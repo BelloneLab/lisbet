@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools", "setuptools_scm", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lisbet"
+authors = [
+    { name = "Giuseppe Chindemi", email = "giuseppe.chindemi@unige.ch" },
+    { name = "Benoit Girard", email = "benoit.girard@unige.ch" },
+]
+description = "LISBET (LISBET Is a Social BEhavior Transformer)"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "h5py",
+    "hmmlearn",
+    "huggingface_hub",
+    "matplotlib",
+    "numpy",
+    "pandas",
+    "pooch",
+    "pyyaml",
+    "scikit-learn",
+    "seaborn",
+    "torch",
+    "torchinfo",
+    "torchvision",
+    "tqdm",
+    "umap-learn",
+]
+dynamic = ["version"]
+
+[project.optional-dependencies]
+docs = [
+    "pydata-sphinx-theme",
+    "sphinx",
+    "sphinx-autodoc-typehints",
+    "sphinx-copybutton",
+    "sphinx-design",
+    "sphinx-gallery",
+]
+
+tests = ["pytest"]
+
+dev = ["lisbet[tests,docs]"]
+
+[project.scripts]
+betman = "lisbet.cli:main"
+
+[tool.pytest.ini_options]
+addopts = ["--import-mode=importlib"]
+
+[tool.setuptools_scm]
+write_to = "src/lisbet/_version.py"
