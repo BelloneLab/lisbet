@@ -20,7 +20,9 @@
 LISBET (LISBET Is a Social BEhavior Transformer) is a machine learning model for social behavior discovery and classification.
 
 > [!WARNING]
-> LISBET is currently under development and the interface is subject to change.
+> LISBET is currently in beta and under active development.
+> If you encounter any issues or bugs, please report them on our GitHub repository.
+> We welcome feedback and contributions from the community.
 
 ## Installation
 See the [installation guide](https://docs.lisbet.ai/getting_started.html) for a step-by-step guide on how to install LISBET.
