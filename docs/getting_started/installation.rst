@@ -40,6 +40,6 @@ If you are a developer and want to contribute to the project, you should install
 
 .. code-block:: console
 
-   $ git clone git@github.com:BelloneLab/lisbet.git
+   $ git clone https://github.com/BelloneLab/lisbet.git
    $ cd lisbet
    $ pip install -e ".[dev]"
