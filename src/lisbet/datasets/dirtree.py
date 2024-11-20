@@ -10,12 +10,68 @@ and must be named 'Manual_Scoring_annotator1.csv'.
 
 import logging
 import os
+import re
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
 from tqdm.auto import tqdm
+
+
+def _find_tracking_files(dspath: Path):
+    """
+    Scan a directory for CSV files and return a filename based on matching rules.
+
+        This function searches for CSV files in the specified directory and applies
+        three matching strategies in order:
+        1. Return if exactly one CSV file exists
+        2. Return if exactly one file matches pattern1
+        3. Return if exactly one file matches pattern2
+
+        Parameters
+        ----------
+        directory_path : str
+            Path to the directory to scan for CSV files.
+
+        Returns
+        -------
+        Optional[str]
+            The name of the matching file if found, None otherwise.
+
+        Raises
+        ------
+        ValueError
+            If multiple matching files are found where only one is expected,
+            or if no matching files are found after trying all strategies.
+    """
+    # Get all CSV files
+    csv_files = list(dspath.rglob("*.csv"))
+
+    # Case 1: Exactly one CSV
+    if len(csv_files) == 1:
+        return csv_files[0]
+
+    # Case 2: Try to look for DLC-like file names
+    dlc_pattern = r".*?DLC.*?shuffle\d+.*?\.csv"
+    dlc_matches = [f for f in csv_files if re.search(dlc_pattern, f.name)]
+    if len(dlc_matches) == 1:
+        return dlc_matches[0]
+    if len(dlc_matches) > 1:
+        raise ValueError(
+            f"Multiple files match a DLC-like pattern '{dlc_pattern}': {dlc_matches}"
+        )
+
+    # Case 3: Try to look for file names containing the 'tracking' tag
+    tag_matches = [f for f in csv_files if re.search(r"tracking", f.name)]
+    if len(tag_matches) == 1:
+        return tag_matches[0]
+    if len(tag_matches) > 1:
+        raise ValueError(
+            f"Multiple files contain 'tracking' in their name: {tag_matches}"
+        )
+
+    raise ValueError(f"No tracking files found in {dspath}")
 
 
 def _dlc2calms(dspath, rescale, ll_threshold=0, multi_animal=False):
@@ -37,11 +93,9 @@ def _dlc2calms(dspath, rescale, ll_threshold=0, multi_animal=False):
             "Tail",
         ]
 
-        df = pd.read_csv(
-            os.path.join(dspath, "tracking.csv"),
-            header=list(range(4)),
-            index_col=0,
-        )
+        # Load tracking data
+        trackingpath = _find_tracking_files(dspath)
+        df = pd.read_csv(trackingpath, header=list(range(4)), index_col=0)
 
         # Ignore estimates with low likelihood
         for bp in body_parts:
