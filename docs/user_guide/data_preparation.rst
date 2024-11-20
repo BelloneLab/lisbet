@@ -16,7 +16,7 @@ Otherwise, LISBET will try to (in order):
 1. Look for files following the naming conventions of the chosen key point tracking tool (e.g., DeepLabCut).
 2. Look for any CSV file containing the tag "tracking" in its name (e.g., "myexperiment_tracking_42.csv").
 
-Finally, in case no ``tracking file`` is found using all methods above or multiple files are conflicting, LISBET will raise an error.
+Finally, in case no ``tracking file`` can be found using all methods above or multiple files are conflicting, LISBET will raise an error.
 
 While we also support H5 archives following a similar structure for advanced use cases, the directory-based organization is recommended for most users.
 
