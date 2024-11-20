@@ -12,8 +12,10 @@ Directory Structure
 Each experiment should be organized as a leaf directory containing a ``tracking file`` in CSV format with the key points, an optional ``annotation file`` in CSV format, and any additional experiment-related files.
 If your directory contains a single CSV file, LISBET will assume it is the ``tracking file``.
 Otherwise, LISBET will try to (in order):
-1. Look for files following the naming conventions of the chosen key point tracking tool (e.g., ``DeepLabCut``).
+
+1. Look for files following the naming conventions of the chosen key point tracking tool (e.g., DeepLabCut).
 2. Look for any CSV file containing the tag "tracking" in its name (e.g., "myexperiment_tracking_42.csv").
+
 Finally, in case no ``tracking file`` is found using all methods above or multiple files are conflicting, LISBET will raise an error.
 
 While we also support H5 archives following a similar structure for advanced use cases, the directory-based organization is recommended for most users.
