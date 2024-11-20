@@ -1,7 +1,9 @@
 """Tests for the input_pipeline module."""
+
 import numpy as np
 import numpy.testing as npt
 import pytest
+
 from lisbet import input_pipeline
 
 

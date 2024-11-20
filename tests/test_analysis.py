@@ -1,10 +1,13 @@
 """Tests for the analysis module."""
-import pytest
+
 import pandas as pd
+import pytest
+
 from lisbet import analysis
 
+
 class TestBoutStats:
-    
+
     def test_bout_stats_basic(self):
         sequences = [1, 1, 2, 2, 2, 1, 1, 1, 3, 3, 1, 1, 2]
         lengths = [8, 5]
@@ -14,6 +17,7 @@ class TestBoutStats:
 
         expected_data = {
             "Motif ID": [1, 2, 1, 2, 3],
+            "Group label": ["default"] * 5,
             "Mean bout duration (s)": [
                 (2 + 3) / (2 * fps),
                 3 / fps,
@@ -27,7 +31,7 @@ class TestBoutStats:
                 (1 * 60 * fps) / 5,
                 (1 * 60 * fps) / 5,
                 (1 * 60 * fps) / 5,
-            ]
+            ],
         }
 
         expected_result = pd.DataFrame(expected_data)
