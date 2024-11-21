@@ -4,6 +4,7 @@ import logging
 from itertools import combinations, groupby
 from math import comb
 from pathlib import Path
+from typing import List, Optional, Tuple, Dict
 
 import numpy as np
 import pandas as pd
@@ -158,16 +159,16 @@ def _filter_by_distance(concat_data, distance_threshold):
 
 
 def select_prototypes(
-    data_path,
-    hmm_list=None,
-    hmm_range=None,
-    method="best",
-    frame_threshold=None,
-    bout_threshold=None,
-    distance_threshold=None,
-    fps=None,
-    output_path=None,
-):
+    data_path: str,
+    hmm_list: Optional[List[int]] = None,
+    hmm_range: Optional[Tuple[int, int]] = None,
+    method: str = "best",
+    frame_threshold: Optional[float] = None,
+    bout_threshold: Optional[float] = None,
+    distance_threshold: Optional[float] = None,
+    fps: Optional[int] = None,
+    output_path: Optional[str] = None,
+) -> Tuple[Dict, List[Tuple[str, pd.DataFrame]]]:
     """
     Select motifs from a set of Hidden Markov Models using a posteriori linkage.
 
@@ -175,20 +176,22 @@ def select_prototypes(
     ----------
     data_path : str
         The root directory containing the annotation files.
-    hmm_list : list
-        A list of Hidden Markov Models sizes. The list must be sorted in ascending
-        order and cannot contain duplicates.
-    method : str, optional
+    hmm_list : list of int, optional
+        A sorted list of unique Hidden Markov Model sizes. If `None`, `hmm_range` must be provided.
+    hmm_range : tuple of int, optional
+        A tuple specifying the range of Hidden Markov Model sizes (low, high). Used if `hmm_list` is `None`.
+    method : str, default='best'
         Method for selecting prototypes. Valid options are 'min' and 'best'.
-        Default is 'min'.
-    output_path : str, optional
-        Path to store the output predictions. If None, results are not saved.
     frame_threshold : float, optional
         Minimum fraction of allocated frames for motifs to be kept.
     bout_threshold : float, optional
         Minimum mean bout duration in seconds for motifs to be kept.
+    distance_threshold : float, optional
+        Maximum Jaccard distance from the closest motif (pairs only).
     fps : int, optional
         Frames per second, used to compute bout duration.
+    output_path : str, optional
+        Path to store the output predictions. If `None`, results are not saved.
 
     Returns
     -------
