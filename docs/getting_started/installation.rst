@@ -1,5 +1,5 @@
 Installation
-------------
+============
 
 .. tip::
 
@@ -34,7 +34,7 @@ After creating and activating the ``lisbet-env`` environment, we can install the
 Depending on your system configuration, installation might take up to a few minutes.
 
 Development Installation
-^^^^^^^^^^^^^^^^^^^^^^^^
+------------------------
 
 If you are a developer and want to contribute to the project, you should install the development dependencies.
 

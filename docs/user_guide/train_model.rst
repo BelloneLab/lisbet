@@ -1,7 +1,7 @@
 .. _model-training:
 
-Model training using self-supervised learnings
-==============================================
+Model training using self-supervised learning
+=============================================
 
 Training a model from scratch is a time-consuming process and generally not required to work with LISBET.
 However, if your tracking data does not follow the conventions of any of the provided models, you want to use a different data source, or simply you want to experiment, you can train a new model using the self-supervised learning approach.

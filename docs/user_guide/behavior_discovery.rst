@@ -7,6 +7,12 @@ One of the most common applications of LISBET is using a pre-trained model to au
 
 Requirements: - A pre-trained LISBET embedding model - A keypoints dataset in the standard LISBET format
 
+Step 0: Prepare the data and model
+----------------------------------
+Please check :ref:`data-preparation` to learn how to prepare your key point data for embedding.
+Alternatively, you can use ``betman fetch_dataset`` to download any of the available datasets directly from the command line.
+Similarly, you can look at :ref:`model-training` to fit a new model, or use ``betman fetch_model`` to download any of the available pre-trained models.
+
 Step 1: Embedding
 -----------------
 
