@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 
 import pooch
+from huggingface_hub import snapshot_download
 from sklearn.model_selection import train_test_split
 
 from . import calms21, dirtree, h5archive
@@ -118,7 +119,7 @@ def fetch_dataset(dataset_id, download_path):
     Download and preprocess keypoints datasets from remote repositories.
 
     Downloads the specified dataset, processes raw data (e.g., keypoints, annotations),
-    and stores them in a standardized HDF5 format for analysis.
+    and stores them in a standardized format for analysis.
 
     Parameters
     ----------
@@ -126,6 +127,7 @@ def fetch_dataset(dataset_id, download_path):
         Identifier for the dataset to fetch. Currently supported datasets:
         - "CalMS21_Task1": Mouse behavior classification dataset
         - "CalMS21_Unlabeled": Unlabeled mouse behavior videos
+        - "SampleData": Sample dataset for testing
         Additional datasets may be supported in future versions.
 
     download_path : str
@@ -135,8 +137,7 @@ def fetch_dataset(dataset_id, download_path):
     Returns
     -------
     None
-        Data is saved to disk in standardized HDF5 format within subdirectories
-        of the specified download_path.
+        Data is saved to disk in standardized format.
 
     Raises
     ------
@@ -199,6 +200,16 @@ def fetch_dataset(dataset_id, download_path):
         data_path = Path(download_path) / "CalMS21" / "unlabeled_videos"
         data_path.mkdir(parents=True, exist_ok=True)
         h5archive.dump(data_path / "all_records.h5", all_records)
+
+    elif dataset_id == "SampleData":
+        # Fetch data from HuggingFace repo
+        # NOTE: This is a small sample dataset for testing purposes
+        data_path = snapshot_download(
+            repo_id="gchindemi/lisbet-examples",
+            allow_patterns="sample_keypoints/",
+            local_dir=download_path,
+            repo_type="dataset",
+        )
 
     else:
         raise ValueError(f"Unknown dataset {dataset_id}")
