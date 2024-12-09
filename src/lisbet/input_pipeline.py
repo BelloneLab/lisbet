@@ -184,7 +184,6 @@ class SwapMousePredictionDataset(BaseDataset):
         self.rng = np.random.default_rng(seed)
 
         self.main_indices = self.rng.permutation(len(self))
-        self.resample_dataset()
 
     def resample_dataset(self):
         labels = []
@@ -305,7 +304,6 @@ class NextWindowPredictionDataset(BaseDataset):
         self.rng = np.random.default_rng(seed)
 
         self.main_indices = self.rng.permutation(len(self))
-        self.resample_dataset()
 
     def resample_dataset(self):
         labels = []
@@ -440,7 +438,6 @@ class DelayMousePredictionDataset(BaseDataset):
         self.regression = regression
 
         self.main_indices = self.rng.permutation(len(self))
-        self.resample_dataset()
 
     def resample_dataset(self):
         labels = []
@@ -557,7 +554,6 @@ class VideoSpeedPredictionDataset(BaseDataset):
         self.regression = regression
 
         self.main_indices = self.rng.permutation(len(self))
-        self.resample_dataset()
 
     def resample_dataset(self):
         logging.info("Resampling twin windows for VSP")
@@ -602,3 +598,4 @@ class VideoSpeedPredictionDataset(BaseDataset):
             curr_data = self.transform(curr_data)
 
         return curr_data, label
+
