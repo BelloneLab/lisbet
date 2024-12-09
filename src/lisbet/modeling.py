@@ -77,13 +77,18 @@ class Backbone(nn.Module):
             dropout=0.0,
             activation="gelu",
             batch_first=True,
+            norm_first=True,
         )
-        self.transformer_encoder = nn.TransformerEncoder(encoder_layers, num_layers)
+        self.transformer_encoder = nn.TransformerEncoder(
+            encoder_layers, num_layers, enable_nested_tensor=False
+        )
+        self.layer_norm = nn.LayerNorm(emb_dim)
 
     def forward(self, x):
         x = self.frame_embedder(x)
         x = self.pos_embedder(x)
         x = self.transformer_encoder(x)
+        x = self.layer_norm(x)
         return x
 
 
