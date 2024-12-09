@@ -116,10 +116,11 @@ class Trainer:
         self.scaler = torch.amp.GradScaler(
             "cuda", enabled=self.config["mixed_precision"]
         )
-        summary(self.model)
+        model_stats = summary(self.model, verbose=0)
+        logging.info("Model summary\n" + str(model_stats))
 
         # Configure optimizer
-        self.optimizer = torch.optim.Adamax(
+        self.optimizer = torch.optim.AdamW(
             filter(lambda p: p.requires_grad, self.model.parameters()),
             lr=self.config["learning_rate"],
         )
@@ -589,7 +590,7 @@ class Trainer:
 
             # Get epoch logs
             train_log = self.compute_epoch_logs("train", losses, labels, predictions)
-            logging.info(train_log)
+            logging.info(", ".join(f"{k}: {v:.3f}" for k, v in train_log.items()))
 
             # Update history entry for current epoch
             history_entry.update(train_log)
@@ -607,7 +608,7 @@ class Trainer:
 
                 # Get epoch logs
                 dev_log = self.compute_epoch_logs("dev", losses, labels, predictions)
-                logging.info(dev_log)
+                logging.info(", ".join(f"{k}: {v:.3f}" for k, v in dev_log.items()))
 
                 # Update history entry for current epoch
                 history_entry.update(dev_log)
@@ -615,13 +616,13 @@ class Trainer:
             # Update history
             history.append(history_entry)
 
+            # Save history, if requested
+            if self.config["save_history"]:
+                self.save_history(history)
+
         # Save final weights, if requested
         if self.config["save_weights"] == "last":
             self.save_weights("weights_last.pt")
-
-        # Save history, if requested
-        if self.config["save_history"]:
-            self.save_history(history)
 
 
 def train(
