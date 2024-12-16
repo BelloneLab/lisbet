@@ -1,4 +1,4 @@
-"""A generic DLC dataset.
+"""A generic dataset.
 Wa assume each record is located in its own directory (i.e. the 'record directory'). In
 the record directory must contain two files:
 - The body pose data of the experimental mouse, named 'tracking_exp_2D_8KP.csv',
@@ -15,11 +15,48 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from movement.io import load_poses
 from sklearn.model_selection import train_test_split
 from tqdm.auto import tqdm
 
 
-def _find_tracking_files(dspath: Path):
+def _find_SLEAP_tracking_files(dspath: Path):
+    """
+    Scan a directory for SLEAP files.
+
+        This function searches for H5 files in the specified directory and applies
+        three matching strategies in order:
+        1. Return if exactly one H5 file exists
+        2. Return if exactly one file matches pattern1
+        3. Return if exactly one file matches pattern2
+
+        Parameters
+        ----------
+        directory_path : str
+            Path to the directory to scan for H5 files.
+
+        Returns
+        -------
+        Optional[str]
+            The name of the matching file if found, None otherwise.
+
+        Raises
+        ------
+        ValueError
+            If multiple matching files are found where only one is expected,
+            or if no matching files are found after trying all strategies.
+    """
+    # Get all CSV files
+    tracking_files = list(dspath.rglob("*.h5"))
+
+    # Case 1: Exactly one CSV
+    if len(tracking_files) == 1:
+        return tracking_files[0]
+
+    raise ValueError(f"No tracking files found in {dspath}")
+
+
+def _find_DLC_tracking_files(dspath: Path):
     """
     Scan a directory for CSV files and return a filename based on matching rules.
 
@@ -94,7 +131,7 @@ def _dlc2calms(dspath, rescale, ll_threshold=0, multi_animal=False):
         ]
 
         # Load tracking data
-        trackingpath = _find_tracking_files(dspath)
+        trackingpath = _find_DLC_tracking_files(dspath)
         df = pd.read_csv(trackingpath, header=list(range(4)), index_col=0)
 
         # Ignore estimates with low likelihood
@@ -210,6 +247,28 @@ def _dlc2calms(dspath, rescale, ll_threshold=0, multi_animal=False):
     return keypoints, valid_indices
 
 
+def _sleap2calms(dspath, rescale):
+    # Load tracking data
+    trackingpath = _find_SLEAP_tracking_files(dspath)
+    ds = load_poses.from_sleap_file(trackingpath)
+
+    # Rescale coordinates in the (0, 1) range
+    if rescale:
+        # Rescale x
+        min_vals = ds["position"].min(dim=("time", "keypoints", "individuals"))
+        max_vals = ds["position"].max(dim=("time", "keypoints", "individuals"))
+        ds["position"] = (ds["position"] - min_vals) / (max_vals - min_vals)
+
+    # Reorder dimensions to match the expected format
+    ds = ds.transpose("time", "individuals", "keypoints", "space")
+
+    # Output data
+    keypoints = ds["position"].to_numpy().reshape((ds.sizes["time"], -1))
+    valid_indices = ds["time"].to_numpy()
+
+    return keypoints, valid_indices
+
+
 def _read_annotations(dspath, kp_index):
     """Read human annotations from 'Manual_Scoring_annotator1.csv'."""
     expected_columns = [
@@ -271,8 +330,8 @@ def _read_annotations(dspath, kp_index):
     return categories
 
 
-def load(datapath, test_ratio=None, rescale=True, seed=1923, multi_animal=False):
-    """Load body pose records from a generic DLC dataset.
+def load(data_path, data_format, test_ratio=None, rescale=True, seed=1923):
+    """Load body pose records from individual files.
 
     Data is split into training and testing set according to the test_ratio. Records in
     the two sets are organized in a list of tuples (video_id, data), where data is a
@@ -282,8 +341,10 @@ def load(datapath, test_ratio=None, rescale=True, seed=1923, multi_animal=False)
 
     Parameters
     ----------
-    datapath : string or pathlib.Path
+    data_path : string or pathlib.Path
         Root directory of the dataset.
+    data_format : string
+        Format of the dataset to load.
     test_ratio : float, optional
         Fraction of the data to be used to create the test set.
     rescale : bool, optional
@@ -298,20 +359,29 @@ def load(datapath, test_ratio=None, rescale=True, seed=1923, multi_animal=False)
 
     Examples
     --------
-    >>> rec_train, rec_test = load_calms21_unlabeled("datasets/CRIM13")
+    >>> rec_train, rec_test = load("datasets/CRIM13")
 
     """
     # Get list of all candidate paths
-    seqpaths = [f for f in Path(datapath).glob("*/**") if f.is_dir()]
+    seqpaths = [f for f in Path(data_path).glob("*/**") if f.is_dir()]
 
     # Load and preprocess raw data
     records = []
-    for seqpath in tqdm(seqpaths, desc="Loading generic DLC dataset"):
+    for seqpath in tqdm(seqpaths, desc="Loading dataset"):
         try:
             # Load and preprocess keypoints
-            keypoints, valid_indices = _dlc2calms(
-                seqpath, rescale, multi_animal=multi_animal
-            )
+            if data_format == "saDLC":
+                keypoints, valid_indices = _dlc2calms(
+                    seqpath, rescale, multi_animal=False
+                )
+            elif data_format == "maDLC":
+                keypoints, valid_indices = _dlc2calms(
+                    seqpath, rescale, multi_animal=True
+                )
+            elif data_format == "SLEAP":
+                keypoints, valid_indices = _sleap2calms(seqpath, rescale)
+            else:
+                raise ValueError(f"Unknown dataset format {data_format}")
         except (FileNotFoundError, ZeroDivisionError) as err:
             logging.debug("%s does not contain body pose data, skipping", seqpath)
             continue
@@ -327,7 +397,7 @@ def load(datapath, test_ratio=None, rescale=True, seed=1923, multi_animal=False)
             data["annotations"] = annotations
 
         # Define video ID
-        video_id = str(seqpath.relative_to(datapath))
+        video_id = str(seqpath.relative_to(data_path))
 
         # Assemble record
         record = (video_id, data)

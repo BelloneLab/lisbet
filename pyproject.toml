@@ -10,12 +10,13 @@ authors = [
 ]
 description = "LISBET (LISBET Is a Social BEhavior Transformer)"
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 dependencies = [
     "h5py",
     "hmmlearn",
     "huggingface_hub",
     "matplotlib",
+    "movement",
     "numpy",
     "pandas",
     "pooch",

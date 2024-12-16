@@ -22,6 +22,7 @@ def setup_logging(verbose: int = 0, log_level: Optional[str] = None) -> None:
         level = level_map.get(verbose, logging.DEBUG)
 
     logging.basicConfig(level=level)
+    logging.getLogger("movement.io.load_poses").setLevel(logging.WARNING)
 
 
 def add_verbosity_args(parser: argparse.ArgumentParser) -> None:
@@ -47,7 +48,7 @@ def add_keypoints_args(parser: argparse.ArgumentParser) -> None:
         "--data_format",
         type=str,
         default="maDLC",
-        choices=["maDLC", "saDLC", "h5archive"],
+        choices=["maDLC", "saDLC", "SLEAP", "h5archive"],
         help="Keypoints dataset format",
     )
     parser.add_argument(
