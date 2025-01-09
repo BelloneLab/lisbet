@@ -246,6 +246,8 @@ def configure_segment_motifs_parser(parser: argparse.ArgumentParser) -> None:
         "--num_iter", type=int, default=10, help="Number of iterations of EM"
     )
     parser.add_argument("--hmm_seed", type=int, help="RNG seed for HMM")
+    parser.add_argument("--save_hmm", type=Path, help="Path to save HMM model")
+    parser.add_argument("--test_data", type=Path, help="Test data for evaluation, it will not be used in the fitting process")
 
 
 def configure_select_prototypes_parser(parser: argparse.ArgumentParser) -> None:
