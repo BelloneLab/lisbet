@@ -10,7 +10,7 @@ from hmmlearn import hmm
 from sklearn.preprocessing import MinMaxScaler
 from tqdm.auto import tqdm
 from umap import UMAP
-
+import pickle
 
 def _one_hot(targets, num_classes):
     """One-hot encoding."""
@@ -64,11 +64,13 @@ def _get_embeddings(features_path, datafilter=None):
 
 def segment_hmm(
     data_path,
+    test_data_path=None,
     num_states=4,
     num_iter=10,
     data_filter=None,
     hmm_seed=None,
     output_path=None,
+    save_hmm=False,
 ):
     """Segment"""
     # Get LISBET embeddings for the dataset
@@ -91,6 +93,14 @@ def segment_hmm(
         verbose=False,
     )
     hmm_model.fit(all_embeddings, lengths=lengths)
+
+    # Store HMM model on file, if requested
+    if save_hmm:
+        dst_path = Path(output_path)
+        dst_path.mkdir(parents=True, exist_ok=True)
+        with open(dst_path / f"hmm_model{num_states}.pkl", "wb") as f_pkl:
+            pickle.dump(hmm_model, f_pkl)
+
     hmm_history = list(hmm_model.monitor_.history)
     hmm_metrics = {
         "ll": hmm_model.score(all_embeddings, lengths=lengths),
@@ -113,34 +123,46 @@ def segment_hmm(
         ) as f_yaml:
             yaml.safe_dump(hmm_metrics, f_yaml)
 
-    # HMM predictions
-    all_predictions = hmm_model.predict(all_embeddings, lengths=lengths)
 
-    # Assign predictions to match the corresponding sequences
-    predictions = []
-    for seq_idx, (key, seq) in enumerate(embeddings):
-        # Find prediction boundaries for the current sequence
-        seq_start = sum(lengths[:seq_idx])
-        seq_stop = seq_start + lengths[seq_idx]
-        assert seq.shape[0] == lengths[seq_idx]
-        logging.debug("Sequence start = %d, Sequence stop = %d", seq_start, seq_stop)
+    def _predict(emb, all_emb, lg):
+        # HMM predictions
+        all_predictions = hmm_model.predict(all_emb, lengths=lg)
 
-        # Extract prediction
-        pred = all_predictions[seq_start:seq_stop]
-        predictions.append((key, pred))
+        
+        # Assign predictions to match the corresponding sequences
+        predictions = []
+        for seq_idx, (key, seq) in enumerate(emb):
+            # Find prediction boundaries for the current sequence
+            seq_start = sum(lg[:seq_idx])
+            seq_stop = seq_start + lg[seq_idx]
+            assert seq.shape[0] == lg[seq_idx]
+            logging.debug("Sequence start = %d, Sequence stop = %d", seq_start, seq_stop)
 
-        # Store predictions on file, if requested
-        if output_path is not None:
-            dst_path = Path(output_path) / key
-            dst_path.mkdir(parents=True, exist_ok=True)
+            # Extract prediction
+            pred = all_predictions[seq_start:seq_stop]
+            predictions.append((key, pred))
 
-            # HMM motifs
-            motifs = pd.DataFrame(
-                _one_hot(pred, num_states),
-                columns=[f"Motif_{i}" for i in range(num_states)],
-            )
-            motifs.to_csv(dst_path / f"machineAnnotation_hmm{num_states}.csv")
+            # Store predictions on file, if requested
+            if output_path is not None:
+                dst_path = Path(output_path) / key
+                dst_path.mkdir(parents=True, exist_ok=True)
 
+                # HMM motifs
+                motifs = pd.DataFrame(
+                    _one_hot(pred, num_states),
+                    columns=[f"Motif_{i}" for i in range(num_states)],
+                )
+                motifs.to_csv(dst_path / f"machineAnnotation_hmm{num_states}.csv")
+        return predictions
+    
+    predictions = _predict(embeddings, all_embeddings, lengths)
+
+    if test_data_path is not None:
+        test_embeddings = _get_embeddings(test_data_path, data_filter)
+        test_lengths = [emb[1].shape[0] for emb in test_embeddings]
+        test_all_embeddings = np.concatenate([emb[1] for emb in test_embeddings])
+        test_predictions = _predict(test_embeddings, test_all_embeddings, test_lengths)
+        
     return hmm_history, predictions
 
 
