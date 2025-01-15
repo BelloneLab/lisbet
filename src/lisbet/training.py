@@ -125,6 +125,29 @@ class Trainer:
             lr=self.config["learning_rate"],
         )
 
+        # Configure LR (warmup scheduler)
+        warmup_epochs = 5
+        warmup_scheduler = torch.optim.lr_scheduler.LinearLR(
+            self.optimizer,
+            start_factor=1e-2,
+            end_factor=1.0,
+            total_iters=warmup_epochs,
+        )
+
+        # Configure LR (main scheduler)
+        T_0 = 10
+        T_mult = 2
+        main_scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+            self.optimizer, T_0=T_0, T_mult=T_mult
+        )
+
+        # Configure final LR scheduler
+        self.scheduler = torch.optim.lr_scheduler.SequentialLR(
+            self.optimizer,
+            schedulers=[warmup_scheduler, main_scheduler],
+            milestones=[warmup_epochs],
+        )
+
     def generate_seeds(self):
         # Generate multiple seeds from the base one
         rng = np.random.default_rng(self.config["seed"])
@@ -476,6 +499,7 @@ class Trainer:
             total_loss.backward()
             self.scaler.step(self.optimizer)
             self.scaler.update()
+        self.scheduler.step()
 
         return losses, labels, predictions
 
@@ -581,6 +605,7 @@ class Trainer:
         for epoch in range(self.config["epochs"]):
             history_entry = {"epoch": epoch}
             print(f"Epoch {epoch}")
+            logging.info(f"Current LR = {self.scheduler.get_last_lr()[0]}")
 
             # Get dataloaders
             train_dataloaders = self.configure_dataloaders("train")
