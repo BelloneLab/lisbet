@@ -251,7 +251,10 @@ def export_embedder(model_path, weights_path, output_path=Path(".")):
 
 def fetch_model(model_id, download_path=Path(".")):
     """Fetch a model from the HF Hub."""
-    valid_model_ids = ["lisbet64x8-calms21UftT1", "lisbet64x8-calms21U-embedder"]
+    valid_model_ids = [
+        "lisbet32x4-calms21UftT1-classifier",
+        "lisbet32x4-calms21U-embedder",
+    ]
     assert (
         model_id in valid_model_ids
     ), f"Model ID '{model_id}' not found in the list of available models."

@@ -315,8 +315,8 @@ def configure_fetch_model_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "model_id",
         choices=(
-            "lisbet64x8-calms21UftT1",
-            "lisbet64x8-calms21U-embedder",
+            "lisbet32x4-calms21UftT1-classifier",
+            "lisbet32x4-calms21U-embedder",
         ),
         help="Model ID",
     )
