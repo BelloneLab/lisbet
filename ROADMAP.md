@@ -1,6 +1,6 @@
 # Roadmap
 
-## ✅ Q2 2025
+## 🔜 Q2 2025
 - [ ] Add support for SLEAP ([#8, in progress](https://github.com/BelloneLab/lisbet/issues/8))
 - [ ] Add support for saving and loading HMMs ([#14, in progress](https://github.com/BelloneLab/lisbet/issues/14))
 - [ ] Accelerate HMM fitting via random sampling
@@ -8,7 +8,7 @@
 - [ ] Add support for fine-tuning classification models using HMM prototypes
 - [ ] Add support for n > 2 individuals, "multi-dyadic" strategy
 
-## 🔜 Q3 2025
+## 📅 Q3 2025
 - [ ] Introduce "Switch Individuals" as a data augmentation strategy
 - [ ] Add native support for n > 2 individuals
 - [ ] Conduct ablation study on pretraining tasks
