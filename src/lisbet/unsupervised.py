@@ -77,7 +77,7 @@ def segment_hmm(
 
     # Random sample
     if fit_frac is not None:
-        assert 0 < fit_frac <= 1, "train_frac must be in the (0, 1] range"
+        assert 0 < fit_frac <= 1, "fit_frac must be in the (0, 1] range"
 
         rng = np.random.default_rng(seed=hmm_seed)
         indices = rng.choice(
