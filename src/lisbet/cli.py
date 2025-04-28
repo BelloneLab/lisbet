@@ -245,6 +245,9 @@ def configure_segment_motifs_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--num_iter", type=int, default=10, help="Number of iterations of EM"
     )
+    parser.add_argument(
+        "--fit_frac", type=float, help="Fraction of data to use for model fitting"
+    )
     parser.add_argument("--hmm_seed", type=int, help="RNG seed for HMM")
 
 

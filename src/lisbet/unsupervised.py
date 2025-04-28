@@ -67,6 +67,7 @@ def segment_hmm(
     num_states=4,
     num_iter=10,
     data_filter=None,
+    fit_frac=None,
     hmm_seed=None,
     output_path=None,
 ):
@@ -74,9 +75,22 @@ def segment_hmm(
     # Get LISBET embeddings for the dataset
     embeddings = _get_embeddings(data_path, data_filter)
 
+    # Random sample
+    if fit_frac is not None:
+        assert 0 < fit_frac <= 1, "fit_frac must be in the (0, 1] range"
+
+        rng = np.random.default_rng(seed=hmm_seed)
+        indices = rng.choice(
+            len(embeddings), size=int(np.ceil(fit_frac * len(embeddings)))
+        )
+        fit_embeddings = [embeddings[idx] for idx in indices]
+        logging.info("Sampled %d sequences for model fitting", len(fit_embeddings))
+    else:
+        fit_embeddings = embeddings
+
     # Merge sequences
-    lengths = [emb[1].shape[0] for emb in embeddings]
-    all_embeddings = np.concatenate([emb[1] for emb in embeddings])
+    fit_lengths = [emb[1].shape[0] for emb in fit_embeddings]
+    fit_embeddings = np.concatenate([emb[1] for emb in fit_embeddings])
 
     # # NEW!!! Smoothing
     # all_embeddings = median_filter(all_embeddings, size=(30, 1), origin=(-15, 0))
@@ -90,12 +104,12 @@ def segment_hmm(
         tol=1e-3,
         verbose=False,
     )
-    hmm_model.fit(all_embeddings, lengths=lengths)
+    hmm_model.fit(fit_embeddings, lengths=fit_lengths)
     hmm_history = list(hmm_model.monitor_.history)
     hmm_metrics = {
-        "ll": hmm_model.score(all_embeddings, lengths=lengths),
-        "aic": hmm_model.aic(all_embeddings, lengths=lengths),
-        "bic": float(hmm_model.bic(all_embeddings, lengths=lengths)),
+        "ll": hmm_model.score(fit_embeddings, lengths=fit_lengths),
+        "aic": hmm_model.aic(fit_embeddings, lengths=fit_lengths),
+        "bic": float(hmm_model.bic(fit_embeddings, lengths=fit_lengths)),
     }
 
     # Store fitting results on file, if requested
@@ -114,15 +128,17 @@ def segment_hmm(
             yaml.safe_dump(hmm_metrics, f_yaml)
 
     # HMM predictions
-    all_predictions = hmm_model.predict(all_embeddings, lengths=lengths)
+    all_lengths = [emb[1].shape[0] for emb in embeddings]
+    all_embeddings = np.concatenate([emb[1] for emb in embeddings])
+    all_predictions = hmm_model.predict(all_embeddings, lengths=all_lengths)
 
     # Assign predictions to match the corresponding sequences
     predictions = []
     for seq_idx, (key, seq) in enumerate(embeddings):
         # Find prediction boundaries for the current sequence
-        seq_start = sum(lengths[:seq_idx])
-        seq_stop = seq_start + lengths[seq_idx]
-        assert seq.shape[0] == lengths[seq_idx]
+        seq_start = sum(all_lengths[:seq_idx])
+        seq_stop = seq_start + all_lengths[seq_idx]
+        assert seq.shape[0] == all_lengths[seq_idx]
         logging.debug("Sequence start = %d, Sequence stop = %d", seq_start, seq_stop)
 
         # Extract prediction
