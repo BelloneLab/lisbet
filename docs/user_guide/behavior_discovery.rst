@@ -81,14 +81,22 @@ For example, your ``betman segment_motifs`` command might look something like th
       -v \
       bet_predictions/maDLC
 
+Currently, LISBET fits the HMM on the entire input dataset.
+For large datasets, this can lead to slow training times and high memory usage.
+
+To address this, you can fit the HMM on a random subset of the data, using the ``--fit_frac`` option (e.g., ``--fit_frac=0.1`` to use 10% of the data).
+After fitting, the trained model will still be used to transform and label the full dataset.
+In the current implementation, a simple random selection of full sequences is used.
+More advanced sampling strategies, such as windowed sampling or weighting by sequence length, could be considered in future iterations of LISBET if needed.
+
 Please use ``betman segment_motifs --help`` for a list of all available option.
 
-After running unsupman, you should find the annotations (i.e., labels) for your dataset in the OUTPUT_PATH directory.
+After running ``segment_motifs``, you should find the annotations (i.e., labels) for your dataset in the OUTPUT_PATH directory.
 
 As discussed in Chindemi et al. 2023, choosing the number of behaviors N_MOTIFS a priori is a limitation imposed by most clustering algorithms.
 If you want to avoid doing so, we propose a "scan-and-select" procedure which allows to specify an upper limit to the number of behaviors in your dataset, rather than the exact number, and automatically determine the actual number of behaviors in the dataset.
 This procedure is described below in **Step 3: Prototype selection**.
-Before proceeding with Step 3, you need to generate multiple sets of HMM annotations by running unsupman, each time with a different N_MOTIFS, as described above.
+Before proceeding with Step 3, you need to generate multiple sets of HMM annotations by running ``segment_motifs``, each time with a different N_MOTIFS, as described above.
 In case you are using a SLURM cluster, this can be easily done by running ``betman segment_motifs`` in a JOB ARRAY.
 
 [OPTIONAL] Step 3: Prototype selection
@@ -111,7 +119,7 @@ To generate the embedding files for your dataset you can use **betman**:
 
 where ANNOT_PATH is the location of the LISBET annotations obtained in Step 2, MIN_STATES (MAX_STATES) is the smallest (largest) annotation set to consider (corresponding to the number of states in the HMM models), and METHOD determines how the prototype for a motif group is chosen (i.e., **best** will select the prototype with the highest silhouette coefficient).
 
-For example, your ``unsupman select_prototypes`` command might look something like this:
+For example, your ``betman select_prototypes`` command might look something like this:
 
 .. code-block:: console
 
@@ -124,7 +132,7 @@ For example, your ``unsupman select_prototypes`` command might look something li
 
 Please use ``betman select_prototypes --help`` for a list of all available option.
 
-After running unsupman, you should find the annotations (i.e., labels) for your dataset in the OUTPUT_PATH directory.
+After running ``select_prototypes``, you should find the annotations (i.e., labels) for your dataset in the OUTPUT_PATH directory.
 
 References
 ----------
