@@ -205,7 +205,7 @@ def segment_hmm(
         num_iter=num_iter,
         embeddings=embeddings,
         frac=fit_frac,
-        n_jobs=min(n_jobs, n_models),
+        n_jobs=n_jobs,
         seed=hmm_seed,
     )
 
