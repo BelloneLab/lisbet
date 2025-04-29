@@ -194,6 +194,10 @@ def segment_hmm(
     # Fit HMM models
     # NOTE: We are moving fitting to a separate function in preparation for the
     #       save/restore mechanism (see https://github.com/BelloneLab/lisbet/issues/14).
+    logging.info(
+        "Fitting %d HMM models, larger datasets may result in longer fitting times.",
+        n_models,
+    )
     fitting_results = _fit_hmm(
         min_n_components=min_n_components,
         max_n_components=max_n_components,
