@@ -239,14 +239,26 @@ def configure_segment_motifs_parser(parser: argparse.ArgumentParser) -> None:
     """Configure segment_motifs command parser."""
     add_verbosity_args(parser)
     add_data_io_args(parser, "Embedding data location")
-    parser.add_argument(
-        "--num_states", type=int, default=4, help="Number of hidden states"
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--num_states", type=int, help="Number of hidden states")
+    group.add_argument(
+        "--hmm_range",
+        type=int,
+        nargs=2,
+        metavar=("LOW", "HIGH"),
+        help="Range of HMM sizes",
     )
     parser.add_argument(
         "--num_iter", type=int, default=10, help="Number of iterations of EM"
     )
     parser.add_argument(
         "--fit_frac", type=float, help="Fraction of data to use for model fitting"
+    )
+    parser.add_argument(
+        "--n_jobs",
+        type=int,
+        default=-1,
+        help="Number of parallel jobs, use -1 (default) for as many jobs as cores",
     )
     parser.add_argument("--hmm_seed", type=int, help="RNG seed for HMM")
 
