@@ -101,7 +101,7 @@ def _fit_hmm(
         fit_embeddings = embeddings
 
     # Merge sequences
-    fit_lengths = np.array([emb[1].shape[0] for emb in fit_embeddings])
+    fit_lengths = [emb[1].shape[0] for emb in fit_embeddings]
     fit_embeddings = np.concatenate([emb[1] for emb in fit_embeddings])
 
     # Make n_components range and shuffle it to improve core allocation
@@ -238,7 +238,7 @@ def segment_hmm(
                 yaml.safe_dump(hmm_metrics, f_yaml)
 
         # HMM predictions
-        all_lengths = np.array([emb[1].shape[0] for emb in embeddings])
+        all_lengths = [emb[1].shape[0] for emb in embeddings]
         all_embeddings = np.concatenate([emb[1] for emb in embeddings])
         all_predictions = hmm_model.predict(all_embeddings, lengths=all_lengths)
 
