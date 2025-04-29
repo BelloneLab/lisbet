@@ -191,9 +191,6 @@ def segment_hmm(
     # Get LISBET embeddings for the dataset
     embeddings = _get_embeddings(data_path, data_filter)
 
-    # # NEW!!! Smoothing
-    # all_embeddings = median_filter(all_embeddings, size=(30, 1), origin=(-15, 0))
-
     # Fit HMM models
     # NOTE: We are moving fitting to a separate function in preparation for the
     #       save/restore mechanism (see https://github.com/BelloneLab/lisbet/issues/14).
