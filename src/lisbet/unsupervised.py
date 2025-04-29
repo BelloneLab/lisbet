@@ -180,12 +180,13 @@ def segment_hmm(
     Raises
     ------
     ValueError
-        If neither or both of num_states and hmm_range are provided.
+        If min_n_components or max_n_components are smaller than 2, or max_n_components
+        is smaller than min_n_components.
 
     """
     # Calculate the number of models to fit
-    # NOTE: We should probably check that min_n_components and max_n_components are
-    #       positive integers and that min_n_components <= max_n_components.
+    if not (2 <= min_n_components <= max_n_components):
+        raise ValueError("Must satisfy: 2 <= min_n_components <= max_n_components")
     n_models = max_n_components - min_n_components + 1
 
     # Get LISBET embeddings for the dataset
