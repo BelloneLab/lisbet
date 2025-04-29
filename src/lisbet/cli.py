@@ -239,15 +239,8 @@ def configure_segment_motifs_parser(parser: argparse.ArgumentParser) -> None:
     """Configure segment_motifs command parser."""
     add_verbosity_args(parser)
     add_data_io_args(parser, "Embedding data location")
-    group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--num_states", type=int, help="Number of hidden states")
-    group.add_argument(
-        "--hmm_range",
-        type=int,
-        nargs=2,
-        metavar=("LOW", "HIGH"),
-        help="Range of HMM sizes",
-    )
+    parser.add_argument("--min_n_components", type=int, default=2, help="Minimum number of hidden states")
+    parser.add_argument("--max_n_components", type=int, default=32, help="Maximum number of hidden states")
     parser.add_argument(
         "--num_iter", type=int, default=10, help="Number of iterations of EM"
     )

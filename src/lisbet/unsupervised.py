@@ -134,8 +134,8 @@ def _fit_hmm(
 
 def segment_hmm(
     data_path,
-    num_states=None,
-    hmm_range=None,
+    min_n_components=2,
+    max_n_components=32,
     num_iter=10,
     data_filter=None,
     fit_frac=None,
@@ -153,11 +153,10 @@ def segment_hmm(
     ----------
     data_path : str or Path
         Path to the directory containing LISBET embeddings.
-    num_states : int, optional
-        Number of states to use in the HMM. Either num_states or hmm_range must be provided.
-    hmm_range : tuple of int, optional
-        Range of states to fit, specified as (min_states, max_states). Either num_states
-        or hmm_range must be provided.
+    min_n_components : int, optional
+        Minimum number of states to use in the HMM.
+    max_n_components : int, optional
+        Maximum number of states to use in the HMM.
     num_iter : int, default=10
         Maximum number of iterations for the Baum-Welch algorithm.
     data_filter : callable, optional
@@ -184,20 +183,9 @@ def segment_hmm(
         If neither or both of num_states and hmm_range are provided.
 
     """
-    # Verify that either hmm_range or num_states is provided, but not both
-    if (num_states is None) == (hmm_range is None):
-        raise ValueError(
-            "Either num_states or hmm_range must be provided, but not both"
-        )
-
-    # Choose the range of states to fit
-    # NOTE: We should probably verify that the range is valid and a few other things
-    if num_states is not None:
-        min_n_components = num_states
-        max_n_components = num_states
-    else:
-        min_n_components, max_n_components = hmm_range
-
+    # Calculate the number of models to fit
+    # NOTE: We should probably check that min_n_components and max_n_components are
+    #       positive integers and that min_n_components <= max_n_components.
     n_models = max_n_components - min_n_components + 1
 
     # Get LISBET embeddings for the dataset
@@ -207,6 +195,8 @@ def segment_hmm(
     # all_embeddings = median_filter(all_embeddings, size=(30, 1), origin=(-15, 0))
 
     # Fit HMM models
+    # NOTE: We are moving fitting to a separate function in preparation for the
+    #       save/restore mechanism (see https://github.com/BelloneLab/lisbet/issues/14).
     fitting_results = _fit_hmm(
         min_n_components=min_n_components,
         max_n_components=max_n_components,
