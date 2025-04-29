@@ -57,18 +57,22 @@ Step 2: HMM fitting
 The HMM fitting step transforms the embeddings into behavioral motifs (i.e., labels), using a Gaussian Hidden Markov Model (HMM).
 For each embedding sequence of shape (nframes, nfeatures), LISBET generates a CSV annotation file of shape (nframes, nmotifs).
 
-To generate the embedding files for your dataset you can again use \**betman\*:
+As discussed in Chindemi et al. 2023, to avoid choosing the number of behaviors a priori (i.e., the number of hidden states in the HMM), we propose a "scan-and-select" approach.
+This method, described below in **Step 3: Prototype selection**, allows to automatically infer the number of behaviors in the dataset, given only a lower and upper bound.
+
+Before proceeding with Step 3, you need to generate multiple sets of HMM annotations for the prototype selection process using ``betman segment_motifs``:
 
 .. code-block:: console
 
    $ betman segment_motifs \
       --output_path=OUTPUT_PATH \       # Path to store annotation files (i.e., labels)
-      --num_states=N_MOTIFS \           # Desired number of motifs (i.e., HMM states)
+      --min_n_components=MIN_N \        # Minimum number of motifs (i.e., HMM states)
+      --max_n_components=MAX_N \        # Maximum number of motifs (i.e., HMM states)
       --num_iter=N_ITER \               # Max number of steps for the fitting algorithm
       -v \                              # Enable verbose mode
       EMBEDDING_PATH                    # Path to LISBET embeddings
 
-where EMBEDDING_PATH is the location of the LISBET embeddings obtained in Step 1, N_MOTIFS is the desired number of behavioral motifs to identify in the data (corresponding to the number of hidden states in the HMM), and N_ITER is the maximum number of iterations allowed before stopping the HMM fitting algorithm before convergence.
+where EMBEDDING_PATH is the location of the LISBET embeddings obtained in Step 1, MIN_N (MAX_N) is the minimum (maximum) number of behavioral motifs to identify in the data, and N_ITER is the maximum number of iterations allowed before stopping the HMM fitting algorithm before convergence.
 
 For example, your ``betman segment_motifs`` command might look something like this:
 
@@ -76,15 +80,23 @@ For example, your ``betman segment_motifs`` command might look something like th
 
    $ betman segment_motifs \
       --output_path=hmm_predictions \
-      --num_states=8 \
-      --num_iter=500 \
+      --min_n_components=2 \
+      --max_n_components=32 \
+      --num_iter=1000 \
       -v \
-      bet_predictions/maDLC
+      embeddings
 
-Currently, LISBET fits the HMM on the entire input dataset.
+By default, ``betman segment_motifs`` will use all the cores available on your machine to run the HMM scan.
+If you wish to reduce the number of cores, consider setting the ``--n_jobs`` parameter to limit the number of parallel jobs allowed (e.g., --n_jobs=4).
+Concerning the number of states,
+Also, please notice that while HMM scanning is the suggested approach, you can also use a fixed number of states by setting the minimum and maximum number of states to the same value.
+
+.. tip::
+   The range 2 to 32 states is generally sufficient in most applications.
+
+Currently, LISBET fits the HMMs on the entire input.
 For large datasets, this can lead to slow training times and high memory usage.
-
-To address this, you can fit the HMM on a random subset of the data, using the ``--fit_frac`` option (e.g., ``--fit_frac=0.1`` to use 10% of the data).
+To address this, you can fit the HMMs on a random subset of the data, using the ``--fit_frac`` option (e.g., ``--fit_frac=0.1`` to use 10% of the data).
 After fitting, the trained model will still be used to transform and label the full dataset.
 In the current implementation, a simple random selection of full sequences is used.
 More advanced sampling strategies, such as windowed sampling or weighting by sequence length, could be considered in future iterations of LISBET if needed.
@@ -93,13 +105,15 @@ Please use ``betman segment_motifs --help`` for a list of all available option.
 
 After running ``segment_motifs``, you should find the annotations (i.e., labels) for your dataset in the OUTPUT_PATH directory.
 
-As discussed in Chindemi et al. 2023, choosing the number of behaviors N_MOTIFS a priori is a limitation imposed by most clustering algorithms.
-If you want to avoid doing so, we propose a "scan-and-select" procedure which allows to specify an upper limit to the number of behaviors in your dataset, rather than the exact number, and automatically determine the actual number of behaviors in the dataset.
-This procedure is described below in **Step 3: Prototype selection**.
-Before proceeding with Step 3, you need to generate multiple sets of HMM annotations by running ``segment_motifs``, each time with a different N_MOTIFS, as described above.
-In case you are using a SLURM cluster, this can be easily done by running ``betman segment_motifs`` in a JOB ARRAY.
+.. note::
+   In theory one could run the HMM scan on a multi-node computing cluster for even shorter processing time.
+   However, due to a bug in ``joblib`` (see https://github.com/joblib/joblib/issues/1707), we are currently forced to use threads rather than processes, and so bound to a single node.
+   The issue has already been fixed at the time of writing, but the patch will not be available until the next release of ``joblib``, currently at version 1.4.2.
+   In the meantime, if using a SLURM cluster or similar, a simple workaround is to run multiple instances of ``betman segment_motifs`` in a job array.
 
-[OPTIONAL] Step 3: Prototype selection
+   In practice, considering that the HMM scan rarely requires more than a few dozens of models, using multiple nodes is probably overkill anyway, and a single node should be sufficient.
+
+Step 3: Prototype selection
 --------------------------------------
 
 The prototype selection step transforms multiple sets of behavioral motifs into a single one, by clustering similar motifs and selecting one of them as a prototype representing the whole group.

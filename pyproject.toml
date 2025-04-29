@@ -15,6 +15,7 @@ dependencies = [
     "h5py",
     "hmmlearn",
     "huggingface_hub",
+    "joblib",
     "matplotlib",
     "numpy",
     "pandas",

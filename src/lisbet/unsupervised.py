@@ -1,12 +1,14 @@
 """LISBET module for sequence segmentation and dimensionality reduction."""
 
 import logging
+import random
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import yaml
 from hmmlearn import hmm
+from joblib import Parallel, delayed
 from sklearn.preprocessing import MinMaxScaler
 from tqdm.auto import tqdm
 from umap import UMAP
@@ -62,27 +64,37 @@ def _get_embeddings(features_path, datafilter=None):
     return embeddings
 
 
-def segment_hmm(
-    data_path,
-    num_states=4,
-    num_iter=10,
-    data_filter=None,
-    fit_frac=None,
-    hmm_seed=None,
-    output_path=None,
+def _fit_hmm_func(n_components, num_iter, data, lengths, seed):
+    """Fit HMM model, target function."""
+    hmm_model = hmm.GaussianHMM(
+        n_components=n_components,
+        covariance_type="full",
+        random_state=seed,
+        n_iter=num_iter,
+        tol=1e-3,
+        verbose=False,
+    )
+    hmm_model.fit(data, lengths=lengths)
+    hmm_history = list(hmm_model.monitor_.history)
+    hmm_metrics = {
+        "ll": hmm_model.score(data, lengths=lengths),
+        "aic": hmm_model.aic(data, lengths=lengths),
+        "bic": float(hmm_model.bic(data, lengths=lengths)),
+    }
+
+    return hmm_model, hmm_history, hmm_metrics
+
+
+def _fit_hmm(
+    min_n_components, max_n_components, num_iter, embeddings, frac, n_jobs, seed
 ):
-    """Segment"""
-    # Get LISBET embeddings for the dataset
-    embeddings = _get_embeddings(data_path, data_filter)
-
+    """Fit HMM model."""
     # Random sample
-    if fit_frac is not None:
-        assert 0 < fit_frac <= 1, "fit_frac must be in the (0, 1] range"
+    if frac is not None:
+        assert 0 < frac <= 1, "frac must be in the (0, 1] range"
 
-        rng = np.random.default_rng(seed=hmm_seed)
-        indices = rng.choice(
-            len(embeddings), size=int(np.ceil(fit_frac * len(embeddings)))
-        )
+        rng = np.random.default_rng(seed=seed)
+        indices = rng.choice(len(embeddings), size=int(np.ceil(frac * len(embeddings))))
         fit_embeddings = [embeddings[idx] for idx in indices]
         logging.info("Sampled %d sequences for model fitting", len(fit_embeddings))
     else:
@@ -92,72 +104,177 @@ def segment_hmm(
     fit_lengths = [emb[1].shape[0] for emb in fit_embeddings]
     fit_embeddings = np.concatenate([emb[1] for emb in fit_embeddings])
 
-    # # NEW!!! Smoothing
-    # all_embeddings = median_filter(all_embeddings, size=(30, 1), origin=(-15, 0))
+    # Make n_components range and shuffle it to improve core allocation
+    # NOTE: We do not need to make the sequence reproducible, this is just a trick to
+    #       reduce CPU idle time.
+    n_components_range = list(range(min_n_components, max_n_components + 1))
+    random.shuffle(n_components_range)
 
     # Fit model
-    hmm_model = hmm.GaussianHMM(
-        n_components=num_states,
-        covariance_type="full",
-        random_state=hmm_seed,
-        n_iter=num_iter,
-        tol=1e-3,
-        verbose=False,
+    # NOTE: We are only parallelizing HMM fitting, not the prediction step or the disk
+    #       I/O. This is because the latter two steps are not CPU-bound and we wanted to
+    #       keep the parallelized code as simple as possible.
+    # NOTE: Using the default loky backend raises an Exception due to a bug in joblib
+    #       (see https://github.com/joblib/joblib/issues/1707). The issue has been
+    #       fixed, but the patch will not be available until the next release of joblib,
+    #       currently at version 1.4.2. In the meantime, we can use the threading
+    #       backend via prefer="threads".
+    parallel = Parallel(
+        n_jobs=n_jobs, return_as="generator_unordered", prefer="threads"
     )
-    hmm_model.fit(fit_embeddings, lengths=fit_lengths)
-    hmm_history = list(hmm_model.monitor_.history)
-    hmm_metrics = {
-        "ll": hmm_model.score(fit_embeddings, lengths=fit_lengths),
-        "aic": hmm_model.aic(fit_embeddings, lengths=fit_lengths),
-        "bic": float(hmm_model.bic(fit_embeddings, lengths=fit_lengths)),
-    }
+    fitting_results = parallel(
+        delayed(_fit_hmm_func)(
+            n_components, num_iter, fit_embeddings, fit_lengths, seed
+        )
+        for n_components in n_components_range
+    )
 
-    # Store fitting results on file, if requested
-    if output_path is not None:
-        dst_path = Path(output_path)
-        dst_path.mkdir(parents=True, exist_ok=True)
+    return fitting_results
 
-        # History
-        history = pd.DataFrame(hmm_history, columns=["History"])
-        history.to_csv(dst_path / f"history_hmm{num_states}.csv")
 
-        # Metrics
-        with open(
-            dst_path / f"metrics_hmm{num_states}.yaml", "w", encoding="utf-8"
-        ) as f_yaml:
-            yaml.safe_dump(hmm_metrics, f_yaml)
+def segment_hmm(
+    data_path,
+    min_n_components=2,
+    max_n_components=32,
+    num_iter=10,
+    data_filter=None,
+    fit_frac=None,
+    hmm_seed=None,
+    n_jobs=-1,
+    output_path=None,
+):
+    """
+    Segment time series data using Hidden Markov Models.
 
-    # HMM predictions
-    all_lengths = [emb[1].shape[0] for emb in embeddings]
-    all_embeddings = np.concatenate([emb[1] for emb in embeddings])
-    all_predictions = hmm_model.predict(all_embeddings, lengths=all_lengths)
+    This function fits one or more HMM models to the embeddings and uses the models to
+    segment the data into discrete states.
 
-    # Assign predictions to match the corresponding sequences
-    predictions = []
-    for seq_idx, (key, seq) in enumerate(embeddings):
-        # Find prediction boundaries for the current sequence
-        seq_start = sum(all_lengths[:seq_idx])
-        seq_stop = seq_start + all_lengths[seq_idx]
-        assert seq.shape[0] == all_lengths[seq_idx]
-        logging.debug("Sequence start = %d, Sequence stop = %d", seq_start, seq_stop)
+    Parameters
+    ----------
+    data_path : str or Path
+        Path to the directory containing LISBET embeddings.
+    min_n_components : int, optional
+        Minimum number of states to use in the HMM.
+    max_n_components : int, optional
+        Maximum number of states to use in the HMM.
+    num_iter : int, default=10
+        Maximum number of iterations for the Baum-Welch algorithm.
+    data_filter : callable, optional
+        Function to filter the data before fitting.
+    fit_frac : float, optional
+        Fraction of data to use for fitting. If None, use all data.
+    hmm_seed : int, optional
+        Random seed for reproducibility.
+    n_jobs : int, default=-1
+        Number of parallel jobs to run, -1 means using all processors.
+    output_path : str or Path, optional
+        Path to save the results. If None, results are not saved to disk.
 
-        # Extract prediction
-        pred = all_predictions[seq_start:seq_stop]
-        predictions.append((key, pred))
+    Returns
+    -------
+    history : dict
+        Dictionary mapping the number of states to the training history.
+    predictions : dict
+        Dictionary mapping the number of states to the predicted segments for each sequence.
 
-        # Store predictions on file, if requested
+    Raises
+    ------
+    ValueError
+        If min_n_components or max_n_components are smaller than 2, or max_n_components
+        is smaller than min_n_components.
+
+    """
+    # Calculate the number of models to fit
+    if not (2 <= min_n_components <= max_n_components):
+        raise ValueError("Must satisfy: 2 <= min_n_components <= max_n_components")
+    n_models = max_n_components - min_n_components + 1
+
+    # Get LISBET embeddings for the dataset
+    embeddings = _get_embeddings(data_path, data_filter)
+
+    # Fit HMM models
+    # NOTE: We are moving fitting to a separate function in preparation for the
+    #       save/restore mechanism (see https://github.com/BelloneLab/lisbet/issues/14).
+    logging.info(
+        "Fitting %d HMM models, larger datasets may result in longer fitting times.",
+        n_models,
+    )
+    fitting_results = _fit_hmm(
+        min_n_components=min_n_components,
+        max_n_components=max_n_components,
+        num_iter=num_iter,
+        embeddings=embeddings,
+        frac=fit_frac,
+        n_jobs=n_jobs,
+        seed=hmm_seed,
+    )
+
+    # Segment all sequences and store predictions to disk, if requested
+    history = {}
+    predictions = {}
+    for hmm_model, hmm_history, hmm_metrics in tqdm(fitting_results, total=n_models):
+        logging.debug(
+            "HMM with %d states: log-likelihood = %.2f, AIC = %.2f, BIC = %.2f",
+            hmm_model.n_components,
+            hmm_metrics["ll"],
+            hmm_metrics["aic"],
+            hmm_metrics["bic"],
+        )
+        # Store fitting results on file, if requested
         if output_path is not None:
-            dst_path = Path(output_path) / key
+            dst_path = Path(output_path)
             dst_path.mkdir(parents=True, exist_ok=True)
 
-            # HMM motifs
-            motifs = pd.DataFrame(
-                _one_hot(pred, num_states),
-                columns=[f"Motif_{i}" for i in range(num_states)],
-            )
-            motifs.to_csv(dst_path / f"machineAnnotation_hmm{num_states}.csv")
+            # History
+            hmm_history_df = pd.DataFrame(hmm_history, columns=["History"])
+            hmm_history_df.to_csv(dst_path / f"history_hmm{hmm_model.n_components}.csv")
 
-    return hmm_history, predictions
+            # Metrics
+            with open(
+                dst_path / f"metrics_hmm{hmm_model.n_components}.yaml",
+                "w",
+                encoding="utf-8",
+            ) as f_yaml:
+                yaml.safe_dump(hmm_metrics, f_yaml)
+
+        # HMM predictions
+        all_lengths = [emb[1].shape[0] for emb in embeddings]
+        all_embeddings = np.concatenate([emb[1] for emb in embeddings])
+        all_predictions = hmm_model.predict(all_embeddings, lengths=all_lengths)
+
+        # Assign predictions to match the corresponding sequences
+        hmm_predictions = []
+        for seq_idx, (key, seq) in enumerate(embeddings):
+            # Find prediction boundaries for the current sequence
+            seq_start = sum(all_lengths[:seq_idx])
+            seq_stop = seq_start + all_lengths[seq_idx]
+            assert seq.shape[0] == all_lengths[seq_idx]
+            logging.debug(
+                "Sequence start = %d, Sequence stop = %d", seq_start, seq_stop
+            )
+
+            # Extract prediction
+            pred = all_predictions[seq_start:seq_stop]
+            hmm_predictions.append((key, pred))
+
+            # Store predictions on file, if requested
+            if output_path is not None:
+                dst_path = Path(output_path) / key
+                dst_path.mkdir(parents=True, exist_ok=True)
+
+                # HMM motifs
+                motifs = pd.DataFrame(
+                    _one_hot(pred, hmm_model.n_components),
+                    columns=[f"Motif_{i}" for i in range(hmm_model.n_components)],
+                )
+                motifs.to_csv(
+                    dst_path / f"machineAnnotation_hmm{hmm_model.n_components}.csv"
+                )
+
+        history[hmm_model.n_components] = hmm_history
+        predictions[hmm_model.n_components] = hmm_predictions
+
+    return history, predictions
 
 
 def reduce_umap(
