@@ -317,7 +317,7 @@ class Trainer:
             "criterion": criterion,
             "datasets": datasets,
             "resample": False,
-            "predictor": lambda output: torch.max(output, 1)[1],
+            "predictor": lambda output: torch.argmax(output, dim=1),
             "metric": metric,
         }
 

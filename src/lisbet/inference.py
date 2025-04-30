@@ -207,7 +207,7 @@ def _classification_forward(model: torch.nn.Module, data: torch.Tensor) -> torch
     """
     output = model(data, "cfc")
     return torch.nn.functional.one_hot(
-        torch.max(output, 1)[1], num_classes=output.shape[1]
+        torch.argmax(output, dim=1), num_classes=output.shape[1]
     )
 
 
