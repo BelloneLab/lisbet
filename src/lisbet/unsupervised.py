@@ -4,11 +4,11 @@ import logging
 import random
 from pathlib import Path
 
+import joblib
 import numpy as np
 import pandas as pd
 import yaml
 from hmmlearn import hmm
-from joblib import Parallel, delayed
 from sklearn.preprocessing import MinMaxScaler
 from tqdm.auto import tqdm
 from umap import UMAP
@@ -86,7 +86,14 @@ def _fit_hmm_func(n_components, num_iter, data, lengths, seed):
 
 
 def _fit_hmm(
-    min_n_components, max_n_components, num_iter, embeddings, frac, n_jobs, seed
+    min_n_components,
+    max_n_components,
+    num_iter,
+    embeddings,
+    frac,
+    n_jobs,
+    seed,
+    output_path=None,
 ):
     """Fit HMM model."""
     # Random sample
@@ -109,6 +116,7 @@ def _fit_hmm(
     #       accurate. An LPT scheduler would be more efficient, but it could severely
     #       degrade user experience as the ETA would be initially overestimated.
     n_components_range = list(range(min_n_components, max_n_components + 1))
+    n_models = len(n_components_range)
     random.shuffle(n_components_range)
 
     # Fit model
@@ -120,17 +128,53 @@ def _fit_hmm(
     #       fixed, but the patch will not be available until the next release of joblib,
     #       currently at version 1.4.2. In the meantime, we can use the threading
     #       backend via prefer="threads".
-    parallel = Parallel(
+    parallel = joblib.Parallel(
         n_jobs=n_jobs, return_as="generator_unordered", prefer="threads"
     )
     fitting_results = parallel(
-        delayed(_fit_hmm_func)(
+        joblib.delayed(_fit_hmm_func)(
             n_components, num_iter, fit_embeddings, fit_lengths, seed
         )
         for n_components in n_components_range
     )
 
-    return fitting_results
+    fitted_models = []
+    for hmm_model, hmm_history, hmm_metrics in tqdm(
+        fitting_results, total=n_models, desc="Fitting HMM models"
+    ):
+        logging.debug(
+            "HMM with %d states: log-likelihood = %.2f, AIC = %.2f, BIC = %.2f",
+            hmm_model.n_components,
+            hmm_metrics["ll"],
+            hmm_metrics["aic"],
+            hmm_metrics["bic"],
+        )
+
+        fitted_models.append(hmm_model)
+
+        # Store fitting results on file, if requested
+        if output_path is not None:
+            dst_path = Path(output_path) / "annotations"
+            dst_path.mkdir(parents=True, exist_ok=True)
+
+            # HMM model
+            joblib.dump(
+                hmm_model, dst_path / f"model_hmm{hmm_model.n_components}.joblib"
+            )
+
+            # History
+            hmm_history_df = pd.DataFrame(hmm_history, columns=["History"])
+            hmm_history_df.to_csv(dst_path / f"history_hmm{hmm_model.n_components}.csv")
+
+            # Metrics
+            with open(
+                dst_path / f"metrics_hmm{hmm_model.n_components}.yaml",
+                "w",
+                encoding="utf-8",
+            ) as f_yaml:
+                yaml.safe_dump(hmm_metrics, f_yaml)
+
+    return fitted_models
 
 
 def segment_hmm(
@@ -142,6 +186,7 @@ def segment_hmm(
     fit_frac=None,
     hmm_seed=None,
     n_jobs=-1,
+    pretrained_path=None,
     output_path=None,
 ):
     """
@@ -168,13 +213,14 @@ def segment_hmm(
         Random seed for reproducibility.
     n_jobs : int, default=-1
         Number of parallel jobs to run, -1 means using all processors.
+    pretrained_path : str or Path, optional
+        Path to the directory containing pretrained HMM models. If None, models are
+        trained from scratch.
     output_path : str or Path, optional
         Path to save the results. If None, results are not saved to disk.
 
     Returns
     -------
-    history : dict
-        Dictionary mapping the number of states to the training history.
     predictions : dict
         Dictionary mapping the number of states to the predicted segments for each sequence.
 
@@ -188,56 +234,32 @@ def segment_hmm(
     # Calculate the number of models to fit
     if not (2 <= min_n_components <= max_n_components):
         raise ValueError("Must satisfy: 2 <= min_n_components <= max_n_components")
-    n_models = max_n_components - min_n_components + 1
 
     # Get LISBET embeddings for the dataset
     embeddings = _get_embeddings(data_path, data_filter)
 
-    # Fit HMM models
-    # NOTE: We are moving fitting to a separate function in preparation for the
-    #       save/restore mechanism (see https://github.com/BelloneLab/lisbet/issues/14).
-    logging.info(
-        "Fitting %d HMM models, larger datasets may result in longer fitting times.",
-        n_models,
-    )
-    fitting_results = _fit_hmm(
-        min_n_components=min_n_components,
-        max_n_components=max_n_components,
-        num_iter=num_iter,
-        embeddings=embeddings,
-        frac=fit_frac,
-        n_jobs=n_jobs,
-        seed=hmm_seed,
-    )
+    if pretrained_path is None:
+        # Fit HMM models
+        hmm_models = _fit_hmm(
+            min_n_components=min_n_components,
+            max_n_components=max_n_components,
+            num_iter=num_iter,
+            embeddings=embeddings,
+            frac=fit_frac,
+            n_jobs=n_jobs,
+            seed=hmm_seed,
+            output_path=output_path,
+        )
+    else:
+        # Load pretrained HMM models
+        hmm_models = [
+            joblib.load(pretrained_path / f"model_hmm{n}.joblib")
+            for n in range(min_n_components, max_n_components + 1)
+        ]
 
     # Segment all sequences and store predictions to disk, if requested
-    history = {}
     predictions = {}
-    for hmm_model, hmm_history, hmm_metrics in tqdm(fitting_results, total=n_models):
-        logging.debug(
-            "HMM with %d states: log-likelihood = %.2f, AIC = %.2f, BIC = %.2f",
-            hmm_model.n_components,
-            hmm_metrics["ll"],
-            hmm_metrics["aic"],
-            hmm_metrics["bic"],
-        )
-        # Store fitting results on file, if requested
-        if output_path is not None:
-            dst_path = Path(output_path)
-            dst_path.mkdir(parents=True, exist_ok=True)
-
-            # History
-            hmm_history_df = pd.DataFrame(hmm_history, columns=["History"])
-            hmm_history_df.to_csv(dst_path / f"history_hmm{hmm_model.n_components}.csv")
-
-            # Metrics
-            with open(
-                dst_path / f"metrics_hmm{hmm_model.n_components}.yaml",
-                "w",
-                encoding="utf-8",
-            ) as f_yaml:
-                yaml.safe_dump(hmm_metrics, f_yaml)
-
+    for hmm_model in tqdm(hmm_models, desc="Segmenting sequences"):
         # HMM predictions
         all_lengths = [emb[1].shape[0] for emb in embeddings]
         all_embeddings = np.concatenate([emb[1] for emb in embeddings])
@@ -260,7 +282,7 @@ def segment_hmm(
 
             # Store predictions on file, if requested
             if output_path is not None:
-                dst_path = Path(output_path) / key
+                dst_path = Path(output_path) / "annotations" / key
                 dst_path.mkdir(parents=True, exist_ok=True)
 
                 # HMM motifs
@@ -272,10 +294,9 @@ def segment_hmm(
                     dst_path / f"machineAnnotation_hmm{hmm_model.n_components}.csv"
                 )
 
-        history[hmm_model.n_components] = hmm_history
         predictions[hmm_model.n_components] = hmm_predictions
 
-    return history, predictions
+    return predictions
 
 
 def reduce_umap(
