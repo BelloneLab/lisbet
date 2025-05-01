@@ -79,6 +79,7 @@ To train the classifier, for example one based on the standard ``lisbet32x4-calm
 .. code-block:: console
 
    $ betman train_model \
+      --run_id=lisbet32x4-calms21UftProto-classifier \
       --data_format=h5archive \
       --learning_rate=1e-4 \
       --epochs=10 \
