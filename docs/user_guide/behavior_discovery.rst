@@ -127,11 +127,11 @@ To generate the embedding files for your dataset you can use **betman**:
 .. code-block:: console
 
    $ betman select_prototypes \
-      --hmm_range LOW HIGH \       # Smallest and largest annotation set to consider
-      --output_path=OUTPUT_PATH \  # Path to store annotation files (i.e., labels)
-      --method=METHOD \            # Prototype selection method
-      -v \                         # Enable verbose mode
-      ANNOT_PATH                   # Path to the root of the annotation sets
+      --min_n_components=MIN_STATES \  # Smallest HMM annotation set to consider
+      --max_n_components=MAX_STATES \  # Largest HMM annotation set to consider
+      --method=METHOD \                # Prototype selection method
+      -v \                             # Enable verbose mode
+      ANNOT_PATH                       # Path to the root of the annotation sets
 
 where ANNOT_PATH is the location of the LISBET annotations obtained in Step 2, MIN_STATES (MAX_STATES) is the smallest (largest) annotation set to consider (corresponding to the number of states in the HMM models), and METHOD determines how the prototype for a motif group is chosen (i.e., **best** will select the prototype with the highest silhouette coefficient).
 
@@ -140,11 +140,11 @@ For example, your ``betman select_prototypes`` command might look something like
 .. code-block:: console
 
    $ betman select_prototypes \
-      --hmm_range 6 32 \
-      --output_path=proto_predictions \
+      --min_n_components=6 \
+      --max_n_components=32 \
       --method=best \
       -v \
-      hmm_predictions/maDLC
+      annotations
 
 Please use ``betman select_prototypes --help`` for a list of all available option.
 

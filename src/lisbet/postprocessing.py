@@ -160,13 +160,13 @@ def _filter_by_distance(concat_data, distance_threshold):
 
 def select_prototypes(
     data_path: str,
-    hmm_list: Optional[List[int]] = None,
-    hmm_range: Optional[Tuple[int, int]] = None,
+    min_n_components: int,
+    max_n_components: int,
     method: str = "best",
-    frame_threshold: Optional[float] = None,
-    bout_threshold: Optional[float] = None,
-    distance_threshold: Optional[float] = None,
-    fps: Optional[int] = None,
+    frame_threshold: float = 0.05,
+    bout_threshold: float = 0.5,
+    distance_threshold: float = 0.6,
+    fps: int = 30,
     output_path: Optional[str] = None,
 ) -> Tuple[Dict, List[Tuple[str, pd.DataFrame]]]:
     """
@@ -176,19 +176,19 @@ def select_prototypes(
     ----------
     data_path : str
         The root directory containing the annotation files.
-    hmm_list : list of int, optional
-        A sorted list of unique Hidden Markov Model sizes. If `None`, `hmm_range` must be provided.
-    hmm_range : tuple of int, optional
-        A tuple specifying the range of Hidden Markov Model sizes (low, high). Used if `hmm_list` is `None`.
+    min_n_components : int, default=2
+        Minimum number of states for the HMMs.
+    max_n_components : int, default=32
+        Maximum number of states for the HMMs.
     method : str, default='best'
         Method for selecting prototypes. Valid options are 'min' and 'best'.
-    frame_threshold : float, optional
+    frame_threshold : float, default=0.05
         Minimum fraction of allocated frames for motifs to be kept.
-    bout_threshold : float, optional
+    bout_threshold : float, default=0.5
         Minimum mean bout duration in seconds for motifs to be kept.
-    distance_threshold : float, optional
+    distance_threshold : float, default=0.6
         Maximum Jaccard distance from the closest motif (pairs only).
-    fps : int, optional
+    fps : int, default=30
         Frames per second, used to compute bout duration.
     output_path : str, optional
         Path to store the output predictions. If `None`, results are not saved.
@@ -206,14 +206,8 @@ def select_prototypes(
     [a] This method could be easily generalized to other clustering algorithms.
 
     """
-    if hmm_list is None:
-        low, high = hmm_range
-        hmm_list = list(range(low, high + 1))
-
-    # List of states must be sorted
-    assert all(a < b for a, b in zip(hmm_list, hmm_list[1:]))
-
     # Load session data
+    hmm_list = list(range(min_n_components, max_n_components + 1))
     session_data = load_annotations(data_path, hmm_list)
 
     # Concatenate all sessions in a single dataset
@@ -309,7 +303,7 @@ def select_prototypes(
 
         # Store predictions on file, if requested
         if output_path is not None:
-            dst_path = Path(output_path) / key
+            dst_path = Path(output_path) / "prototypes" / key
             dst_path.mkdir(parents=True, exist_ok=True)
 
             motifs.to_csv(
