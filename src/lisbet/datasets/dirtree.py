@@ -24,29 +24,29 @@ def _find_SLEAP_tracking_files(dspath: Path):
     """
     Scan a directory for SLEAP files.
 
-        This function searches for H5 files in the specified directory and applies
-        three matching strategies in order:
+    This function searches for H5 files in the specified directory and applies
+    three matching strategies in order:
         1. Return if exactly one H5 file exists
         2. Return if exactly one file matches pattern1
         3. Return if exactly one file matches pattern2
 
-        Parameters
-        ----------
-        directory_path : str
-            Path to the directory to scan for H5 files.
+    Parameters
+    ----------
+    directory_path : str
+        Path to the directory to scan for H5 files.
 
-        Returns
-        -------
-        Optional[str]
-            The name of the matching file if found, None otherwise.
+    Returns
+    -------
+    Optional[str]
+        The name of the matching file if found, None otherwise.
 
-        Raises
-        ------
-        ValueError
-            If multiple matching files are found where only one is expected,
-            or if no matching files are found after trying all strategies.
+    Raises
+    ------
+    ValueError
+        If multiple matching files are found where only one is expected,
+        or if no matching files are found after trying all strategies.
     """
-    # Get all CSV files
+    # Get all HDF5 files
     tracking_files = list(dspath.rglob("*.h5"))
 
     # Case 1: Exactly one CSV
@@ -60,27 +60,27 @@ def _find_DLC_tracking_files(dspath: Path):
     """
     Scan a directory for CSV files and return a filename based on matching rules.
 
-        This function searches for CSV files in the specified directory and applies
-        three matching strategies in order:
+    This function searches for CSV files in the specified directory and applies
+    three matching strategies in order:
         1. Return if exactly one CSV file exists
         2. Return if exactly one file matches pattern1
         3. Return if exactly one file matches pattern2
 
-        Parameters
-        ----------
-        directory_path : str
-            Path to the directory to scan for CSV files.
+    Parameters
+    ----------
+    directory_path : str
+        Path to the directory to scan for CSV files.
 
-        Returns
-        -------
-        Optional[str]
-            The name of the matching file if found, None otherwise.
+    Returns
+    -------
+    Optional[str]
+        The name of the matching file if found, None otherwise.
 
-        Raises
-        ------
-        ValueError
-            If multiple matching files are found where only one is expected,
-            or if no matching files are found after trying all strategies.
+    Raises
+    ------
+    ValueError
+        If multiple matching files are found where only one is expected,
+        or if no matching files are found after trying all strategies.
     """
     # Get all CSV files
     csv_files = list(dspath.rglob("*.csv"))
