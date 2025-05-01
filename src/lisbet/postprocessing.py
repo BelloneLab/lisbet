@@ -160,13 +160,13 @@ def _filter_by_distance(concat_data, distance_threshold):
 
 def select_prototypes(
     data_path: str,
-    hmm_list: Optional[List[int]] = None,
-    hmm_range: Optional[Tuple[int, int]] = None,
+    min_n_components: int,
+    max_n_components: int,
     method: str = "best",
-    frame_threshold: Optional[float] = None,
-    bout_threshold: Optional[float] = None,
-    distance_threshold: Optional[float] = None,
-    fps: Optional[int] = None,
+    frame_threshold: float = 0.05,
+    bout_threshold: float = 0.5,
+    distance_threshold: float = 0.6,
+    fps: int = 30,
     output_path: Optional[str] = None,
 ) -> Tuple[Dict, List[Tuple[str, pd.DataFrame]]]:
     """
@@ -206,14 +206,8 @@ def select_prototypes(
     [a] This method could be easily generalized to other clustering algorithms.
 
     """
-    if hmm_list is None:
-        low, high = hmm_range
-        hmm_list = list(range(low, high + 1))
-
-    # List of states must be sorted
-    assert all(a < b for a, b in zip(hmm_list, hmm_list[1:]))
-
     # Load session data
+    hmm_list = list(range(min_n_components, max_n_components + 1))
     session_data = load_annotations(data_path, hmm_list)
 
     # Concatenate all sessions in a single dataset
