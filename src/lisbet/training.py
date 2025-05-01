@@ -116,12 +116,36 @@ class Trainer:
         self.scaler = torch.amp.GradScaler(
             "cuda", enabled=self.config["mixed_precision"]
         )
-        summary(self.model)
+        model_stats = summary(self.model, verbose=0)
+        logging.info("Model summary\n" + str(model_stats))
 
         # Configure optimizer
-        self.optimizer = torch.optim.Adamax(
+        self.optimizer = torch.optim.AdamW(
             filter(lambda p: p.requires_grad, self.model.parameters()),
             lr=self.config["learning_rate"],
+        )
+
+        # Configure LR (warmup scheduler)
+        warmup_epochs = 5
+        warmup_scheduler = torch.optim.lr_scheduler.LinearLR(
+            self.optimizer,
+            start_factor=1e-2,
+            end_factor=1.0,
+            total_iters=warmup_epochs,
+        )
+
+        # Configure LR (main scheduler)
+        T_0 = 10
+        T_mult = 2
+        main_scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+            self.optimizer, T_0=T_0, T_mult=T_mult
+        )
+
+        # Configure final LR scheduler
+        self.scheduler = torch.optim.lr_scheduler.SequentialLR(
+            self.optimizer,
+            schedulers=[warmup_scheduler, main_scheduler],
+            milestones=[warmup_epochs],
         )
 
     def generate_seeds(self):
@@ -293,7 +317,7 @@ class Trainer:
             "criterion": criterion,
             "datasets": datasets,
             "resample": False,
-            "predictor": lambda output: torch.max(output, 1)[1],
+            "predictor": lambda output: torch.argmax(output, dim=1),
             "metric": metric,
         }
 
@@ -475,6 +499,7 @@ class Trainer:
             total_loss.backward()
             self.scaler.step(self.optimizer)
             self.scaler.update()
+        self.scheduler.step()
 
         return losses, labels, predictions
 
@@ -580,6 +605,7 @@ class Trainer:
         for epoch in range(self.config["epochs"]):
             history_entry = {"epoch": epoch}
             print(f"Epoch {epoch}")
+            logging.info(f"Current LR = {self.scheduler.get_last_lr()[0]}")
 
             # Get dataloaders
             train_dataloaders = self.configure_dataloaders("train")
@@ -589,7 +615,7 @@ class Trainer:
 
             # Get epoch logs
             train_log = self.compute_epoch_logs("train", losses, labels, predictions)
-            logging.info(train_log)
+            logging.info(", ".join(f"{k}: {v:.3f}" for k, v in train_log.items()))
 
             # Update history entry for current epoch
             history_entry.update(train_log)
@@ -607,7 +633,7 @@ class Trainer:
 
                 # Get epoch logs
                 dev_log = self.compute_epoch_logs("dev", losses, labels, predictions)
-                logging.info(dev_log)
+                logging.info(", ".join(f"{k}: {v:.3f}" for k, v in dev_log.items()))
 
                 # Update history entry for current epoch
                 history_entry.update(dev_log)
@@ -615,13 +641,13 @@ class Trainer:
             # Update history
             history.append(history_entry)
 
+            # Save history, if requested
+            if self.config["save_history"]:
+                self.save_history(history)
+
         # Save final weights, if requested
         if self.config["save_weights"] == "last":
             self.save_weights("weights_last.pt")
-
-        # Save history, if requested
-        if self.config["save_history"]:
-            self.save_history(history)
 
 
 def train(

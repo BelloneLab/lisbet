@@ -20,3 +20,4 @@ Advanced
    train_model
    fine_tuning
    prototype_calibration
+   prototype_inference

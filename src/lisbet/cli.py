@@ -239,11 +239,19 @@ def configure_segment_motifs_parser(parser: argparse.ArgumentParser) -> None:
     """Configure segment_motifs command parser."""
     add_verbosity_args(parser)
     add_data_io_args(parser, "Embedding data location")
-    parser.add_argument(
-        "--num_states", type=int, default=4, help="Number of hidden states"
-    )
+    parser.add_argument("--min_n_components", type=int, default=2, help="Minimum number of hidden states")
+    parser.add_argument("--max_n_components", type=int, default=32, help="Maximum number of hidden states")
     parser.add_argument(
         "--num_iter", type=int, default=10, help="Number of iterations of EM"
+    )
+    parser.add_argument(
+        "--fit_frac", type=float, help="Fraction of data to use for model fitting"
+    )
+    parser.add_argument(
+        "--n_jobs",
+        type=int,
+        default=-1,
+        help="Number of parallel jobs, use -1 (default) for as many jobs as cores",
     )
     parser.add_argument("--hmm_seed", type=int, help="RNG seed for HMM")
     parser.add_argument("--save_hmm", type=Path, help="Path to save HMM model")
@@ -317,8 +325,8 @@ def configure_fetch_model_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "model_id",
         choices=(
-            "lisbet64x8-calms21UftT1",
-            "lisbet64x8-calms21U-embedder",
+            "lisbet32x4-calms21UftT1-classifier",
+            "lisbet32x4-calms21U-embedder",
         ),
         help="Model ID",
     )
