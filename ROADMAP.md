@@ -2,7 +2,7 @@
 
 ## 🔜 Q2 2025
 - [ ] Add support for SLEAP ([#8, in progress](https://github.com/BelloneLab/lisbet/issues/8))
-- [ ] Add support for saving and loading HMMs ([#14, in progress](https://github.com/BelloneLab/lisbet/issues/14))
+- [x] Add support for saving and loading HMMs ([#14](https://github.com/BelloneLab/lisbet/issues/14))
 - [x] Speed up HMM fitting by training on a random subset of data ([#22](https://github.com/BelloneLab/lisbet/issues/22))
 - [x] Add native support for parallel HMM scanning in CLI ([#23](https://github.com/BelloneLab/lisbet/issues/23))
 - [x] Test training LISBET classifiers using HMM prototypes ([#24](https://github.com/BelloneLab/lisbet/issues/24))
