@@ -303,7 +303,7 @@ def select_prototypes(
 
         # Store predictions on file, if requested
         if output_path is not None:
-            dst_path = Path(output_path) / key
+            dst_path = Path(output_path) / "prototypes" / key
             dst_path.mkdir(parents=True, exist_ok=True)
 
             motifs.to_csv(
