@@ -240,8 +240,18 @@ def configure_segment_motifs_parser(parser: argparse.ArgumentParser) -> None:
     """Configure segment_motifs command parser."""
     add_verbosity_args(parser)
     add_data_io_args(parser, "Embedding data location")
-    parser.add_argument("--min_n_components", type=int, default=2, help="Minimum number of hidden states")
-    parser.add_argument("--max_n_components", type=int, default=32, help="Maximum number of hidden states")
+    parser.add_argument(
+        "--min_n_components",
+        type=int,
+        default=2,
+        help="Minimum number of hidden states",
+    )
+    parser.add_argument(
+        "--max_n_components",
+        type=int,
+        default=32,
+        help="Maximum number of hidden states",
+    )
     parser.add_argument(
         "--num_iter", type=int, default=10, help="Number of iterations of EM"
     )
@@ -262,40 +272,47 @@ def configure_select_prototypes_parser(parser: argparse.ArgumentParser) -> None:
     """Configure select_prototypes command parser."""
     add_verbosity_args(parser)
     add_data_io_args(parser, "Annotation data location")
-    group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument(
-        "--hmm_range",
+    parser.add_argument(
+        "--min_n_components",
         type=int,
-        nargs=2,
-        metavar=("LOW", "HIGH"),
-        help="Range of HMM sizes",
+        default=6,
+        help="Minimum number of hidden states",
     )
-    group.add_argument(
-        "--hmm_list", type=int, nargs="+", metavar="HMM_SIZE", help="List of HMM sizes"
+    parser.add_argument(
+        "--max_n_components",
+        type=int,
+        default=32,
+        help="Maximum number of hidden states",
     )
     parser.add_argument(
         "--method",
-        default="min",
+        default="best",
         choices=["min", "best"],
         help="Prototype selection algorithm",
     )
     parser.add_argument(
         "--frame_threshold",
         type=float,
+        default=0.05,
         help="Minimum fraction of allocated frames for motifs to be kept",
     )
     parser.add_argument(
         "--bout_threshold",
         type=float,
+        default=0.5,
         help="Minimum mean bout duration in seconds for motifs to be kept",
     )
     parser.add_argument(
         "--distance_threshold",
         type=float,
-        help="Maximum Jaccard distance from the closest motif (pairs only)",
+        default=0.6,
+        help="Maximum Jaccard distance from the closest neighbor motif",
     )
     parser.add_argument(
-        "--fps", type=float, help="Frames per second, used to compute bout duration"
+        "--fps",
+        type=float,
+        default=30,
+        help="Frames per second, used to compute bout duration",
     )
 
 
