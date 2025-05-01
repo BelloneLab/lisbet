@@ -1,7 +1,7 @@
 # Roadmap
 
 ## 🔜 Q2 2025
-- [ ] Add support for SLEAP ([#8, in progress](https://github.com/BelloneLab/lisbet/issues/8))
+- [x] Add support for SLEAP ([#8](https://github.com/BelloneLab/lisbet/issues/8))
 - [x] Add support for saving and loading HMMs ([#14](https://github.com/BelloneLab/lisbet/issues/14))
 - [x] Speed up HMM fitting by training on a random subset of data ([#22](https://github.com/BelloneLab/lisbet/issues/22))
 - [x] Add native support for parallel HMM scanning in CLI ([#23](https://github.com/BelloneLab/lisbet/issues/23))
