@@ -56,14 +56,9 @@ def load_records(
         If the dataset name is unknown or unsupported.
 
     """
-    if data_format == "maDLC":
+    if data_format in ("maDLC", "saDLC", "SLEAP"):
         train_rec, test_rec = dirtree.load(
-            data_path, seed=test_seed, test_ratio=test_ratio, multi_animal=True
-        )
-
-    elif data_format == "saDLC":
-        train_rec, test_rec = dirtree.load(
-            data_path, seed=test_seed, test_ratio=test_ratio, multi_animal=False
+            data_path, data_format, seed=test_seed, test_ratio=test_ratio,
         )
 
     elif data_format == "h5archive":
