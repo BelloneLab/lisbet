@@ -176,19 +176,19 @@ def select_prototypes(
     ----------
     data_path : str
         The root directory containing the annotation files.
-    hmm_list : list of int, optional
-        A sorted list of unique Hidden Markov Model sizes. If `None`, `hmm_range` must be provided.
-    hmm_range : tuple of int, optional
-        A tuple specifying the range of Hidden Markov Model sizes (low, high). Used if `hmm_list` is `None`.
+    min_n_components : int, default=2
+        Minimum number of states for the HMMs.
+    max_n_components : int, default=32
+        Maximum number of states for the HMMs.
     method : str, default='best'
         Method for selecting prototypes. Valid options are 'min' and 'best'.
-    frame_threshold : float, optional
+    frame_threshold : float, default=0.05
         Minimum fraction of allocated frames for motifs to be kept.
-    bout_threshold : float, optional
+    bout_threshold : float, default=0.5
         Minimum mean bout duration in seconds for motifs to be kept.
-    distance_threshold : float, optional
+    distance_threshold : float, default=0.6
         Maximum Jaccard distance from the closest motif (pairs only).
-    fps : int, optional
+    fps : int, default=30
         Frames per second, used to compute bout duration.
     output_path : str, optional
         Path to store the output predictions. If `None`, results are not saved.
