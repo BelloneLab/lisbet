@@ -104,9 +104,10 @@ def _fit_hmm(
     fit_lengths = [emb[1].shape[0] for emb in fit_embeddings]
     fit_embeddings = np.concatenate([emb[1] for emb in fit_embeddings])
 
-    # Make n_components range and shuffle it to improve core allocation
-    # NOTE: We do not need to make the sequence reproducible, this is just a trick to
-    #       reduce CPU idle time.
+    # Make n_components range
+    # NOTE: Shuffling is used mostly to improve user experience by making the ETA more
+    #       accurate. An LPT scheduler would be more efficient, but it could severely
+    #       degrade user experience as the ETA would be initially overestimated.
     n_components_range = list(range(min_n_components, max_n_components + 1))
     random.shuffle(n_components_range)
 

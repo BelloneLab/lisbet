@@ -7,6 +7,8 @@ One of the most common applications of LISBET is using a pre-trained model to au
 
 Requirements: - A pre-trained LISBET embedding model - A keypoints dataset in the standard LISBET format
 
+.. _social-behavior-discovery-step0:
+
 Step 0: Prepare the data and model
 ----------------------------------
 Please check :ref:`data-preparation` to learn how to prepare your key point data for embedding.
