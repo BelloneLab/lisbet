@@ -1,7 +1,7 @@
 <div align="center">
 
 <p align="center">
-  <img src="docs/_static/logo_dark.png" alt="Logo" width="200">
+  <img src="https://raw.githubusercontent.com/BelloneLab/lisbet/main/docs/_static/logo_dark.png" alt="Logo" width="200">
 </p><br>
 
 [📚 Documentation](https://docs.lisbet.ai) |
