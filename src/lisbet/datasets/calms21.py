@@ -5,16 +5,16 @@ import logging
 import os
 
 import numpy as np
+import pandas as pd
 from movement.io import load_poses
 from tqdm.auto import trange
 
 
 def _preprocess_calms21(raw_data, rescale):
     """Preprocess body pose in the CalMS21 records."""
-    # Reshape data
     records = []
-    for key, val in raw_data.items():
-        logging.debug("Reshaping %s data...", key)
+    for rec_id, val in raw_data.items():
+        logging.debug("Processing %s data...", rec_id)
 
         # Invert coordinates and body parts dims
         posetracks = np.array(val["keypoints"]).transpose((0, 2, 3, 1))
@@ -43,22 +43,37 @@ def _preprocess_calms21(raw_data, rescale):
             source_software="MARS",
         )
 
-        # Store preprocessed sequence
-        # NOTE: We use a list to simplify splitting into train/dev/test sets
-        # NOTE: For the moment we keep annotations as a separate field, but this should
-        #       be added to the keypoints data structure in the future.
+        # Create record data structure
+        rec_data = {"posetracks": posetracks}
+
+        # Load annotations
+        # NOTE: For the moment we keep annotations as a separate field, but this could
+        #       be added to the posetracks data structure in the future.
         if "annotations" in val:
-            records.append(
-                (
-                    key,
-                    {
-                        "posetracks": posetracks,
-                        "annotations": np.array(val["annotations"]),
-                    },
-                )
+            annotator_id = f"annotator{val["metadata"]["annotator-id"]}"
+
+            # Get annotation map
+            class_idx_map = val["metadata"]["vocab"]
+            num_classes = len(class_idx_map)
+
+            # Convert annotations to one-hot encoding
+            one_hot_annotations = np.eye(num_classes, dtype=int)[val["annotations"]]
+
+            # Build the column labels in *exact* column order
+            labels = [None] * num_classes
+            for behavior, idx in class_idx_map.items():
+                labels[idx] = behavior
+
+            # Create a two‑level (MultiIndex) column index
+            cols = pd.MultiIndex.from_product(
+                [labels, [annotator_id]], names=["behavior", "annotator"]
             )
-        else:
-            records.append((key, {"posetracks": posetracks}))
+
+            # Convert to pandas DataFrame
+            rec_data["annotations"] = pd.DataFrame(one_hot_annotations, columns=cols)
+
+        # Store preprocessed sequence
+        records.append((rec_id, rec_data))
 
     return records
 

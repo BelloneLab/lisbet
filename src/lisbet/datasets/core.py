@@ -5,6 +5,7 @@ import re
 from functools import partial
 from pathlib import Path
 
+import pandas as pd
 import pooch
 import xarray as xr
 from huggingface_hub import snapshot_download
@@ -13,6 +14,83 @@ from sklearn.model_selection import train_test_split
 from tqdm.auto import tqdm
 
 from . import calms21
+
+
+def _load_posetracks(seq_path, data_format, rescale):
+    """Load pose-tracking data from a file."""
+    # Valid filenames and their corresponding loading functions
+    # TODO: Test re matching for all supported formats.
+    data_readers = {
+        "DLC": (r"(?i)(DLC.*?shuffle\d+|tracking).*\.csv$", load_poses.from_dlc_file),
+        "SLEAP": (r"(?i)SLEAP.*\.h5$", load_poses.from_sleap_file),
+        "movement": (r"(?i)tracking.*\.nc$", partial(xr.open_dataset, engine="scipy")),
+    }
+
+    if data_format in data_readers:
+        # Find all files matching the regex and load them
+        pattern, loader = data_readers[data_format]
+        rx = re.compile(pattern)
+        dss = [loader(pth) for pth in seq_path.iterdir() if rx.search(pth.name)]
+
+    else:
+        raise ValueError(f"Unknown data format {data_format}")
+
+    # Check if any datasets were found
+    if len(dss) == 0:
+        return None
+
+    # Merge all datasets into a single one
+    # NOTE: There should be only one dataset per sequence, but we keep this for
+    #       compatibility with multiple single-individual datasets
+    ds = xr.concat(dss, dim="individuals")
+
+    logging.debug("Individuals: %s", ds["individuals"].values)
+
+    # Rescale coordinates in the (0, 1) range, if requested
+    if rescale:
+        reduce_dims = ("time", "keypoints", "individuals")
+
+        pos = ds["position"]
+        min_val = pos.min(dim=reduce_dims, skipna=True)
+        max_val = pos.max(dim=reduce_dims, skipna=True)
+
+        ds = ds.assign(position=(pos - min_val) / (max_val - min_val))
+
+        logging.debug(
+            "Rescaled coordinates between min values %s and max values %s",
+            min_val.values,
+            max_val.values,
+        )
+
+    return ds
+
+
+def _load_annotations(seq_path):
+    """Load annotations from a file."""
+    # Find all files matching the annotations regex and load them
+    rx = re.compile(r"(?i)(manual_scoring|annotations).*\.csv$")
+    annotations = [
+        pd.read_csv(pth, header=[0, 1])
+        for pth in seq_path.iterdir()
+        if rx.search(pth.name)
+    ]
+
+    # Check if any annotations were found
+    if len(annotations) == 0:
+        return None
+
+    # Merge all annotations into a single one
+    annotations = pd.concat(annotations, axis=0, ignore_index=True)
+
+    logging.debug("Annotations: %s", annotations.columns.values)
+
+    # Convert annotations to label encoding format
+    # NOTE: This is a temporary solution to maintain compatibility with the current
+    #       implementation of training and inference pipelines.
+    # TODO: Add full support for one-hot and multi-label annotations
+    annotations = annotations.values.argmax(axis=1)
+
+    return annotations
 
 
 def load_records(
@@ -90,65 +168,27 @@ def load_records(
     dict_keys(['main_records', 'test_records', 'dev_records'])
 
     """
-    # Valid filenames and their corresponding loading functions
-    # TODO: Test re matching for all supported formats.
-    data_readers = {
-        "DLC": (r"(?i)(DLC.*?shuffle\d+|tracking).*\.csv$", load_poses.from_dlc_file),
-        "SLEAP": (r"(?i)SLEAP.*\.h5$", load_poses.from_sleap_file),
-        "movement": (r"(?i)tracking.*\.nc$", partial(xr.open_dataset, engine="scipy")),
-    }
-
     # Find all potential record paths
     seq_paths = [f for f in Path(data_path).rglob("*") if f.is_dir()]
 
     # Load and preprocess raw data
     all_records = []
     for seq_path in tqdm(seq_paths, desc="Loading dataset"):
-        if data_format in data_readers:
-            # Find all files matching the regex and load them
-            pattern, loader = data_readers[data_format]
-            rx = re.compile(pattern)
-            dss = [loader(pth) for pth in seq_path.iterdir() if rx.search(pth.name)]
-
+        # Load pose-tracking data
+        if (ds := _load_posetracks(seq_path, data_format, rescale)) is not None:
+            rec_data = {"posetracks": ds}
         else:
-            raise ValueError(f"Unknown data format {data_format}")
-
-        if len(dss) == 0:
             logging.debug("Skipping %s, no tracking data found", str(seq_path))
             continue
 
-        # Merge all datasets into a single one
-        # NOTE: There should be only one dataset per sequence, but we keep this for
-        #       compatibility with multiple single-individual datasets
-        ds = xr.concat(dss, dim="individuals")
-
-        logging.debug("Individuals: %s", ds["individuals"].values)
-
-        # Rescale coordinates in the (0, 1) range, if requested
-        if rescale:
-            reduce_dims = ("time", "keypoints", "individuals")
-
-            pos = ds["position"]
-            min_val = pos.min(dim=reduce_dims, skipna=True)
-            max_val = pos.max(dim=reduce_dims, skipna=True)
-
-            ds = ds.assign(position=(pos - min_val) / (max_val - min_val))
-
-            logging.debug(
-                "Rescaled coordinates between min values %s and max values %s",
-                min_val.values,
-                max_val.values,
-            )
-
-        # Add dataset to record
-        rec_data = {"posetracks": ds}
-
         # Load annotations
-        # TODO: Add support for annotations
+        if (annotations := _load_annotations(seq_path)) is not None:
+            rec_data["annotations"] = annotations
 
         # Create record id
         rec_id = str(seq_path.relative_to(data_path))
 
+        # Add record to the list
         all_records.append((rec_id, rec_data))
 
     # TODO: It would be important to run a few sanity checks on the data. For example,
@@ -196,7 +236,9 @@ def load_records(
 
 def dump_records(data_path, records):
     """
-    Dump a list of records to a netCDF file.
+    Dump a list of records to a file.
+
+    Pose tracks are saved in a NetCDF format, and annotations are saved in CSV format.
 
     Parameters
     ----------
@@ -207,7 +249,7 @@ def dump_records(data_path, records):
         List of records to be saved. Each record is a tuple containing
 
     """
-    for key, data in tqdm(records, desc="Dumping to netCDF"):
+    for key, data in tqdm(records, desc="Dumping records to disk"):
         rec_path = data_path / key
         rec_path.mkdir(parents=True, exist_ok=True)
 
@@ -215,7 +257,8 @@ def dump_records(data_path, records):
         data["posetracks"].to_netcdf(rec_path / "tracking.nc", engine="scipy")
 
         # Save annotations
-        # TODO: Add support for annotations
+        if "annotations" in data:
+            data["annotations"].to_csv(rec_path / "annotations.csv", index=False)
 
 
 def fetch_dataset(dataset_id, download_path):
