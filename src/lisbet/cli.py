@@ -23,6 +23,7 @@ def setup_logging(verbose: int = 0, log_level: Optional[str] = None) -> None:
 
     logging.basicConfig(level=level)
     logging.getLogger("movement.io.load_poses").setLevel(logging.WARNING)
+    logging.getLogger("numba").setLevel(logging.WARNING)
 
 
 def add_verbosity_args(parser: argparse.ArgumentParser) -> None:

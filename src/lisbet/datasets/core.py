@@ -23,6 +23,7 @@ def load_records(
     test_ratio=None,
     dev_seed=None,
     test_seed=None,
+    rescale=True,
 ):
     """
     Load pose‑tracking records, (optionally) filter them, and (optionally) split
@@ -47,6 +48,8 @@ def load_records(
     dev_seed, test_seed : int, optional
         Random seeds forwarded to :pyfunc:`sklearn.model_selection.train_test_split`
         for reproducibility of the dev and test splits, respectively.
+    rescale : bool, optional
+        If ``True`` (default), rescale the coordinates in the (0, 1) range.
 
     Returns
     -------
@@ -114,13 +117,36 @@ def load_records(
             logging.debug("Skipping %s, no tracking data found", str(seq_path))
             continue
 
-        # Load annotations
-        # TODO: Add support for annotations
-
         # Merge all datasets into a single one
         # NOTE: There should be only one dataset per sequence, but we keep this for
         #       compatibility with multiple single-individual datasets
-        rec_data = {"posetracks": xr.concat(dss, dim="individuals")}
+        ds = xr.concat(dss, dim="individuals")
+
+        logging.debug("Individuals: %s", ds["individuals"].values)
+
+        # Rescale coordinates in the (0, 1) range, if requested
+        if rescale:
+            reduce_dims = ("time", "keypoints", "individuals")
+
+            pos = ds["position"]
+            min_val = pos.min(dim=reduce_dims, skipna=True)
+            max_val = pos.max(dim=reduce_dims, skipna=True)
+
+            ds = ds.assign(position=(pos - min_val) / (max_val - min_val))
+
+            logging.debug(
+                "Rescaled coordinates between min values %s and max values %s",
+                min_val.values,
+                max_val.values,
+            )
+
+        # Add dataset to record
+        rec_data = {"posetracks": ds}
+
+        # Load annotations
+        # TODO: Add support for annotations
+
+        # Create record id
         rec_id = str(seq_path.relative_to(data_path))
 
         all_records.append((rec_id, rec_data))
