@@ -47,8 +47,8 @@ def add_keypoints_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--data_format",
         type=str,
-        default="maDLC",
-        choices=["maDLC", "saDLC", "SLEAP", "h5archive"],
+        default="DLC",
+        choices=["DLC", "SLEAP", "movement"],
         help="Keypoints dataset format",
     )
     parser.add_argument(

@@ -88,7 +88,8 @@ class Trainer:
         self.train_rec, self.test_rec, self.dev_rec = self.load_records()
 
         # Determine data shape from first record
-        self.bp_dim = self.train_rec[self.task_ids[0]][0][1]["keypoints"].shape[1]
+        all_dim = self.train_rec[self.task_ids[0]][0][1]["posetracks"].sizes
+        self.bp_dim = all_dim["individuals"] * all_dim["keypoints"] * all_dim["space"]
 
         # Determine max sequence length
         # TODO: Find a better way to compute max_len or fix in the embedder exporter
@@ -225,11 +226,11 @@ class Trainer:
         # Assign records
         for task_id, dataidx_lst in task_data.items():
             for dataidx in dataidx_lst:
-                train_rec[task_id].extend(records[dataidx][0])
-                if (rec := records[dataidx][1]) is not None:
-                    test_rec[task_id].extend(rec)
-                if (rec := records[dataidx][2]) is not None:
-                    dev_rec[task_id].extend(rec)
+                train_rec[task_id].extend(records[dataidx]["main_records"])
+                if "test_records" in records[dataidx]:
+                    test_rec[task_id].extend(records[dataidx]["test_records"])
+                if "dev_records" in records[dataidx]:
+                    dev_rec[task_id].extend(records[dataidx]["dev_records"])
                 logging.info(
                     "Assigning records from dataset no. %d to task %s", dataidx, task_id
                 )
@@ -605,7 +606,7 @@ class Trainer:
         for epoch in range(self.config["epochs"]):
             history_entry = {"epoch": epoch}
             print(f"Epoch {epoch}")
-            logging.info(f"Current LR = {self.scheduler.get_last_lr()[0]}")
+            logging.info("Current LR = %f", self.scheduler.get_last_lr()[0])
 
             # Get dataloaders
             train_dataloaders = self.configure_dataloaders("train")

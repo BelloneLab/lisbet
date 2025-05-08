@@ -1,3 +1,3 @@
-from .core import load_records, fetch_dataset
+from .core import load_records, dump_records, fetch_dataset
 
 __doc__ = """Datasets input for LISBET."""

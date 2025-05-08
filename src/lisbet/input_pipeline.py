@@ -1,4 +1,4 @@
-"""Input data managment."""
+"""Input data management."""
 
 import logging
 from abc import ABC
@@ -25,7 +25,7 @@ class BaseDataset(Dataset, ABC):
         self.window_catalog = [
             idx
             for key, data in records
-            for idx in product([key], range(data["keypoints"].shape[0]))
+            for idx in product([key], range(data["posetracks"].sizes["time"]))
         ]
 
     def __len__(self):
@@ -42,8 +42,12 @@ class BaseDataset(Dataset, ABC):
         if window_size is None:
             window_size = self.window_size
 
-        x_data = self.records[curr_key]["keypoints"]
-        seq_len = x_data.shape[0]
+        x_data = self.records[curr_key]["posetracks"]
+
+        # Compute data dimensions
+        all_dim = x_data.sizes
+        seq_len = all_dim["time"]
+        bp_dim = all_dim["individuals"] * all_dim["keypoints"] * all_dim["space"]
 
         # Compute actual window size
         act_window_size = int(np.rint(self.fps_scaling * window_size))
@@ -65,10 +69,17 @@ class BaseDataset(Dataset, ABC):
         # logging.debug("Data bounds: (%d, %d, %d)", start_idx, curr_loc, stop_idx)
 
         # Pad data with zeros
-        past_pad = np.zeros((past_n, *x_data.shape[1:]))
-        future_pad = np.zeros((future_n, *x_data.shape[1:]))
+        past_pad = np.zeros((past_n, bp_dim))
+        future_pad = np.zeros((future_n, bp_dim))
         x_data = np.concatenate(
-            [past_pad, x_data[start_idx:stop_idx], future_pad], axis=0
+            [
+                past_pad,
+                x_data.isel(time=slice(start_idx, stop_idx))
+                .stack(features=("individuals", "keypoints", "space"))
+                .position,
+                future_pad,
+            ],
+            axis=0,
         )
 
         # assert (
@@ -598,4 +609,3 @@ class VideoSpeedPredictionDataset(BaseDataset):
             curr_data = self.transform(curr_data)
 
         return curr_data, label
-

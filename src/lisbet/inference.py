@@ -5,14 +5,12 @@ behavior annotation and embedding computation. It supports both single-sequence
 and dataset-wide inference.
 """
 
-import logging
 from pathlib import Path
-from typing import Callable, List, Optional, Tuple, Union
+from typing import Callable, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 import torch
-import yaml
 from torchvision import transforms
 from tqdm.auto import tqdm
 
@@ -146,25 +144,18 @@ def _process_dataset(
     model.to(device)
 
     # Load records
-    # NOTE: If the dataset has an explicit test set, the corresponding records will be
-    #       allocated to the 'test' group. Otherwise, all records will be in the 'train'
-    #       group. However, no training is performed here. Data are simply analyzed and
-    #       returned, regardless of the group.
     group_records = load_records(data_format, data_path, data_filter=data_filter)
-    seen_keys = set()
+
+    # Analyze records
+    # NOTE: We assume no overlapping record IDs. That is, records could be stored in a
+    #       single list with no ambiguity. To ensure that, we keep a set of observed
+    #       keys and check for duplicates. This safety check is not strictly necessary
+    #       and should be removed in the future or moved to the dataset loading.
     results = []
-
-    # Analyze every group (i.e. train, test and dev)
-    # NOTE: We assume no overlapping record IDs in the groups. That is, records could be
-    #       stored in a single list with no ambiguity. To ensure that, we keep a set of
-    #       observed keys and check for duplicates.
-    for group, records in zip(("train", "test", "dev"), group_records):
-        if records is None:
-            logging.debug("Empty %s group, skipping", group)
-            continue
-
+    seen_keys = set()
+    for group_name, group_data in group_records.items():
         for seq in tqdm(
-            records, desc=f"Analyzing {data_format} dataset, {group} group"
+            group_data, desc=f"Analyzing {data_format} dataset, {group_name} group"
         ):
             # Extract sequence ID
             key = seq[0]

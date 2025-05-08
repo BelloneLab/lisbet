@@ -4,10 +4,12 @@ import logging
 from pathlib import Path
 
 import pooch
+import xarray as xr
 from huggingface_hub import snapshot_download
 from sklearn.model_selection import train_test_split
+from tqdm.auto import tqdm
 
-from . import calms21, dirtree, h5archive
+from . import calms21
 
 
 def load_records(
@@ -20,93 +22,163 @@ def load_records(
     test_seed=None,
 ):
     """
-    Load records from a dataset and split them into train, test, and optionally dev
-    sets.
+    Load pose‑tracking records, (optionally) filter them, and (optionally) split
+    them into *main*, *test*, and *dev* subsets.
 
     Parameters
     ----------
-    data_format : str
-        Format of the dataset to load. Currently supported datasets are "CalMS21_Task1",
-        "CalMS21_Unlabeled", and "GenericDLC".
-    data_path : str
-        Path to the directory containing the dataset records.
+    data_format : {'movement', 'DLC', 'SLEAP'}
+        Dataset format to load. Only ``'movement'`` is implemented at present.
+    data_path : str or Path
+        Root directory containing the sequence sub‑directories.
+    data_filter : str, optional
+        Comma‑separated substrings; a record is kept if **any** substring
+        occurs in its relative path.  By default, all records are kept.
     dev_ratio : float, optional
-        Fraction of the training set to use as the dev set. If None (default), no dev
-        set is created.
+        Fraction of the **post‑test** remainder to devote to the dev set.
+        If ``None`` (default) no dev split is performed.
     test_ratio : float, optional
-        Fraction of the dataset to use as the test set. If None (default), no test is
-        created unless it already exists as an explicit test split in the dataset (i.e
-        CalMS21_Task1 dataset).
-    dev_seed : int, optional
-        Seed for the random number generator used to split the training set into train
-        and dev sets.
-    test_seed : int, optional
-        Seed for the random number generator used to split the dataset into train and
-        test sets.
+        Fraction of *all* records to devote to the test set.  If ``None``
+        (default) no test split is performed unless the dataset already
+        contains an explicit test split (not yet supported here).
+    dev_seed, test_seed : int, optional
+        Random seeds forwarded to :pyfunc:`sklearn.model_selection.train_test_split`
+        for reproducibility of the dev and test splits, respectively.
 
     Returns
     -------
-    list : Training set records.
-    list : Test set records.
-    list : Dev set records.
+    dict[str, list[tuple[str, dict[str, xarray.Dataset]]]]
+        A mapping whose keys are
+
+        * ``'main_records'`` – always present
+        * ``'test_records'`` – present only if *test_ratio* was supplied
+        * ``'dev_records'`` – present only if *dev_ratio* was supplied
+
+        Each value is a list of ``(record_id, data_dict)`` pairs; every
+        ``data_dict`` currently contains a single entry ``'posetracks'`` holding
+        an *xarray* dataset of shape `(individuals, frames, points, coords)`.
 
     Raises
     ------
     ValueError
-        If the dataset name is unknown or unsupported.
+        If *data_format* is unsupported.
+    NotImplementedError
+        For recognized but unimplemented formats.
+
+    Notes
+    -----
+    When *dev_ratio* is supplied it applies **after** any test split; i.e.
+    the dev set is carved out of what remains.
+
+    Examples
+    --------
+    >>> groups = load_records(
+    ...     data_format="movement",
+    ...     data_path="~/datasets/mice",
+    ...     test_ratio=0.2,
+    ...     dev_ratio=0.1,
+    ...     test_seed=0,
+    ...     dev_seed=0,
+    ... )
+    >>> groups.keys()
+    dict_keys(['main_records', 'test_records', 'dev_records'])
 
     """
-    if data_format in ("maDLC", "saDLC", "SLEAP"):
-        train_rec, test_rec = dirtree.load(
-            data_path, data_format, seed=test_seed, test_ratio=test_ratio,
-        )
+    # Find all potential record paths
+    seq_paths = [f for f in Path(data_path).rglob("*") if f.is_dir()]
 
-    elif data_format == "h5archive":
-        train_rec, test_rec = h5archive.load(
-            data_path, seed=test_seed, test_ratio=test_ratio
-        )
+    # Load and preprocess raw data
+    all_records = []
+    for seq_path in tqdm(seq_paths, desc="Loading dataset"):
+        if data_format == "DLC":
+            raise NotImplementedError("DLC format not yet supported")
+        elif data_format == "SLEAP":
+            raise NotImplementedError("SLEAP format not yet supported")
+        elif data_format == "movement":
+            tracking_paths = list(seq_path.glob("*.nc"))
+            dss = [
+                xr.open_dataset(tracking_path, engine="scipy")
+                for tracking_path in tracking_paths
+            ]
+        else:
+            raise ValueError(f"Unknown data format {data_format}")
 
-    else:
-        raise ValueError(f"Unknown dataset {data_format}")
+        if len(dss) == 0:
+            logging.debug("Skipping %s, no tracking data found", str(seq_path))
+            continue
+
+        # Load annotations
+        # TODO: Add support for annotations
+
+        # Merge all datasets into a single one
+        # NOTE: There should be only one dataset per sequence, but we keep this for
+        #       compatibility with multiple single-individual datasets
+        rec_data = {"posetracks": xr.concat(dss, dim="individuals")}
+        rec_id = str(seq_path.relative_to(data_path))
+
+        all_records.append((rec_id, rec_data))
 
     # Filter data, if requested
     if data_filter is not None:
         filters = data_filter.split(",")
 
-        if train_rec is not None:
-            train_rec = [
-                rec for rec in train_rec if any(flt in rec[0] for flt in filters)
-            ]
-            logging.info("Filtered training set size =  %d videos", len(train_rec))
-            logging.debug([key for key, val in train_rec])
+        all_records = [
+            rec for rec in all_records if any(flt in rec[0] for flt in filters)
+        ]
 
-        if test_rec is not None:
-            test_rec = [
-                rec for rec in test_rec if any(flt in rec[0] for flt in filters)
-            ]
-            logging.info("Filtered test set size =  %d videos", len(test_rec))
-            logging.debug([key for key, val in test_rec])
+        logging.info("Filtered dataset size =  %d videos", len(all_records))
+        logging.debug([key for key, val in all_records])
 
-    # Make devset if requested
+    # Split dataset into train/test/dev sets
+    groups = {}
+
+    # Optional test‑set split
+    if test_ratio is not None:
+        all_records, groups["test_records"] = train_test_split(
+            all_records, test_size=test_ratio, random_state=test_seed
+        )
+
+    # Optional dev‑set split (performed on what’s left after the test split)
+    # NOTE: We assume that dev_ratio refers to the dataset size after the test split.
     if dev_ratio is not None:
-        train_rec, dev_rec = train_test_split(
-            train_rec, test_size=dev_ratio, random_state=dev_seed
+        all_records, groups["dev_records"] = train_test_split(
+            all_records, test_size=dev_ratio, random_state=dev_seed
         )
 
-        logging.info(
-            "Holding out %f%% of the training set for HP tuning.", dev_ratio * 100
-        )
-        logging.debug(
-            "Dev set size = %d videos, new Train set size = %d videos",
-            len(dev_rec),
-            len(train_rec),
-        )
-        logging.debug([key for key, val in dev_rec])
-        logging.debug([key for key, val in train_rec])
-    else:
-        dev_rec = None
+    # Remaining records become the “main” set
+    # NOTE: We call this "main_records", rather than "train_records" to avoid
+    #       confusion in inference mode. That is, "main_records" refers to all data #       during inference or an unsplit dataset during training.
+    groups["main_records"] = all_records
 
-    return train_rec, test_rec, dev_rec
+    for group_id, group_data in groups.items():
+        logging.info("Placing %d sequences in the %s group", len(group_data), group_id)
+        logging.debug([key for key, val in group_data])
+
+    return groups
+
+
+def dump_records(data_path, records):
+    """
+    Dump a list of records to a netCDF file.
+
+    Parameters
+    ----------
+    data_path : str or Path
+        Directory where the records will be saved.
+
+    records : list of tuples
+        List of records to be saved. Each record is a tuple containing
+
+    """
+    for key, data in tqdm(records, desc="Dumping to netCDF"):
+        rec_path = data_path / key
+        rec_path.mkdir(parents=True, exist_ok=True)
+
+        # Save posetracks
+        data["posetracks"].to_netcdf(rec_path / "tracking.nc", engine="scipy")
+
+        # Save annotations
+        # TODO: Add support for annotations
 
 
 def fetch_dataset(dataset_id, download_path):
@@ -166,9 +238,8 @@ def fetch_dataset(dataset_id, download_path):
 
         # Store data in LISBET-compatible format
         data_path = Path(download_path) / "CalMS21" / "task1_classic_classification"
-        data_path.mkdir(parents=True, exist_ok=True)
-        h5archive.dump(data_path / "train_records.h5", train_records)
-        h5archive.dump(data_path / "test_records.h5", test_records)
+        dump_records(data_path, train_records)
+        dump_records(data_path, test_records)
 
     elif dataset_id == "CalMS21_Unlabeled":
         # Get data from Caltech repo
@@ -189,12 +260,11 @@ def fetch_dataset(dataset_id, download_path):
 
         # Preprocess keypoints
         rawdata_path = Path(fnames[0]).parents[1]
-        all_records, _ = calms21.load_unlabeled(rawdata_path)
+        all_records = calms21.load_unlabeled(rawdata_path)
 
         # Store data in LISBET-compatible format
         data_path = Path(download_path) / "CalMS21" / "unlabeled_videos"
-        data_path.mkdir(parents=True, exist_ok=True)
-        h5archive.dump(data_path / "all_records.h5", all_records)
+        dump_records(data_path, all_records)
 
     elif dataset_id == "SampleData":
         # Fetch data from HuggingFace repo
