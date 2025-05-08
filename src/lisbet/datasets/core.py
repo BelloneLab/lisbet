@@ -1,11 +1,14 @@
 """Core dataset functionalities."""
 
 import logging
+import re
+from functools import partial
 from pathlib import Path
 
 import pooch
 import xarray as xr
 from huggingface_hub import snapshot_download
+from movement.io import load_poses
 from sklearn.model_selection import train_test_split
 from tqdm.auto import tqdm
 
@@ -84,22 +87,26 @@ def load_records(
     dict_keys(['main_records', 'test_records', 'dev_records'])
 
     """
+    # Valid filenames and their corresponding loading functions
+    # TODO: Test re matching for all supported formats.
+    data_readers = {
+        "DLC": (r"(?i)(DLC.*?shuffle\d+|tracking).*\.csv$", load_poses.from_dlc_file),
+        "SLEAP": (r"(?i)SLEAP.*\.h5$", load_poses.from_sleap_file),
+        "movement": (r"(?i)tracking.*\.nc$", partial(xr.open_dataset, engine="scipy")),
+    }
+
     # Find all potential record paths
     seq_paths = [f for f in Path(data_path).rglob("*") if f.is_dir()]
 
     # Load and preprocess raw data
     all_records = []
     for seq_path in tqdm(seq_paths, desc="Loading dataset"):
-        if data_format == "DLC":
-            raise NotImplementedError("DLC format not yet supported")
-        elif data_format == "SLEAP":
-            raise NotImplementedError("SLEAP format not yet supported")
-        elif data_format == "movement":
-            tracking_paths = list(seq_path.glob("*.nc"))
-            dss = [
-                xr.open_dataset(tracking_path, engine="scipy")
-                for tracking_path in tracking_paths
-            ]
+        if data_format in data_readers:
+            # Find all files matching the regex and load them
+            pattern, loader = data_readers[data_format]
+            rx = re.compile(pattern)
+            dss = [loader(pth) for pth in seq_path.iterdir() if rx.search(pth.name)]
+
         else:
             raise ValueError(f"Unknown data format {data_format}")
 
@@ -117,6 +124,10 @@ def load_records(
         rec_id = str(seq_path.relative_to(data_path))
 
         all_records.append((rec_id, rec_data))
+
+    # TODO: It would be important to run a few sanity checks on the data. For example,
+    #       all record ids should be unique, and the data should be consistent across
+    #       recordings (i.e., same individuals/space/keypoints in the same order).
 
     # Filter data, if requested
     if data_filter is not None:
