@@ -46,6 +46,13 @@ def _load_posetracks(seq_path, data_format, rescale):
 
     logging.debug("Individuals: %s", ds["individuals"].values)
 
+    # Drop confidence varible, if present
+    # NOTE: This variable is currently not needed in LISBET, but it may become useful in
+    #       the future, especially if we decide to provide a measure of tracking
+    #       quality to the model.
+    if "confidence" in ds:
+        ds = ds.drop_vars("confidence")
+
     # Rescale coordinates in the (0, 1) range, if requested
     if rescale:
         reduce_dims = ("time", "keypoints", "individuals")
@@ -62,6 +69,14 @@ def _load_posetracks(seq_path, data_format, rescale):
             max_val.values,
         )
 
+    # Stack variables into a single dimension
+    # NOTE: This is done already here for performance reasons, as stacking in the
+    #       `input_pipeline._select_and_pad` is very inefficient.
+    ds = ds.stack(features=("individuals", "keypoints", "space"))
+
+    # NOTE: We keep the whole Dataset object, rather than selecting the "position"
+    #       variable, to allow for future extensions (e.g., adding more variables) and
+    #       to keep the FPS information.
     return ds
 
 

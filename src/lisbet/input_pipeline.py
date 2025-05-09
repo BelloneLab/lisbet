@@ -43,11 +43,7 @@ class BaseDataset(Dataset, ABC):
             window_size = self.window_size
 
         x_data = self.records[curr_key]["posetracks"]
-
-        # Compute data dimensions
-        all_dim = x_data.sizes
-        seq_len = all_dim["time"]
-        bp_dim = all_dim["individuals"] * all_dim["keypoints"] * all_dim["space"]
+        seq_len = x_data.sizes["time"]
 
         # Compute actual window size
         act_window_size = int(np.rint(self.fps_scaling * window_size))
@@ -69,14 +65,12 @@ class BaseDataset(Dataset, ABC):
         # logging.debug("Data bounds: (%d, %d, %d)", start_idx, curr_loc, stop_idx)
 
         # Pad data with zeros
-        past_pad = np.zeros((past_n, bp_dim))
-        future_pad = np.zeros((future_n, bp_dim))
+        past_pad = np.zeros((past_n, x_data.sizes["features"]))
+        future_pad = np.zeros((future_n, x_data.sizes["features"]))
         x_data = np.concatenate(
             [
                 past_pad,
-                x_data.isel(time=slice(start_idx, stop_idx))
-                .stack(features=("individuals", "keypoints", "space"))
-                .position,
+                x_data["position"].isel(time=slice(start_idx, stop_idx)),
                 future_pad,
             ],
             axis=0,
