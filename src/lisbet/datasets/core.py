@@ -17,8 +17,33 @@ from tqdm.auto import tqdm
 from . import calms21
 
 
-def _load_posetracks(seq_path, data_format, data_scale):
-    """Load pose-tracking data from a file."""
+def _load_posetracks(seq_path, data_format, data_scale, keypoints_subset):
+    """
+    Load pose-tracking data from a file, optionally selecting a subset of individuals,
+    coordinates, and keypoints.
+
+    Parameters
+    ----------
+    seq_path : Path
+        Path to the sequence directory.
+    data_format : str
+        Format of the dataset ('DLC', 'SLEAP', 'movement').
+    data_scale : str or None
+        Scaling string or None for auto-scaling.
+    keypoints_subset : str or None
+        Optional subset string in the format 'INDIVS;COORDS;PARTS', where each field is
+        a comma-separated list or '*' for all. If None, all data is loaded.
+
+    Returns
+    -------
+    xarray.Dataset
+        The loaded (and possibly subsetted) dataset.
+
+    Raises
+    ------
+    ValueError
+        If the subset string is not in the correct format or selection fails.
+    """
     # Valid filenames and their corresponding loading functions
     # TODO: Test re matching for all supported formats.
     data_readers = {
@@ -47,12 +72,33 @@ def _load_posetracks(seq_path, data_format, data_scale):
 
     logging.debug("Individuals: %s", ds["individuals"].values)
 
-    # Drop confidence varible, if present
+    # Drop confidence variable, if present
     # NOTE: This variable is currently not needed in LISBET, but it may become useful in
     #       the future, especially if we decide to provide a measure of tracking
     #       quality to the model.
     if "confidence" in ds:
         ds = ds.drop_vars("confidence")
+
+    # Apply keypoints subset selection if requested
+    if keypoints_subset is not None:
+        # Parse the subset string: 'INDIVS;COORDS;PARTS'
+        fields = keypoints_subset.split(";")
+        if len(fields) != 3:
+            raise ValueError(
+                "keypoints_subset must have format 'INDIVS;COORDS;PARTS', "
+                "e.g. 'ind1,ind2;x,y;nose,neck,tail'"
+            )
+        # Use a compact dict comprehension for selection
+        sel_keys = ["individuals", "space", "keypoints"]
+        sel = {
+            key: [item.strip() for item in field.split(",") if item.strip()]
+            for key, field in zip(sel_keys, fields)
+            if field.strip() and field.strip() != "*"
+        }
+        if sel:
+            ds = ds.sel(**sel)
+
+            logging.debug("Subset selection: %s", sel)
 
     # Rescale coordinates in the (0, 1) range, if requested
     if data_scale is None:
@@ -141,15 +187,16 @@ def load_records(
     test_ratio=None,
     dev_seed=None,
     test_seed=None,
+    keypoints_subset=None,
 ):
     """
-    Load pose‑tracking records, (optionally) filter them, and (optionally) split
-    them into *main*, *test*, and *dev* subsets.
+    Load pose‑tracking records, (optionally) filter them, (optionally) select a subset
+    of keypoints, and (optionally) split them into *main*, *test*, and *dev* subsets.
 
     Parameters
     ----------
     data_format : {'movement', 'DLC', 'SLEAP'}
-        Dataset format to load. Only ``'movement'`` is implemented at present.
+        Dataset format to load.
     data_path : str or Path
         Root directory containing the sequence sub‑directories.
     data_scale : str, optional
@@ -170,6 +217,9 @@ def load_records(
     dev_seed, test_seed : int, optional
         Random seeds forwarded to :pyfunc:`sklearn.model_selection.train_test_split`
         for reproducibility of the dev and test splits, respectively.
+    keypoints_subset : str, optional
+        Optional subset string in the format 'INDIVS;COORDS;PARTS', where each field is
+        a comma-separated list or '*' for all. If None, all data is loaded.
 
     Returns
     -------
@@ -187,7 +237,7 @@ def load_records(
     Raises
     ------
     ValueError
-        If *data_format* is unsupported.
+        If *data_format* is unsupported or keypoints_subset is invalid.
     NotImplementedError
         For recognized but unimplemented formats.
 
@@ -205,6 +255,7 @@ def load_records(
     ...     dev_ratio=0.1,
     ...     test_seed=0,
     ...     dev_seed=0,
+    ...     keypoints_subset="mouse1,mouse2;x,y;nose,tail"
     ... )
     >>> groups.keys()
     dict_keys(['main_records', 'test_records', 'dev_records'])
@@ -217,7 +268,8 @@ def load_records(
     all_records = []
     for seq_path in tqdm(seq_paths, desc="Loading dataset"):
         # Load pose-tracking data
-        if (ds := _load_posetracks(seq_path, data_format, data_scale)) is not None:
+        ds = _load_posetracks(seq_path, data_format, data_scale, keypoints_subset)
+        if ds is not None:
             rec_data = {"posetracks": ds}
         else:
             logging.debug("Skipping %s, no tracking data found", str(seq_path))

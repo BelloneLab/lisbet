@@ -215,6 +215,7 @@ class Trainer:
                 test_ratio=self.config["test_ratio"],
                 dev_seed=self.run_seeds["dev_split"],
                 test_seed=self.run_seeds["test_split"],
+                keypoints_subset=self.config["keypoints_subset"],
             )
             for dataset, datapath in datasources
         ]
@@ -658,6 +659,7 @@ def train(
     data_path: str = "datasets/CalMS21",
     data_scale: Optional[str] = None,
     data_filter: Optional[str] = None,
+    keypoints_subset: Optional[str] = None,
     window_size: int = 200,
     window_offset: int = 0,
     fps_scaling: float = 1.0,
@@ -690,9 +692,16 @@ def train(
     mixed_precision: bool = False,
     compile_model: bool = False,
 ) -> None:
-    """Train a LISBET model.
+    """
+    Train a LISBET model.
 
     All parameters match the CLI arguments exactly.
+
+    Parameters
+    ----------
+    keypoints_subset : str, optional
+        Optional subset string in the format 'INDIVS;COORDS;PARTS', where each field is
+        a comma-separated list or '*' for all. If None, all data is loaded.
     """
     # TODO: Drop the Trainer, it lost most of its usefulness after refactoring the CLI
     trainer = Trainer(locals())

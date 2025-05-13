@@ -82,6 +82,32 @@ def add_keypoints_args(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
+        "--keypoints_subset",
+        type=str,
+        metavar="INDIVS;COORDS;PARTS",
+        help=textwrap.dedent(
+            """\
+            Optional subset of keypoints to load (quote or escape the spec).
+
+              Example:
+                'individual1,individual2;x,y;nose,neck,tail'
+
+              Format:  INDIVS;COORDS;PARTS
+                INDIVS  = comma‑separated individuals  | *
+                COORDS  = comma‑separated coord axes   | *
+                PARTS   = comma‑separated body parts   | *
+
+              Wildcards:
+                *        include all items at that level
+
+              If omitted, the entire dataset is loaded.
+
+              NOTE: ';' and '*' are shell meta-characters, use single quotes
+              on Unix‑like shells, double quotes on Windows, or escape them.
+            """
+        ),
+    )
+    parser.add_argument(
         "--window_size",
         default=200,
         type=int,

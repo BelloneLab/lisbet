@@ -94,9 +94,11 @@ def _process_dataset(
     fps_scaling: float,
     batch_size: int,
     data_filter: Optional[str] = None,
+    keypoints_subset: Optional[str] = None,
     device: Optional[torch.device] = None,
 ) -> List[Tuple[str, np.ndarray]]:
-    """Process an entire dataset with the given model and forward function.
+    """
+    Process an entire dataset with the given model and forward function.
 
     Parameters
     ----------
@@ -108,6 +110,8 @@ def _process_dataset(
         Format of the dataset to analyze.
     data_path : str
         Path to the directory containing the dataset files.
+    data_scale : str or None
+        Scaling string or None for auto-scaling.
     window_size : int
         Size of the sliding window.
     window_offset : int
@@ -118,6 +122,9 @@ def _process_dataset(
         Batch size for inference.
     data_filter : str, optional
         Filter to apply when loading records.
+    keypoints_subset : str, optional
+        Optional subset string in the format 'INDIVS;COORDS;PARTS', where each field is
+        a comma-separated list or '*' for all. If None, all data is loaded.
     device : str, optional
         Device to use. Defaults to CUDA if available.
 
@@ -146,7 +153,11 @@ def _process_dataset(
 
     # Load records
     group_records = load_records(
-        data_format, data_path, data_filter=data_filter, data_scale=data_scale
+        data_format,
+        data_path,
+        data_filter=data_filter,
+        data_scale=data_scale,
+        keypoints_subset=keypoints_subset,
     )
 
     # Analyze records
@@ -235,8 +246,10 @@ def annotate_behavior(
     fps_scaling: float = 1.0,
     batch_size: int = 128,
     output_path: Optional[str] = None,
+    keypoints_subset: Optional[str] = None,
 ) -> List[Tuple[str, np.ndarray]]:
-    """Run LISBET behavior classification for every record in a dataset.
+    """
+    Run LISBET behavior classification for every record in a dataset.
 
     This function loads a classification model and processes an entire dataset,
     producing behavior annotations for each sequence.
@@ -251,6 +264,8 @@ def annotate_behavior(
         Format of the dataset to analyze.
     data_path : str
         Path to the directory containing the dataset files.
+    data_scale : str or None
+        Scaling string or None for auto-scaling.
     data_filter : str, optional
         Filter to apply when loading records.
     window_size : int, default=200
@@ -263,6 +278,9 @@ def annotate_behavior(
         Batch size for inference.
     output_path : str or None, optional
         If given, predictions will be saved as CSV files in this directory.
+    keypoints_subset : str, optional
+        Optional subset string in the format 'INDIVS;COORDS;PARTS', where each field is
+        a comma-separated list or '*' for all. If None, all data is loaded.
 
     Returns
     -------
@@ -289,6 +307,7 @@ def annotate_behavior(
         fps_scaling=fps_scaling,
         batch_size=batch_size,
         data_filter=data_filter,
+        keypoints_subset=keypoints_subset,
     )
 
     # Store results on file, if requested
@@ -315,8 +334,10 @@ def compute_embeddings(
     fps_scaling: float = 1.0,
     batch_size: int = 128,
     output_path: Optional[str] = None,
+    keypoints_subset: Optional[str] = None,
 ) -> List[Tuple[str, np.ndarray]]:
-    """Compute LISBET embeddings for every record in a dataset.
+    """
+    Compute LISBET embeddings for every record in a dataset.
 
     This function loads an embedding model and processes an entire dataset,
     computing embeddings for each sequence.
@@ -331,6 +352,8 @@ def compute_embeddings(
         Format of the dataset to analyze.
     data_path : str
         Path to the directory containing the dataset files.
+    data_scale : str or None
+        Scaling string or None for auto-scaling.
     data_filter : str, optional
         Filter to apply when loading records.
     window_size : int, default=200
@@ -343,6 +366,9 @@ def compute_embeddings(
         Batch size for inference.
     output_path : str or None, optional
         If given, embeddings will be saved as CSV files in this directory.
+    keypoints_subset : str, optional
+        Optional subset string in the format 'INDIVS;COORDS;PARTS', where each field is
+        a comma-separated list or '*' for all. If None, all data is loaded.
 
     Returns
     -------
@@ -369,6 +395,7 @@ def compute_embeddings(
         fps_scaling=fps_scaling,
         batch_size=batch_size,
         data_filter=data_filter,
+        keypoints_subset=keypoints_subset,
     )
 
     # Store results on file, if requested

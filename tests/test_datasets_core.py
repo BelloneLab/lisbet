@@ -209,3 +209,24 @@ def test_data_filter(dummy_dataset):
     )
     assert len(groups["main_records"]) == 1
     assert groups["main_records"][0][0] == "exp0"
+
+
+def test_keypoints_subset_selection(dummy_dataset):
+    """
+    Test that keypoints_subset argument selects only the requested individuals, coords, and keypoints.
+
+    Parameters
+    ----------
+    dummy_dataset : Path
+        Path to the dummy dataset fixture.
+    """
+    # Only select 'mouse', 'x', and 'nose'
+    groups = load_records(
+        data_format="movement",
+        data_path=dummy_dataset,
+        keypoints_subset="mouse;x;nose"
+    )
+    ds = groups["main_records"][0][1]["posetracks"]
+    assert list(ds["individuals"].values) == ["mouse"]
+    assert list(ds["space"].values) == ["x"]
+    assert list(ds["keypoints"].values) == ["nose"]
