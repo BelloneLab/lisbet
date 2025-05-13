@@ -64,6 +64,10 @@ def _load_posetracks(seq_path, data_format, data_scale):
 
         ds = ds.assign(position=(pos - min_val) / (max_val - min_val))
 
+        # Validate scaling
+        assert ds["position"].min() >= 0.0, "Coordinates should be in the [0, 1] range"
+        assert ds["position"].max() <= 1.0, "Coordinates should be in the [0, 1] range"
+
         logging.debug(
             "Rescaled coordinates between min values %s and max values %s",
             min_val.values,
@@ -76,9 +80,18 @@ def _load_posetracks(seq_path, data_format, data_scale):
 
         logging.debug("Rescaled coordinates by factor %s", factor)
 
-    # Validate scaling
-    assert ds["position"].min() >= 0.0, "Coordinates should be in the [0, 1] range"
-    assert ds["position"].max() <= 1.0, "Coordinates should be in the [0, 1] range"
+        # After explicit scaling, enforce [0, 1] range and raise if not satisfied
+        min_val = ds["position"].min()
+        max_val = ds["position"].max()
+        if min_val < 0.0 or max_val > 1.0:
+            raise ValueError(
+                f"After applying data_scale={data_scale}, coordinates are not in "
+                f"[0, 1] (min={min_val}, max={max_val}). "
+                "Explicit scaling assumes that the video has already been cropped to "
+                "the region of interest during pose estimation, its origin is at "
+                "(0,0), and the maximum dimensions match the scale provided. If this "
+                "is not the case, use auto mode (data_scale=None) for normalization."
+            )
 
     # Stack variables into a single dimension
     # NOTE: This is done already here for performance reasons, as stacking in the
