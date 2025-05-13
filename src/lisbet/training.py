@@ -209,11 +209,12 @@ class Trainer:
             load_records(
                 dataset,
                 datapath,
-                self.config["data_filter"],
-                self.config["dev_ratio"],
-                self.config["test_ratio"],
-                self.run_seeds["dev_split"],
-                self.run_seeds["test_split"],
+                data_scale=self.config["data_scale"],
+                data_filter=self.config["data_filter"],
+                dev_ratio=self.config["dev_ratio"],
+                test_ratio=self.config["test_ratio"],
+                dev_seed=self.run_seeds["dev_split"],
+                test_seed=self.run_seeds["test_split"],
             )
             for dataset, datapath in datasources
         ]
@@ -655,6 +656,7 @@ def train(
     # Basic params
     data_format: str = "CalMS21_Task1",
     data_path: str = "datasets/CalMS21",
+    data_scale: Optional[str] = None,
     data_filter: Optional[str] = None,
     window_size: int = 200,
     window_offset: int = 0,

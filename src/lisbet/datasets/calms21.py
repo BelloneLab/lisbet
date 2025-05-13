@@ -10,7 +10,7 @@ from movement.io import load_poses
 from tqdm.auto import trange
 
 
-def _preprocess_calms21(raw_data, rescale):
+def _preprocess_calms21(raw_data):
     """Preprocess body pose in the CalMS21 records."""
     records = []
     for rec_id, val in raw_data.items():
@@ -18,11 +18,6 @@ def _preprocess_calms21(raw_data, rescale):
 
         # Invert coordinates and body parts dims
         posetracks = np.array(val["keypoints"]).transpose((0, 2, 3, 1))
-
-        # Rescale in (0, 1) range if requested
-        if rescale:
-            posetracks[:, 0] = posetracks[:, 0] / 1024
-            posetracks[:, 1] = posetracks[:, 1] / 570
 
         scores = np.array(val["scores"]).transpose((0, 2, 1))
 
@@ -50,7 +45,7 @@ def _preprocess_calms21(raw_data, rescale):
         # NOTE: For the moment we keep annotations as a separate field, but this could
         #       be added to the posetracks data structure in the future.
         if "annotations" in val:
-            annotator_id = f"annotator{val["metadata"]["annotator-id"]}"
+            annotator_id = f"annotator{val['metadata']['annotator-id']}"
 
             # Get annotation map
             class_idx_map = val["metadata"]["vocab"]
@@ -78,21 +73,18 @@ def _preprocess_calms21(raw_data, rescale):
     return records
 
 
-def load_unlabeled(datapath, rescale=True):
+def load_unlabeled(datapath):
     """
     Load body pose records from the unlabeled videos in the CalMS21 dataset.
 
     Records are organized in a list of tuples (video_id, data), where data is a
     dictionary {"posetracks": xr.Dataset, "annotations": np.array}. This format has
-    been chosen to simplify splitting the records into sets. Optionally, the keypoints
-    are scaled in the (0, 1) range.
+    been chosen to simplify splitting the records into sets.
 
     Parameters
     ----------
     datapath : string or pathlib.Path
         Root directory of the CalMS21 dataset.
-    rescale : bool, optional
-        Rescale body pose data in the (0, 1) range.
 
     Returns
     -------
@@ -118,18 +110,18 @@ def load_unlabeled(datapath, rescale=True):
 
         # Preprocess data
         # NOTE: We use a list to simplify splitting into train/dev/test sets
-        records.extend(_preprocess_calms21(raw_data["unlabeled_videos"], rescale))
+        records.extend(_preprocess_calms21(raw_data["unlabeled_videos"]))
 
     return records
 
 
-def load_taskx(datapath, taskid, rescale=True):
+def load_taskx(datapath, taskid):
     """Load body pose records from the task 1/2/3 videos in the CalMS21 dataset.
 
-    Data is split into training and testing is prescribed in the dataset. Records in are organized in a list of tuples (video_id, data), where data is a
-    dictionary {"posetracks": xr.Dataset, "annotations": np.array}. This format has
-    been chosen to simplify splitting the records into sets. Optionally, the keypoints
-    are scaled in the (0, 1) range.
+    Data is split into training and testing is prescribed in the dataset. Records in
+    are organized in a list of tuples (video_id, data), where data is a dictionary
+    {"posetracks": xr.Dataset, "annotations": np.array}. This format has been chosen to
+    simplify splitting the records into sets.
 
     Parameters
     ----------
@@ -137,8 +129,6 @@ def load_taskx(datapath, taskid, rescale=True):
         Root directory of the CalMS21 dataset.
     taskid : int
         Name of the dataset to load. Valid options are 1, 2 and 3.
-    rescale : bool, optional
-        Rescale body pose data in the (0, 1) range.
 
     Returns
     -------
@@ -180,7 +170,7 @@ def load_taskx(datapath, taskid, rescale=True):
         records[key] = [
             rec
             for cond_data in raw_data.values()
-            for rec in _preprocess_calms21(cond_data, rescale)
+            for rec in _preprocess_calms21(cond_data)
         ]
 
     logging.info("Training set size =  %d videos", len(records["train"]))

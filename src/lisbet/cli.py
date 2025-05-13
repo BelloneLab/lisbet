@@ -4,9 +4,21 @@ import argparse
 import importlib
 import inspect
 import logging
+import textwrap
 from importlib.metadata import version as get_version
 from pathlib import Path
 from typing import Any, Dict, Optional
+
+
+class RawDefaultsHelpFormatter(
+    argparse.ArgumentDefaultsHelpFormatter, argparse.RawTextHelpFormatter
+):
+    """
+    Show default values **and** keep all newline / indent formatting
+    exactly as written in help strings.
+    """
+
+    pass
 
 
 def setup_logging(verbose: int = 0, log_level: Optional[str] = None) -> None:
@@ -53,6 +65,23 @@ def add_keypoints_args(parser: argparse.ArgumentParser) -> None:
         help="Keypoints dataset format",
     )
     parser.add_argument(
+        "--data_scale",
+        type=str,
+        help=textwrap.dedent(
+            """\
+            Spatial dimensions of the dataset.
+
+            - For 2D data:  WIDTHxHEIGHT         (e.g., 1920x1080)
+            - For 3D data:  WIDTHxHEIGHTxDEPTH   (e.g., 1920x1080x480)
+
+            When specified, input coordinates (x, y, z) are interpreted in data units
+            and normalized to the [0, 1] range by dividing by the given scale.
+
+            If omitted, the scale is inferred from the dataset.
+            """
+        ),
+    )
+    parser.add_argument(
         "--window_size",
         default=200,
         type=int,
@@ -75,8 +104,12 @@ def add_data_io_args(parser: argparse.ArgumentParser, data_help: str) -> None:
     parser.add_argument(
         "--data_filter",
         type=str,
-        help="""Comma-separated list of sub-keys to keep in the dataset
-        For example, 'mouse001,mouse002' or 'approach'""",
+        help=textwrap.dedent(
+            """\
+            Comma-separated list of sub-keys to keep in the dataset
+            For example, 'mouse001,mouse002' or 'approach'
+            """
+        ),
     )
     parser.add_argument(
         "--output_path", type=Path, default=Path("."), help="Output path"
@@ -331,7 +364,7 @@ def configure_fetch_dataset_parser(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--download_path",
-        default=Path("datasets"),
+        default=Path("."),
         type=Path,
         help="Dataset destination path on the local machine",
     )
@@ -445,7 +478,7 @@ def main() -> None:
             cmd_name,
             description=cmd_config["description"],
             add_help=False,
-            formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+            formatter_class=RawDefaultsHelpFormatter,
         )
         cmd_parser.add_argument(
             "-h",

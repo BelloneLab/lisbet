@@ -10,13 +10,14 @@ import pooch
 import xarray as xr
 from huggingface_hub import snapshot_download
 from movement.io import load_poses
+from movement.transforms import scale
 from sklearn.model_selection import train_test_split
 from tqdm.auto import tqdm
 
 from . import calms21
 
 
-def _load_posetracks(seq_path, data_format, rescale):
+def _load_posetracks(seq_path, data_format, data_scale):
     """Load pose-tracking data from a file."""
     # Valid filenames and their corresponding loading functions
     # TODO: Test re matching for all supported formats.
@@ -54,7 +55,7 @@ def _load_posetracks(seq_path, data_format, rescale):
         ds = ds.drop_vars("confidence")
 
     # Rescale coordinates in the (0, 1) range, if requested
-    if rescale:
+    if data_scale is None:
         reduce_dims = ("time", "keypoints", "individuals")
 
         pos = ds["position"]
@@ -68,6 +69,16 @@ def _load_posetracks(seq_path, data_format, rescale):
             min_val.values,
             max_val.values,
         )
+    else:
+        # Compute scaling factor and rescale coordinates
+        factor = [1 / float(val) for val in data_scale.split("x")]
+        ds = ds.assign(position=scale(ds["position"], factor=factor))
+
+        logging.debug("Rescaled coordinates by factor %s", factor)
+
+    # Validate scaling
+    assert ds["position"].min() >= 0.0, "Coordinates should be in the [0, 1] range"
+    assert ds["position"].max() <= 1.0, "Coordinates should be in the [0, 1] range"
 
     # Stack variables into a single dimension
     # NOTE: This is done already here for performance reasons, as stacking in the
@@ -111,12 +122,12 @@ def _load_annotations(seq_path):
 def load_records(
     data_format,
     data_path,
+    data_scale=None,
     data_filter=None,
     dev_ratio=None,
     test_ratio=None,
     dev_seed=None,
     test_seed=None,
-    rescale=True,
 ):
     """
     Load pose‑tracking records, (optionally) filter them, and (optionally) split
@@ -128,6 +139,11 @@ def load_records(
         Dataset format to load. Only ``'movement'`` is implemented at present.
     data_path : str or Path
         Root directory containing the sequence sub‑directories.
+    data_scale : str, optional
+        If supplied as WIDTHxHEIGHT or WIDTHxHEIGHTxDEPTH, every input coordinate is
+        assumed to be in data units and is divided by the given scale to obtain
+        normalized coordinates in the range [0, 1]. Otherwise, the algorithm infers the
+        active extent directly from the data.
     data_filter : str, optional
         Comma‑separated substrings; a record is kept if **any** substring
         occurs in its relative path.  By default, all records are kept.
@@ -141,8 +157,6 @@ def load_records(
     dev_seed, test_seed : int, optional
         Random seeds forwarded to :pyfunc:`sklearn.model_selection.train_test_split`
         for reproducibility of the dev and test splits, respectively.
-    rescale : bool, optional
-        If ``True`` (default), rescale the coordinates in the (0, 1) range.
 
     Returns
     -------
@@ -190,7 +204,7 @@ def load_records(
     all_records = []
     for seq_path in tqdm(seq_paths, desc="Loading dataset"):
         # Load pose-tracking data
-        if (ds := _load_posetracks(seq_path, data_format, rescale)) is not None:
+        if (ds := _load_posetracks(seq_path, data_format, data_scale)) is not None:
             rec_data = {"posetracks": ds}
         else:
             logging.debug("Skipping %s, no tracking data found", str(seq_path))
@@ -239,7 +253,8 @@ def load_records(
 
     # Remaining records become the “main” set
     # NOTE: We call this "main_records", rather than "train_records" to avoid
-    #       confusion in inference mode. That is, "main_records" refers to all data #       during inference or an unsplit dataset during training.
+    #       confusion in inference mode. That is, "main_records" refers to all data
+    #       during inference or an unsplit dataset during training.
     groups["main_records"] = all_records
 
     for group_id, group_data in groups.items():
@@ -317,7 +332,7 @@ def fetch_dataset(dataset_id, download_path):
         fnames = pooch.retrieve(
             url="https://data.caltech.edu/records/s0vdx-0k302/files/task1_classic_classification.zip?download=1",
             known_hash="md5:8a02654fddae28614ee24a6a082261b8",
-            path=Path(download_path) / ".cache" / "lisbet",
+            path=Path(download_path) / "datasets" / ".cache" / "lisbet",
             processor=pooch.Unzip(
                 members=[
                     "task1_classic_classification/calms21_task1_train.json",
@@ -332,7 +347,12 @@ def fetch_dataset(dataset_id, download_path):
         train_records, test_records = calms21.load_taskx(rawdata_path, taskid=1)
 
         # Store data in LISBET-compatible format
-        data_path = Path(download_path) / "CalMS21" / "task1_classic_classification"
+        data_path = (
+            Path(download_path)
+            / "datasets"
+            / "CalMS21"
+            / "task1_classic_classification"
+        )
         dump_records(data_path, train_records)
         dump_records(data_path, test_records)
 
@@ -341,7 +361,7 @@ def fetch_dataset(dataset_id, download_path):
         fnames = pooch.retrieve(
             url="https://data.caltech.edu/records/s0vdx-0k302/files/unlabeled_videos.zip?download=1",
             known_hash="md5:35ab3acdeb231a3fe1536e38ad223b2e",
-            path=Path(download_path) / ".cache" / "lisbet",
+            path=Path(download_path) / "datasets" / ".cache" / "lisbet",
             processor=pooch.Unzip(
                 members=[
                     "unlabeled_videos/calms21_unlabeled_videos_part1.json",
@@ -358,7 +378,7 @@ def fetch_dataset(dataset_id, download_path):
         all_records = calms21.load_unlabeled(rawdata_path)
 
         # Store data in LISBET-compatible format
-        data_path = Path(download_path) / "CalMS21" / "unlabeled_videos"
+        data_path = Path(download_path) / "datasets" / "CalMS21" / "unlabeled_videos"
         dump_records(data_path, all_records)
 
     elif dataset_id == "SampleData":

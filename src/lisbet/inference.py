@@ -88,6 +88,7 @@ def _process_dataset(
     forward_fn: Callable[[torch.nn.Module, torch.Tensor], torch.Tensor],
     data_format: str,
     data_path: str,
+    data_scale: str,
     window_size: int,
     window_offset: int,
     fps_scaling: float,
@@ -144,7 +145,9 @@ def _process_dataset(
     model.to(device)
 
     # Load records
-    group_records = load_records(data_format, data_path, data_filter=data_filter)
+    group_records = load_records(
+        data_format, data_path, data_filter=data_filter, data_scale=data_scale
+    )
 
     # Analyze records
     # NOTE: We assume no overlapping record IDs. That is, records could be stored in a
@@ -225,6 +228,7 @@ def annotate_behavior(
     weights_path: str,
     data_format: str,
     data_path: str,
+    data_scale: Optional[str] = None,
     data_filter: Optional[str] = None,
     window_size: int = 200,
     window_offset: int = 0,
@@ -279,6 +283,7 @@ def annotate_behavior(
         forward_fn=_classification_forward,
         data_format=data_format,
         data_path=data_path,
+        data_scale=data_scale,
         window_size=window_size,
         window_offset=window_offset,
         fps_scaling=fps_scaling,
@@ -303,6 +308,7 @@ def compute_embeddings(
     weights_path: str,
     data_format: str,
     data_path: str,
+    data_scale: Optional[str] = None,
     data_filter: Optional[str] = None,
     window_size: int = 200,
     window_offset: int = 0,
@@ -357,6 +363,7 @@ def compute_embeddings(
         forward_fn=_embedding_forward,
         data_format=data_format,
         data_path=data_path,
+        data_scale=data_scale,
         window_size=window_size,
         window_offset=window_offset,
         fps_scaling=fps_scaling,
