@@ -6,7 +6,7 @@ and dataset-wide inference.
 """
 
 from pathlib import Path
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, Optional
 
 import numpy as np
 import pandas as pd
@@ -96,7 +96,7 @@ def _process_dataset(
     data_filter: Optional[str] = None,
     keypoints_subset: Optional[str] = None,
     device: Optional[torch.device] = None,
-) -> List[Tuple[str, np.ndarray]]:
+) -> list[tuple[str, np.ndarray]]:
     """
     Process an entire dataset with the given model and forward function.
 
@@ -247,7 +247,7 @@ def annotate_behavior(
     batch_size: int = 128,
     output_path: Optional[str] = None,
     keypoints_subset: Optional[str] = None,
-) -> List[Tuple[str, np.ndarray]]:
+) -> list[tuple[str, np.ndarray]]:
     """
     Run LISBET behavior classification for every record in a dataset.
 
@@ -335,7 +335,7 @@ def compute_embeddings(
     batch_size: int = 128,
     output_path: Optional[str] = None,
     keypoints_subset: Optional[str] = None,
-) -> List[Tuple[str, np.ndarray]]:
+) -> list[tuple[str, np.ndarray]]:
     """
     Compute LISBET embeddings for every record in a dataset.
 

@@ -222,7 +222,8 @@ def segment_hmm(
     Returns
     -------
     predictions : dict
-        Dictionary mapping the number of states to the predicted segments for each sequence.
+        Dictionary mapping the number of states to the predicted segments for each
+        sequence.
 
     Raises
     ------

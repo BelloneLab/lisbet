@@ -167,7 +167,7 @@ def transition_probability(sequences, lengths, dummy_state_id=None, groups=None)
     # Make probability
     trans_prob = {
         group: occurrences[group] / np.sum(occurrences[group], axis=1)[:, np.newaxis]
-        for group in occurrences.keys()
+        for group in occurrences
     }
 
     return trans_prob
@@ -202,8 +202,8 @@ def f1_score_matrix(labels, predictions):
     for s in trange(n_states, desc="Computing F1 score"):
         bin_pred = np.array(predictions == s, dtype=int)
         score = []
-        for l in range(n_classes):
-            bin_lab = np.array(labels == l, dtype=int)
+        for lbl in range(n_classes):
+            bin_lab = np.array(labels == lbl, dtype=int)
             score.append(f1_score(bin_lab, bin_pred, zero_division=0.0))
         f1_matrix.append(score)
     f1_matrix = np.array(f1_matrix)

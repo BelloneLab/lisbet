@@ -105,7 +105,7 @@ def load_unlabeled(datapath):
         )
 
         # Load from source
-        with open(raw_path + ".json", "r", encoding="utf-8") as f_json:
+        with open(raw_path + ".json", encoding="utf-8") as f_json:
             raw_data = json.load(f_json)
 
         # Preprocess data
@@ -160,7 +160,7 @@ def load_taskx(datapath, taskid):
         )
 
         # Load from source
-        with open(raw_path + ".json", "r", encoding="utf-8") as f_json:
+        with open(raw_path + ".json", encoding="utf-8") as f_json:
             raw_data = json.load(f_json)
 
         # Preprocess data

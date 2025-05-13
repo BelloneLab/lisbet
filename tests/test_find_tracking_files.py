@@ -1,6 +1,4 @@
-import re
 from pathlib import Path
-from typing import List
 
 import pytest
 
@@ -13,7 +11,7 @@ def temp_dir(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def create_files(temp_dir: Path, filenames: List[str], nested: bool = False) -> None:
+def create_files(temp_dir: Path, filenames: list[str], nested: bool = False) -> None:
     """Helper to create empty files with given names."""
     for filename in filenames:
         if nested and "/" in filename:

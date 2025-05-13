@@ -7,7 +7,7 @@ import logging
 import textwrap
 from importlib.metadata import version as get_version
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 
 class RawDefaultsHelpFormatter(
@@ -143,7 +143,7 @@ def add_data_io_args(parser: argparse.ArgumentParser, data_help: str) -> None:
 
 
 def lazy_load_handler(
-    module_path: str, function_name: str, args: Dict[str, Any]
+    module_path: str, function_name: str, args: dict[str, Any]
 ) -> None:
     """Dynamically import and call a command handler."""
     module = importlib.import_module(module_path)

@@ -35,8 +35,8 @@ def records():
 #     @pytest.mark.parametrize("epoch", [3, 5])
 #     @pytest.mark.parametrize("shuffle", [False, True])
 #     def test_resume_from_epoch(self, records, epoch, shuffle):
-#         """Test whether the random stream is properly managed when resuming from a given
-#         epoch.
+#         """Test whether the random stream is properly managed when resuming from a
+#            given epoch.
 
 #         """
 #         dataset = input_pipeline.frame_classification_generator(

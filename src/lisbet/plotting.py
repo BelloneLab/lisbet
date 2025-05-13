@@ -86,10 +86,7 @@ def get_custom_cmap(n, palette="Set2", alpha=None, desat=None):
     """
     colors = sns.color_palette(palette, desat=desat)
 
-    if n <= len(colors):
-        colors = colors[:n]
-    else:
-        colors = sns.blend_palette(colors, n_colors=n)
+    colors = colors[:n] if n <= len(colors) else sns.blend_palette(colors, n_colors=n)
 
     if alpha:
         colors = [c + (a,) for c, a in zip(colors, alpha)]
@@ -201,7 +198,7 @@ def plot_umap2d(
     if targets is not None:
         mis_idx = np.where(targets != labels)[0]
         mis_sample_idx = np.intersect1d(mis_idx, sample_idx)
-        er = ax.scatter(
+        ax.scatter(
             data[mis_sample_idx, 0],
             data[mis_sample_idx, 1],
             s=5 * marker_size[mis_sample_idx],
@@ -565,7 +562,7 @@ def plot_embedding_summary(
         vmax=n_classes - 0.5,
         extent=extent,
     )
-    cbar = fig.colorbar(im, cax=cax, ticks=mticker.FixedLocator(range(n_classes)))
+    fig.colorbar(im, cax=cax, ticks=mticker.FixedLocator(range(n_classes)))
     ax.set_ylabel("Human")
     ax.set_yticks([])
 
@@ -580,7 +577,7 @@ def plot_embedding_summary(
         vmax=n_states - 0.5,
         extent=extent,
     )
-    cbar = fig.colorbar(im, cax=cax, label="Motif ID")
+    fig.colorbar(im, cax=cax, label="Motif ID")
     ax.set_ylabel("LISBET")
     ax.set_yticks([])
 

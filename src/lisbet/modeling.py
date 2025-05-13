@@ -164,7 +164,7 @@ def load_model(config_path, weights_path):
     toch.nn.Module : The loaded model.
 
     """
-    with open(config_path, "r", encoding="utf-8") as f_yaml:
+    with open(config_path, encoding="utf-8") as f_yaml:
         model_config = yaml.safe_load(f_yaml)
 
     if "out_dim" in model_config:
@@ -212,7 +212,7 @@ def load_model(config_path, weights_path):
 
 def export_embedder(model_path, weights_path, output_path=Path(".")):
     # Get hyper-parameters
-    with open(model_path, "r", encoding="utf-8") as f_yaml:
+    with open(model_path, encoding="utf-8") as f_yaml:
         yaml_config = yaml.safe_load(f_yaml)
 
     # Create behavior embedding model
@@ -255,9 +255,9 @@ def fetch_model(model_id, download_path=Path(".")):
         "lisbet32x4-calms21UftT1-classifier",
         "lisbet32x4-calms21U-embedder",
     ]
-    assert (
-        model_id in valid_model_ids
-    ), f"Model ID '{model_id}' not found in the list of available models."
+    assert model_id in valid_model_ids, (
+        f"Model ID '{model_id}' not found in the list of available models."
+    )
 
     model_path = download_path / model_id
     snapshot_download(

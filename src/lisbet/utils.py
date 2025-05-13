@@ -1,8 +1,8 @@
 """LISBET"""
 
 import numpy as np
-from sklearn.metrics import f1_score
 from scipy.optimize import linear_sum_assignment
+from sklearn.metrics import f1_score
 
 
 def permute_predictions(predictions, labels):
@@ -15,8 +15,8 @@ def permute_predictions(predictions, labels):
     for s in range(n_states):
         bin_pred = np.array(predictions == s, dtype=int)
         score = []
-        for l in range(n_classes):
-            bin_lab = np.array(labels == l, dtype=int)
+        for lbl in range(n_classes):
+            bin_lab = np.array(labels == lbl, dtype=int)
             score.append(f1_score(bin_lab, bin_pred))
         hist2d.append(score)
     hist2d = np.array(hist2d)
