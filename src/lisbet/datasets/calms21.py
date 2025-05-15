@@ -5,7 +5,7 @@ import logging
 import os
 
 import numpy as np
-import pandas as pd
+import xarray as xr
 from movement.io import load_poses
 from tqdm.auto import trange
 
@@ -47,25 +47,37 @@ def _preprocess_calms21(raw_data):
         if "annotations" in val:
             annotator_id = f"annotator{val['metadata']['annotator-id']}"
 
-            # Get annotation map
-            class_idx_map = val["metadata"]["vocab"]
-            num_classes = len(class_idx_map)
+            # Build the column labels in *exact* column order
+            behaviors = [
+                behavior
+                for behavior, _ in sorted(
+                    val["metadata"]["vocab"].items(), key=lambda item: item[1]
+                )
+            ]
 
             # Convert annotations to one-hot encoding
-            one_hot_annotations = np.eye(num_classes, dtype=int)[val["annotations"]]
+            one_hot_annotations = np.eye(len(behaviors), dtype=int)[val["annotations"]]
 
-            # Build the column labels in *exact* column order
-            labels = [None] * num_classes
-            for behavior, idx in class_idx_map.items():
-                labels[idx] = behavior
-
-            # Create a two‑level (MultiIndex) column index
-            cols = pd.MultiIndex.from_product(
-                [labels, [annotator_id]], names=["behavior", "annotator"]
+            # Convert to xarray Dataset
+            rec_data["annotations"] = xr.Dataset(
+                data_vars=dict(
+                    label=(
+                        ["time", "behaviors", "annotators"],
+                        one_hot_annotations[..., np.newaxis],
+                    )
+                ),
+                coords=dict(
+                    time=posetracks.time,
+                    behaviors=behaviors,
+                    annotators=[annotator_id],
+                ),
+                attrs=dict(
+                    source_software=posetracks.source_software,
+                    ds_type="annotations",
+                    fps=posetracks.fps,
+                    time_unit=posetracks.time_unit,
+                ),
             )
-
-            # Convert to pandas DataFrame
-            rec_data["annotations"] = pd.DataFrame(one_hot_annotations, columns=cols)
 
         # Store preprocessed sequence
         records.append((rec_id, rec_data))

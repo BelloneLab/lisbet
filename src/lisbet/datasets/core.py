@@ -5,7 +5,6 @@ import re
 from functools import partial
 from pathlib import Path
 
-import pandas as pd
 import pooch
 import xarray as xr
 from huggingface_hub import snapshot_download
@@ -153,9 +152,9 @@ def _load_posetracks(seq_path, data_format, data_scale, keypoints_subset):
 def _load_annotations(seq_path):
     """Load annotations from a file."""
     # Find all files matching the annotations regex and load them
-    rx = re.compile(r"(?i)(manual_scoring|annotations).*\.csv$")
+    rx = re.compile(r"(?i)(manual_scoring|annotations).*\.nc$")
     annotations = [
-        pd.read_csv(pth, header=[0, 1])
+        xr.open_dataset(pth, engine="scipy")
         for pth in seq_path.iterdir()
         if rx.search(pth.name)
     ]
@@ -165,15 +164,17 @@ def _load_annotations(seq_path):
         return None
 
     # Merge all annotations into a single one
-    annotations = pd.concat(annotations, axis=0, ignore_index=True)
+    annotations = xr.concat(annotations, dim="annotators")
 
-    logging.debug("Annotations: %s", annotations.columns.values)
+    logging.debug("Annotations: %s", annotations.coords["behaviors"].values)
 
     # Convert annotations to label encoding format
     # NOTE: This is a temporary solution to maintain compatibility with the current
     #       implementation of training and inference pipelines.
     # TODO: Add full support for one-hot and multi-label annotations
-    annotations = annotations.values.argmax(axis=1)
+    annotations = annotations.assign(
+        label_cat=annotations.label.argmax("behaviors").squeeze()
+    )
 
     return annotations
 
@@ -333,7 +334,7 @@ def dump_records(data_path, records):
     """
     Dump a list of records to a file.
 
-    Pose tracks are saved in a NetCDF format, and annotations are saved in CSV format.
+    Pose tracks and annotations are saved in a NetCDF format.
 
     Parameters
     ----------
@@ -353,7 +354,7 @@ def dump_records(data_path, records):
 
         # Save annotations
         if "annotations" in data:
-            data["annotations"].to_csv(rec_path / "annotations.csv", index=False)
+            data["annotations"].to_netcdf(rec_path / "annotations.nc", engine="scipy")
 
 
 def fetch_dataset(dataset_id, download_path):

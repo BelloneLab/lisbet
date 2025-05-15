@@ -135,7 +135,11 @@ class FrameClassificationDataset(BaseDataset):
 
         # Select annotation data, if requested, return x_data only otherwise
         if self.num_classes is not None:
-            y_data = self.records[curr_key]["annotations"][curr_loc]
+            y_data = (
+                self.records[curr_key]["annotations"]
+                .label_cat.isel(time=curr_loc)
+                .values
+            )
 
             return x_data, y_data
 

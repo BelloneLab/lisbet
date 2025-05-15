@@ -186,7 +186,9 @@ def _configure_classification_task(
         raise RuntimeError("The provided dataset does not contain annotations.")
 
     # Find number of behaviors in the training set
-    labels = np.concatenate([data["annotations"] for _, data in train_rec["cfc"]])
+    labels = np.concatenate(
+        [data["annotations"].label_cat for _, data in train_rec["cfc"]]
+    )
     classes = np.unique(labels)
     num_classes = len(classes)
     np.testing.assert_array_equal(classes, np.array(range(num_classes)))
