@@ -631,6 +631,7 @@ def _save_model_config(
     num_layers,
     max_len,
     tasks,
+    input_features,
 ):
     """Internal helper. Saves model config."""
     model_config = {
@@ -644,6 +645,7 @@ def _save_model_config(
         "num_layers": num_layers,
         "max_len": max_len,
         "out_dim": {task["task_id"]: task["out_dim"] for task in tasks},
+        "input_features": input_features,
     }
     model_path = Path(output_path) / "models" / run_id / "model_config.yml"
     model_path.parent.mkdir(parents=True, exist_ok=True)
@@ -827,6 +829,13 @@ def train(
     # Determine data shape from first record
     bp_dim = train_rec[task_ids_list[0]][0][1]["posetracks"].sizes["features"]
 
+    # Determine input_features list for config consistency
+    input_features = (
+        train_rec[task_ids_list[0]][0][1]["posetracks"]
+        .coords["features"]
+        .values.tolist()
+    )
+
     # Determine max sequence length
     # TODO: Find a better way to compute max_len or fix in the embedder exporter
     max_len = (
@@ -896,6 +905,7 @@ def train(
         num_layers,
         max_len,
         tasks,
+        input_features,
     )
 
     # Training loop

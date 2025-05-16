@@ -2,9 +2,11 @@ from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import pytest
 import torch
 import xarray as xr
+import yaml
 
 import lisbet.training as training
 
@@ -175,11 +177,19 @@ def test_save_and_load_weights(tmp_path):
 def test_save_model_config_and_history(tmp_path):
     run_id = "testrun"
     tasks = [{"task_id": "cfc", "out_dim": 3}, {"task_id": "nwp", "out_dim": 1}]
+    input_features = [["mouse", "nose", "x"], ["mouse", "nose", "y"]]
     training._save_model_config(
-        tmp_path, run_id, 200, 0, -1, 8, 32, 128, 4, 4, 200, tasks
+        tmp_path, run_id, 200, 0, -1, 8, 32, 128, 4, 4, 200, tasks, input_features
     )
     config_path = tmp_path / "models" / run_id / "model_config.yml"
     assert config_path.exists()
+
+    # Check input_features in config
+    with open(config_path, encoding="utf-8") as f:
+        config = yaml.safe_load(f)
+    assert "input_features" in config
+    assert config["input_features"] == input_features
+
     # Save history
     history = [
         {"epoch": 0, "cfc_train_loss": 0.1},
@@ -188,7 +198,6 @@ def test_save_model_config_and_history(tmp_path):
     training._save_history(tmp_path, run_id, history)
     hist_path = tmp_path / "models" / run_id / "training_history.log"
     assert hist_path.exists()
-    import pandas as pd
 
     df = pd.read_csv(hist_path)
     assert "epoch" in df.columns
