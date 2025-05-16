@@ -286,9 +286,20 @@ def load_records(
         # Add record to the list
         all_records.append((rec_id, rec_data))
 
-    # TODO: It would be important to run a few sanity checks on the data. For example,
-    #       all record ids should be unique, and the data should be consistent across
-    #       recordings (i.e., same individuals/space/keypoints in the same order).
+    # Sanity check: All posetracks must have the same 'features' coordinate (summary of
+    #               individuals/keypoints/space)
+    if all_records:
+        ref_features = (
+            all_records[0][1]["posetracks"].coords["features"].values.tolist()
+        )
+        for rec_id, rec_data in all_records:
+            ds_features = rec_data["posetracks"].coords["features"].values.tolist()
+            if ds_features != ref_features:
+                raise ValueError(
+                    f"Inconsistent posetracks coordinates in record '{rec_id}':\n"
+                    f"Reference features:\n{ref_features}\n"
+                    f"Record features:\n{ds_features}"
+                )
 
     # Filter data, if requested
     if data_filter is not None:

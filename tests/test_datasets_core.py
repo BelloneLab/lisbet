@@ -231,3 +231,53 @@ def test_keypoints_subset_selection(dummy_dataset):
     assert list(ds["individuals"].values) == ["mouse"]
     assert list(ds["space"].values) == ["x"]
     assert list(ds["keypoints"].values) == ["nose"]
+
+
+def test_inconsistent_features_raises(tmp_path):
+    """
+    Test that load_records raises ValueError if 'features' coordinate is inconsistent.
+    """
+    root = tmp_path / "dataset_feat"
+    root.mkdir()
+    # exp0: features = nose, tail
+    exp0 = root / "exp0"
+    exp0.mkdir()
+    arr0 = np.arange(40).reshape((10, 1, 2, 2))
+    data0 = xr.Dataset(
+        {
+            "position": (
+                ("time", "individuals", "keypoints", "space"),
+                arr0,
+            )
+        },
+        coords={
+            "time": np.arange(10),
+            "individuals": ["mouse"],
+            "keypoints": ["nose", "tail"],
+            "space": ["x", "y"],
+        },
+    )
+    data0.to_netcdf(exp0 / "tracking.nc", engine="scipy")
+    # exp1: features = nose only
+    exp1 = root / "exp1"
+    exp1.mkdir()
+    arr1 = np.arange(20).reshape((10, 1, 1, 2))
+    data1 = xr.Dataset(
+        {
+            "position": (
+                ("time", "individuals", "keypoints", "space"),
+                arr1,
+            )
+        },
+        coords={
+            "time": np.arange(10),
+            "individuals": ["mouse"],
+            "keypoints": ["nose"],
+            "space": ["x", "y"],
+        },
+    )
+    data1.to_netcdf(exp1 / "tracking.nc", engine="scipy")
+    with pytest.raises(
+        ValueError, match="Inconsistent posetracks coordinates in record"
+    ):
+        load_records(data_format="movement", data_path=root)
