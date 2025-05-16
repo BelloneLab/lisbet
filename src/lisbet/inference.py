@@ -11,6 +11,7 @@ from typing import Callable, Optional
 import numpy as np
 import pandas as pd
 import torch
+import yaml
 from torchvision import transforms
 from tqdm.auto import tqdm
 
@@ -83,8 +84,9 @@ def run_inference_for_sequence(
     return np.concatenate(predictions)
 
 
-def _process_dataset(
-    model: torch.nn.Module,
+def _process_inference_dataset(
+    model_path: str,
+    weights_path: str,
     forward_fn: Callable[[torch.nn.Module, torch.Tensor], torch.Tensor],
     data_format: str,
     data_path: str,
@@ -98,12 +100,14 @@ def _process_dataset(
     device: Optional[torch.device] = None,
 ) -> list[tuple[str, np.ndarray]]:
     """
-    Process an entire dataset with the given model and forward function.
+    Load model, records, check input_features compatibility, and process the dataset.
 
     Parameters
     ----------
-    model : torch.nn.Module
-        The model to use for inference.
+    model_path : str
+        Path to the model config (YAML format).
+    weights_path : str
+        Path to the model weights.
     forward_fn : callable
         Function defining how to process model outputs.
     data_format : str
@@ -137,6 +141,8 @@ def _process_dataset(
     ------
     RuntimeError
         If duplicate sequence IDs are found across dataset splits.
+    ValueError
+        If input features are incompatible.
     """
     if device is None:
         # Configure accelerator
@@ -148,7 +154,10 @@ def _process_dataset(
             device_type = "cpu"
         device = torch.device(device_type)
 
-    # Transfer model to device
+    # Load model config and model
+    with open(model_path, encoding="utf-8") as f:
+        config = yaml.safe_load(f)
+    model = modeling.load_model(model_path, weights_path)
     model.to(device)
 
     # Load records
@@ -159,6 +168,20 @@ def _process_dataset(
         data_scale=data_scale,
         keypoints_subset=keypoints_subset,
     )
+
+    # Input features compatibility check
+    model_features = [tuple(x) for x in config.get("input_features")]
+    dataset_features = (
+        group_records["main_records"][0][1]["posetracks"]
+        .coords["features"]
+        .values.tolist()
+    )
+    if dataset_features != model_features:
+        raise ValueError(
+            f"Incompatible input features!\n"
+            f"Model expects: {model_features}\n"
+            f"Dataset provides: {dataset_features}"
+        )
 
     # Analyze records
     # NOTE: We assume no overlapping record IDs. That is, records could be stored in a
@@ -292,12 +315,9 @@ def annotate_behavior(
     ValueError
         If the loaded model is not a classification model.
     """
-    model = modeling.load_model(model_path, weights_path)
-    if not isinstance(model, modeling.MultiTaskModel) or "cfc" not in model.task_heads:
-        raise ValueError("Model must be a classification model for behavior annotation")
-
-    results = _process_dataset(
-        model=model,
+    results = _process_inference_dataset(
+        model_path=model_path,
+        weights_path=weights_path,
         forward_fn=_classification_forward,
         data_format=data_format,
         data_path=data_path,
@@ -380,12 +400,9 @@ def compute_embeddings(
     ValueError
         If the loaded model is not an embedding model.
     """
-    model = modeling.load_model(model_path, weights_path)
-    if not isinstance(model, modeling.EmbeddingModel):
-        raise ValueError("Model must be an embedding model for computing embeddings")
-
-    results = _process_dataset(
-        model=model,
+    results = _process_inference_dataset(
+        model_path=model_path,
+        weights_path=weights_path,
         forward_fn=_embedding_forward,
         data_format=data_format,
         data_path=data_path,

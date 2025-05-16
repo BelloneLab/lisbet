@@ -216,7 +216,9 @@ def export_embedder(model_path, weights_path, output_path=Path(".")):
         yaml_config = yaml.safe_load(f_yaml)
 
     # Create behavior embedding model
+    # TODO: This should be improved.
     model_config = {
+        "input_features": yaml_config["input_features"],
         "bp_dim": yaml_config["bp_dim"],
         "emb_dim": yaml_config["emb_dim"],
         "hidden_dim": yaml_config["hidden_dim"],

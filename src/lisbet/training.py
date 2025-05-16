@@ -836,6 +836,15 @@ def train(
         .values.tolist()
     )
 
+    if load_backbone_weights is not None:
+        logging.warning(
+            "Loading backbone weights from %s. If you are not experimenting with "
+            "transfer learning, please verify that the input features of the "
+            "pre-trained model match those of your data. In the future, this warning "
+            "could become a requirement to load the backbone weights.",
+            load_backbone_weights,
+        )
+
     # Determine max sequence length
     # TODO: Find a better way to compute max_len or fix in the embedder exporter
     max_len = (
