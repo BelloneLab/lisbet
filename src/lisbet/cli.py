@@ -415,6 +415,14 @@ def configure_fetch_model_parser(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def configure_model_info_parser(parser: argparse.ArgumentParser) -> None:
+    """Configure model_info command parser."""
+    add_verbosity_args(parser)
+    parser.add_argument(
+        "model_path", type=Path, help="Path to model config (YAML file)"
+    )
+
+
 def main() -> None:
     """Main entry point for betman CLI."""
     parser = argparse.ArgumentParser(
@@ -495,6 +503,12 @@ def main() -> None:
             "module": ".modeling",
             "function": "fetch_model",
             "configure": configure_fetch_model_parser,
+        },
+        "model_info": {
+            "description": "Show information about a LISBET model config file",
+            "module": ".modeling",
+            "function": "model_info",
+            "configure": configure_model_info_parser,
         },
     }
 

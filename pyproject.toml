@@ -29,6 +29,7 @@ dependencies = [
     "torchvision",
     "tqdm",
     "umap-learn",
+    "rich",
 ]
 dynamic = ["version"]
 

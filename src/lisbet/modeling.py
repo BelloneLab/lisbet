@@ -17,11 +17,14 @@ References
 
 import logging
 import math
+import pprint
 from pathlib import Path
 
 import torch
 import yaml
 from huggingface_hub import snapshot_download
+from rich.console import Console
+from rich.table import Table
 from torch import nn
 from torchinfo import summary
 
@@ -265,3 +268,26 @@ def fetch_model(model_id, download_path=Path(".")):
     snapshot_download(
         repo_id=f"gchindemi/{model_id}", repo_type="model", local_dir=model_path
     )
+
+
+def model_info(model_path):
+    """Print information about a LISBET model config file."""
+
+    with open(model_path, encoding="utf-8") as f:
+        config = yaml.safe_load(f)
+
+    console = Console()
+    table = Table(title="LISBET Model Configuration")
+
+    table.add_column("Key", style="cyan", no_wrap=True)
+    table.add_column("Value", style="magenta")
+
+    for key, value in config.items():
+        # Pretty-print nested dicts/lists
+        if isinstance(value, (dict, list)):
+            value_str = pprint.pformat(value, compact=True, width=60)
+        else:
+            value_str = str(value)
+        table.add_row(str(key), value_str)
+
+    console.print(table)
