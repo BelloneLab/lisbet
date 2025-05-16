@@ -1,9 +1,83 @@
 from collections import defaultdict
+from pathlib import Path
 
 import numpy as np
+import pytest
 import torch
+import xarray as xr
 
 import lisbet.training as training
+
+
+def make_dummy_dataset(root: Path, keypoints=("nose", "tail")):
+    """
+    Create a dummy dataset directory with one experiment subdirectory containing a
+    tracking.nc file.
+    """
+    exp_dir = root / "exp0"
+    exp_dir.mkdir(parents=True)
+    arr = np.arange(10 * 1 * len(keypoints) * 2).reshape((10, 1, len(keypoints), 2))
+    data = xr.Dataset(
+        {
+            "position": (
+                ("time", "individuals", "keypoints", "space"),
+                arr,
+            )
+        },
+        coords={
+            "time": np.arange(10),
+            "individuals": ["mouse"],
+            "keypoints": list(keypoints),
+            "space": ["x", "y"],
+        },
+    )
+    data.to_netcdf(exp_dir / "tracking.nc", engine="scipy")
+    return root
+
+
+def test_load_records_success(tmp_path):
+    """Test _load_records succeeds with consistent features across datasets."""
+    root1 = make_dummy_dataset(tmp_path / "ds1", keypoints=("nose", "tail"))
+    root2 = make_dummy_dataset(tmp_path / "ds2", keypoints=("nose", "tail"))
+    train_rec, test_rec, dev_rec = training._load_records(
+        data_format="movement,movement",
+        data_path=f"{root1},{root2}",
+        data_scale=None,
+        data_filter=None,
+        dev_ratio=None,
+        test_ratio=None,
+        dev_seed=None,
+        test_seed=None,
+        keypoints_subset=None,
+        task_ids=["task"],
+        task_data=None,
+    )
+    assert "task" in train_rec
+    assert len(train_rec["task"]) == 2
+
+
+def test_load_records_inconsistent_features_raises(tmp_path):
+    """
+    Test _load_records raises ValueError if features are inconsistent across datasets.
+    """
+    root1 = make_dummy_dataset(tmp_path / "ds1", keypoints=("nose", "tail"))
+    root2 = make_dummy_dataset(tmp_path / "ds2", keypoints=("nose",))
+    with pytest.raises(
+        ValueError, match="Inconsistent posetracks coordinates in loaded records"
+    ):
+        training._load_records(
+            data_format="movement,movement",
+            data_path=f"{root1},{root2}",
+            data_scale=None,
+            data_filter=None,
+            dev_ratio=None,
+            test_ratio=None,
+            dev_seed=None,
+            test_seed=None,
+            keypoints_subset=None,
+            task_ids=["task"],
+            task_data=None,
+        )
 
 
 def test_generate_seeds_deterministic_and_override():

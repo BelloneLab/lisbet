@@ -139,6 +139,23 @@ def _load_records(
         for dataset, datapath in datasources
     ]
 
+    # Sanity check: All posetracks must have the same 'features' coordinate across
+    #               datasets. As consistency within a dataset is already checked, we
+    #               only need to check the first record of each dataset against the
+    #               others.
+    main_features = [
+        recs["main_records"][0][1]["posetracks"].coords["features"].values.tolist()
+        for recs in records
+    ]
+    ref_features = main_features[0]
+    for i, features in enumerate(main_features):
+        if features != ref_features:
+            raise ValueError(
+                f"Inconsistent posetracks coordinates in loaded records, dataset {i}:\n"
+                f"Reference features:\n{ref_features}\n"
+                f"Record features:\n{features}"
+            )
+
     # Create the lists of records for each task
     train_rec = defaultdict(list)
     test_rec = defaultdict(list)
