@@ -211,26 +211,85 @@ def test_data_filter(dummy_dataset):
     assert groups["main_records"][0][0] == "exp0"
 
 
-def test_keypoints_subset_selection(dummy_dataset):
+def test_select_coords_selection(dummy_dataset):
     """
-    Test that keypoints_subset argument selects only the requested individuals, coords,
-    and keypoints.
-
-    Parameters
-    ----------
-    dummy_dataset : Path
-        Path to the dummy dataset fixture.
+    Test that select_coords argument selects only the requested individuals, axes, and
+    keypoints.
     """
     # Only select 'mouse', 'x', and 'nose'
     groups = load_records(
         data_format="movement",
         data_path=dummy_dataset,
-        keypoints_subset="mouse;x;nose",
+        select_coords="mouse;x;nose",
     )
     ds = groups["main_records"][0][1]["posetracks"]
     assert list(ds["individuals"].values) == ["mouse"]
     assert list(ds["space"].values) == ["x"]
     assert list(ds["keypoints"].values) == ["nose"]
+
+
+def test_select_coords_wildcard(dummy_dataset):
+    """
+    Test that select_coords with '*' includes all items at that level.
+    """
+    groups = load_records(
+        data_format="movement",
+        data_path=dummy_dataset,
+        select_coords="*;*;*",
+    )
+    ds = groups["main_records"][0][1]["posetracks"]
+    assert set(str(x) for x in ds["individuals"].values) == {"mouse"}
+    assert set(str(x) for x in ds["space"].values) == {"x", "y"}
+    assert set(str(x) for x in ds["keypoints"].values) == {"nose", "tail"}
+
+
+def test_rename_coords_basic(dummy_dataset):
+    """
+    Test that rename_coords argument renames individuals, axes, and keypoints as
+    expected.
+    """
+    groups = load_records(
+        data_format="movement",
+        data_path=dummy_dataset,
+        rename_coords="mouse:rat;x:horizontal;nose:snout,tail:tailbase",
+    )
+    ds = groups["main_records"][0][1]["posetracks"]
+    assert set(str(x) for x in ds["individuals"].values) == {"rat"}
+    assert set(str(x) for x in ds["space"].values) == {"horizontal", "y"}
+    assert set(str(x) for x in ds["keypoints"].values) == {"snout", "tailbase"}
+
+
+def test_rename_coords_wildcard(dummy_dataset):
+    """
+    Test that rename_coords with '*' leaves coordinates unchanged.
+    """
+    groups = load_records(
+        data_format="movement",
+        data_path=dummy_dataset,
+        rename_coords="*;*;*",
+    )
+    ds = groups["main_records"][0][1]["posetracks"]
+    assert set(ds["individuals"].values) == {"mouse"}
+    assert set(ds["space"].values) == {"x", "y"}
+    assert set(ds["keypoints"].values) == {"nose", "tail"}
+
+
+def test_rename_coords_invalid_format(dummy_dataset):
+    """
+    Test that rename_coords with invalid format raises ValueError.
+    """
+    with pytest.raises(ValueError, match="rename_coords must have format"):
+        load_records(
+            data_format="movement",
+            data_path=dummy_dataset,
+            rename_coords="mouse:rat;x:horizontal",  # Missing keypoints field
+        )
+    with pytest.raises(ValueError, match="rename_coords must have format"):
+        load_records(
+            data_format="movement",
+            data_path=dummy_dataset,
+            rename_coords="mouse:rat;;nose:snout",  # Empty field not allowed
+        )
 
 
 def test_inconsistent_features_raises(tmp_path):

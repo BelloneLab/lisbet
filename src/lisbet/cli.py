@@ -82,20 +82,20 @@ def add_keypoints_args(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
-        "--keypoints_subset",
+        "--select_coords",
         type=str,
-        metavar="INDIVS;COORDS;PARTS",
+        metavar="INDIVIDUALS;AXES;KEYPOINTS",
         help=textwrap.dedent(
             """\
-            Optional subset of keypoints to load (quote or escape the spec).
+            Optional subset of coordinates to load (quote or escape the spec).
 
               Example:
                 'individual1,individual2;x,y;nose,neck,tail'
 
-              Format:  INDIVS;COORDS;PARTS
-                INDIVS  = comma‑separated individuals  | *
-                COORDS  = comma‑separated coord axes   | *
-                PARTS   = comma‑separated body parts   | *
+              Format:  INDIVIDUALS;AXES;KEYPOINTS
+                INDIVIDUALS = comma‑separated individuals   | *
+                AXES        = comma‑separated spatial axes  | *
+                KEYPOINTS   = comma‑separated keypoints     | *
 
               Wildcards:
                 *        include all items at that level
@@ -103,6 +103,35 @@ def add_keypoints_args(parser: argparse.ArgumentParser) -> None:
               If omitted, the entire dataset is loaded.
 
               NOTE: ';' and '*' are shell meta-characters, use single quotes
+              on Unix‑like shells, double quotes on Windows, or escape them.
+            """
+        ),
+    )
+    parser.add_argument(
+        "--rename_coords",
+        type=str,
+        metavar=(
+            "OLD_INDIVIDUALS:NEW_INDIVIDUALS;"
+            "OLD_AXES:NEW_AXES;"
+            "OLD_KEYPOINTS:NEW_KEYPOINTS"
+        ),
+        help=textwrap.dedent(
+            """\
+            Optional mapping to rename coordinates (quote or escape the spec).
+
+              Example:
+                '*;*;nose:snout,tail:tailbase'
+
+              Format:  INDIVIDUALS;AXES;KEYPOINTS
+                INDIVIDUALS = comma‑separated individual mappings   | *
+                AXES        = comma‑separated spatial axis mappings | *
+                KEYPOINTS   = comma‑separated keypoint mappings     | *
+
+              Each mapping is OLD_NAME:NEW_NAME. Use * to skip renaming at that level.
+
+              If omitted, original dataset names are used.
+
+              NOTE: ';' and '*' are shell meta-characters. Use single quotes
               on Unix‑like shells, double quotes on Windows, or escape them.
             """
         ),

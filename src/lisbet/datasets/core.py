@@ -16,10 +16,12 @@ from tqdm.auto import tqdm
 from . import calms21
 
 
-def _load_posetracks(seq_path, data_format, data_scale, keypoints_subset):
+def _load_posetracks(seq_path, data_format, data_scale, select_coords, rename_coords):
     """
-    Load pose-tracking data from a file, optionally selecting a subset of individuals,
-    coordinates, and keypoints.
+    Load and preprocess a pose-tracking dataset from a sequence directory.
+
+    Applies optional coordinate selection and renaming, and rescales coordinates
+    to [0, 1] if requested.
 
     Parameters
     ----------
@@ -29,19 +31,18 @@ def _load_posetracks(seq_path, data_format, data_scale, keypoints_subset):
         Format of the dataset ('DLC', 'SLEAP', 'movement').
     data_scale : str or None
         Scaling string or None for auto-scaling.
-    keypoints_subset : str or None
-        Optional subset string in the format 'INDIVS;COORDS;PARTS', where each field is
-        a comma-separated list or '*' for all. If None, all data is loaded.
+    select_coords : str or None
+        Optional subset string in the format 'INDIVIDUALS;AXES;KEYPOINTS', where each
+        field is a comma-separated list or '*' for all.
+    rename_coords : str or None
+        Optional coordinate names remapping in the format 'INDIVIDUALS;AXES;KEYPOINTS',
+        where each field is a comma-separated list of maps 'old_id:new_id' or '*' for
+        no remapping at that level.
 
     Returns
     -------
     xarray.Dataset
-        The loaded (and possibly subsetted) dataset.
-
-    Raises
-    ------
-    ValueError
-        If the subset string is not in the correct format or selection fails.
+        The loaded and preprocessed dataset.
     """
     # Valid filenames and their corresponding loading functions
     # TODO: Test re matching for all supported formats.
@@ -78,26 +79,55 @@ def _load_posetracks(seq_path, data_format, data_scale, keypoints_subset):
     if "confidence" in ds:
         ds = ds.drop_vars("confidence")
 
-    # Apply keypoints subset selection if requested
-    if keypoints_subset is not None:
-        # Parse the subset string: 'INDIVS;COORDS;PARTS'
-        fields = keypoints_subset.split(";")
+    # Apply coordinates selection if requested
+    # TODO: Move string parsing to CLI during refactoring and make 'sel_dict' an
+    #       argument.
+    if select_coords is not None:
+        # Parse the subset string: 'INDIVIDUALS;AXES;KEYPOINTS'
+        fields = select_coords.split(";")
         if len(fields) != 3:
             raise ValueError(
-                "keypoints_subset must have format 'INDIVS;COORDS;PARTS', "
+                "select_coords must have format 'INDIVIDUALS;AXES;KEYPOINTS', "
                 "e.g. 'ind1,ind2;x,y;nose,neck,tail'"
             )
         # Use a compact dict comprehension for selection
         sel_keys = ["individuals", "space", "keypoints"]
-        sel = {
+        sel_dict = {
             key: [item.strip() for item in field.split(",") if item.strip()]
             for key, field in zip(sel_keys, fields)
             if field.strip() and field.strip() != "*"
         }
-        if sel:
-            ds = ds.sel(**sel)
+        if sel_dict:
+            ds = ds.sel(**sel_dict)
 
-            logging.debug("Subset selection: %s", sel)
+            logging.debug("Subset selection: %s", sel_dict)
+
+    # Apply coordinates renaming if requested
+    # TODO: Move string parsing to CLI during refactoring and make 'remap_dict' an
+    #       argument.
+    if rename_coords is not None:
+        # Parse the remapping string: 'INDIVIDUALS;AXES;KEYPOINTS'
+        fields = rename_coords.split(";")
+        if len(fields) != 3 or any(f.strip() == "" for f in fields):
+            raise ValueError(
+                "rename_coords must have format 'INDIVIDUALS;AXES;KEYPOINTS', "
+                "using '*' for no remapping at a level, e.g. "
+                "'mouse1:resident,mouse2:intruder;*;nose:snout,tail:tailbase'"
+            )
+        rename_keys = ["individuals", "space", "keypoints"]
+        remap_dict = {}
+        for key, field in zip(rename_keys, fields):
+            if field.strip() != "*":
+                mapping = {}
+                for pair in field.split(","):
+                    old, new = pair.split(":")
+                    mapping[old.strip()] = new.strip()
+                remap_dict[key] = (
+                    key,
+                    [mapping.get(val, val) for val in ds.coords[key].values],
+                )
+        if remap_dict:
+            ds = ds.assign_coords(**remap_dict)
 
     # Rescale coordinates in the (0, 1) range, if requested
     if data_scale is None:
@@ -150,7 +180,14 @@ def _load_posetracks(seq_path, data_format, data_scale, keypoints_subset):
 
 
 def _load_annotations(seq_path):
-    """Load annotations from a file."""
+    """
+    Load annotations from a sequence directory, if present.
+
+    Returns
+    -------
+    xarray.Dataset or None
+        The loaded annotations, or None if not found.
+    """
     # Find all files matching the annotations regex and load them
     rx = re.compile(r"(?i)(manual_scoring|annotations).*\.nc$")
     annotations = [
@@ -188,64 +225,66 @@ def load_records(
     test_ratio=None,
     dev_seed=None,
     test_seed=None,
-    keypoints_subset=None,
+    select_coords=None,
+    rename_coords=None,
 ):
     """
-    Load pose‑tracking records, (optionally) filter them, (optionally) select a subset
-    of keypoints, and (optionally) split them into *main*, *test*, and *dev* subsets.
+    Load pose-tracking records from a directory, with optional filtering, coordinate
+    selection, coordinate renaming, and train/dev/test splitting.
 
     Parameters
     ----------
     data_format : {'movement', 'DLC', 'SLEAP'}
         Dataset format to load.
     data_path : str or Path
-        Root directory containing the sequence sub‑directories.
+        Root directory containing the sequence sub-directories.
     data_scale : str, optional
         If supplied as WIDTHxHEIGHT or WIDTHxHEIGHTxDEPTH, every input coordinate is
         assumed to be in data units and is divided by the given scale to obtain
         normalized coordinates in the range [0, 1]. Otherwise, the algorithm infers the
         active extent directly from the data.
     data_filter : str, optional
-        Comma‑separated substrings; a record is kept if **any** substring
-        occurs in its relative path.  By default, all records are kept.
+        Comma-separated substrings; a record is kept if any substring occurs in its
+        relative path. By default, all records are kept.
     dev_ratio : float, optional
-        Fraction of the **post‑test** remainder to devote to the dev set.
-        If ``None`` (default) no dev split is performed.
+        Fraction of the post-test remainder to devote to the dev set.
+        If None, no dev split is performed.
     test_ratio : float, optional
-        Fraction of *all* records to devote to the test set.  If ``None``
-        (default) no test split is performed unless the dataset already
-        contains an explicit test split (not yet supported here).
+        Fraction of all records to devote to the test set. If None, no test split is
+        performed.
     dev_seed, test_seed : int, optional
-        Random seeds forwarded to :pyfunc:`sklearn.model_selection.train_test_split`
-        for reproducibility of the dev and test splits, respectively.
-    keypoints_subset : str, optional
-        Optional subset string in the format 'INDIVS;COORDS;PARTS', where each field is
-        a comma-separated list or '*' for all. If None, all data is loaded.
+        Random seeds for reproducibility of the dev and test splits, respectively.
+    select_coords : str or None
+        Optional subset string in the format 'INDIVIDUALS;AXES;KEYPOINTS', where each
+        field is a comma-separated list or '*' for all. If None, all data is loaded.
+        Example: 'mouse1,mouse2;x,y;nose,tail'
+    rename_coords : str or None
+        Optional coordinate names remapping in the format 'INDIVIDUALS;AXES;KEYPOINTS',
+        where each field is a comma-separated list of maps 'old_id:new_id' or '*' for
+        no remapping at that level. If None, original dataset names are used.
+        Example: 'mouse1:resident,mouse2:intruder;*;nose:snout,tail:tailbase'
 
     Returns
     -------
     dict[str, list[tuple[str, dict[str, xarray.Dataset]]]]
-        A mapping whose keys are
-
-        * ``'main_records'`` – always present
-        * ``'test_records'`` – present only if *test_ratio* was supplied
-        * ``'dev_records'`` – present only if *dev_ratio* was supplied
-
-        Each value is a list of ``(record_id, data_dict)`` pairs; every
-        ``data_dict`` currently contains a single entry ``'posetracks'`` holding
-        an *xarray* dataset of shape `(individuals, frames, points, coords)`.
+        A mapping whose keys are:
+            * 'main_records' – always present
+            * 'test_records' – present only if test_ratio was supplied
+            * 'dev_records' – present only if dev_ratio was supplied
+        Each value is a list of (record_id, data_dict) pairs; every data_dict contains
+        at least 'posetracks' (xarray.Dataset), and optionally 'annotations'.
 
     Raises
     ------
     ValueError
-        If *data_format* is unsupported or keypoints_subset is invalid.
+        If data_format is unsupported, or if select_coords/rename_coords are invalid.
     NotImplementedError
         For recognized but unimplemented formats.
 
     Notes
     -----
-    When *dev_ratio* is supplied it applies **after** any test split; i.e.
-    the dev set is carved out of what remains.
+    When dev_ratio is supplied it applies after any test split; i.e. the dev set is
+    carved out of what remains.
 
     Examples
     --------
@@ -256,7 +295,8 @@ def load_records(
     ...     dev_ratio=0.1,
     ...     test_seed=0,
     ...     dev_seed=0,
-    ...     keypoints_subset="mouse1,mouse2;x,y;nose,tail"
+    ...     select_coords="mouse1,mouse2;x,y;nose,tail",
+    ...     rename_coords="mouse1:resident,mouse2:intruder;*;nose:snout,tail:tailbase",
     ... )
     >>> groups.keys()
     dict_keys(['main_records', 'test_records', 'dev_records'])
@@ -269,7 +309,9 @@ def load_records(
     all_records = []
     for seq_path in tqdm(seq_paths, desc="Loading dataset"):
         # Load pose-tracking data
-        ds = _load_posetracks(seq_path, data_format, data_scale, keypoints_subset)
+        ds = _load_posetracks(
+            seq_path, data_format, data_scale, select_coords, rename_coords
+        )
         if ds is not None:
             rec_data = {"posetracks": ds}
         else:
