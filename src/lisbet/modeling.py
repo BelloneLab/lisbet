@@ -4,7 +4,7 @@ available at https://github.com/google-research/vision_transformer.
 
 Notes
 -----
-[a] Early versions of LISBET were using Tensorflow/Keras.
+[a] Early versions of LISBET were using TensorFlow/Keras.
 
 References
 ----------
