@@ -172,7 +172,8 @@ def load_model(config_path, weights_path):
 
     if "out_dim" in model_config:
         # TODO: I should probably revise the way the MultiTaskModel is initialized.
-        #       The EmbeddingModel style is probably a better choice.
+        #       The old EmbeddingModel style (**model_config) is probably a better
+        #       choice if we remove the extra keys.
         backbone = Backbone(
             bp_dim=model_config["bp_dim"],
             emb_dim=model_config["emb_dim"],
@@ -195,7 +196,15 @@ def load_model(config_path, weights_path):
             },
         )
     else:
-        model = EmbeddingModel(**model_config)
+        model = EmbeddingModel(
+            output_token_idx=model_config["output_token_idx"],
+            bp_dim=model_config["bp_dim"],
+            emb_dim=model_config["emb_dim"],
+            hidden_dim=model_config["hidden_dim"],
+            num_heads=model_config["num_heads"],
+            num_layers=model_config["num_layers"],
+            max_len=model_config["max_len"],
+        )
 
     # Load weights
     # NOTE: Setting strict=False allows for partial loading (i.e., dropping
