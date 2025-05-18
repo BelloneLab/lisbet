@@ -164,7 +164,7 @@ def load_model(config_path, weights_path):
 
     Returns
     -------
-    toch.nn.Module : The loaded model.
+    torch.nn.Module : The loaded model.
 
     """
     with open(config_path, encoding="utf-8") as f_yaml:
