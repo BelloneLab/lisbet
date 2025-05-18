@@ -506,7 +506,7 @@ def fetch_dataset(dataset_id, download_path):
         data_path = snapshot_download(
             repo_id="gchindemi/lisbet-examples",
             allow_patterns="sample_keypoints/",
-            local_dir=download_path,
+            local_dir=Path(download_path) / "datasets",
             repo_type="dataset",
         )
 
