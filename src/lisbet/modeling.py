@@ -1,4 +1,4 @@
-"""Pytorch models and their extensions.
+"""PyTorch models and their extensions.
 The transformer model is based on ViT [1] and its reference implementation in JAX/Flax,
 available at https://github.com/google-research/vision_transformer.
 
