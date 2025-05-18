@@ -34,6 +34,8 @@ def test_train_integration(tmp_path):
         compile_model=False,
         mixed_precision=False,
         run_id="pytest_run",
+        select_coords=None,
+        rename_coords=None,
     )
     # Check that model is returned and weights/history are saved
     assert hasattr(model, "state_dict")

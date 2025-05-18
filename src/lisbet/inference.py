@@ -96,7 +96,8 @@ def _process_inference_dataset(
     fps_scaling: float,
     batch_size: int,
     data_filter: Optional[str] = None,
-    keypoints_subset: Optional[str] = None,
+    select_coords: Optional[str] = None,
+    rename_coords: Optional[str] = None,
     device: Optional[torch.device] = None,
 ) -> list[tuple[str, np.ndarray]]:
     """
@@ -126,9 +127,13 @@ def _process_inference_dataset(
         Batch size for inference.
     data_filter : str, optional
         Filter to apply when loading records.
-    keypoints_subset : str, optional
-        Optional subset string in the format 'INDIVS;COORDS;PARTS', where each field is
-        a comma-separated list or '*' for all. If None, all data is loaded.
+    select_coords : str, optional
+        Optional subset string in the format 'INDIVIDUALS;AXES;KEYPOINTS', where each
+        field is a comma-separated list or '*' for all. If None, all data is loaded.
+    rename_coords : str, optional
+        Optional coordinate names remapping in the format 'INDIVIDUALS;AXES;KEYPOINTS',
+        where each field is a comma-separated list of maps 'old_id:new_id' or '*' for
+        no remapping at that level. If None, original dataset names are used.
     device : str, optional
         Device to use. Defaults to CUDA if available.
 
@@ -166,7 +171,8 @@ def _process_inference_dataset(
         data_path,
         data_filter=data_filter,
         data_scale=data_scale,
-        keypoints_subset=keypoints_subset,
+        select_coords=select_coords,
+        rename_coords=rename_coords,
     )
 
     # Input features compatibility check
@@ -269,7 +275,8 @@ def annotate_behavior(
     fps_scaling: float = 1.0,
     batch_size: int = 128,
     output_path: Optional[str] = None,
-    keypoints_subset: Optional[str] = None,
+    select_coords: Optional[str] = None,
+    rename_coords: Optional[str] = None,
 ) -> list[tuple[str, np.ndarray]]:
     """
     Run LISBET behavior classification for every record in a dataset.
@@ -301,9 +308,13 @@ def annotate_behavior(
         Batch size for inference.
     output_path : str or None, optional
         If given, predictions will be saved as CSV files in this directory.
-    keypoints_subset : str, optional
-        Optional subset string in the format 'INDIVS;COORDS;PARTS', where each field is
-        a comma-separated list or '*' for all. If None, all data is loaded.
+    select_coords : str, optional
+        Optional subset string in the format 'INDIVIDUALS;AXES;KEYPOINTS', where each
+        field is a comma-separated list or '*' for all. If None, all data is loaded.
+    rename_coords : str, optional
+        Optional coordinate names remapping in the format 'INDIVIDUALS;AXES;KEYPOINTS',
+        where each field is a comma-separated list of maps 'old_id:new_id' or '*' for
+        no remapping at that level. If None, original dataset names are used.
 
     Returns
     -------
@@ -327,7 +338,8 @@ def annotate_behavior(
         fps_scaling=fps_scaling,
         batch_size=batch_size,
         data_filter=data_filter,
-        keypoints_subset=keypoints_subset,
+        select_coords=select_coords,
+        rename_coords=rename_coords,
     )
 
     # Store results on file, if requested
@@ -354,7 +366,8 @@ def compute_embeddings(
     fps_scaling: float = 1.0,
     batch_size: int = 128,
     output_path: Optional[str] = None,
-    keypoints_subset: Optional[str] = None,
+    select_coords: Optional[str] = None,
+    rename_coords: Optional[str] = None,
 ) -> list[tuple[str, np.ndarray]]:
     """
     Compute LISBET embeddings for every record in a dataset.
@@ -386,9 +399,13 @@ def compute_embeddings(
         Batch size for inference.
     output_path : str or None, optional
         If given, embeddings will be saved as CSV files in this directory.
-    keypoints_subset : str, optional
-        Optional subset string in the format 'INDIVS;COORDS;PARTS', where each field is
-        a comma-separated list or '*' for all. If None, all data is loaded.
+    select_coords : str, optional
+        Optional subset string in the format 'INDIVIDUALS;AXES;KEYPOINTS', where each
+        field is a comma-separated list or '*' for all. If None, all data is loaded.
+    rename_coords : str, optional
+        Optional coordinate names remapping in the format 'INDIVIDUALS;AXES;KEYPOINTS',
+        where each field is a comma-separated list of maps 'old_id:new_id' or '*' for
+        no remapping at that level. If None, original dataset names are used.
 
     Returns
     -------
@@ -412,7 +429,8 @@ def compute_embeddings(
         fps_scaling=fps_scaling,
         batch_size=batch_size,
         data_filter=data_filter,
-        keypoints_subset=keypoints_subset,
+        select_coords=select_coords,
+        rename_coords=rename_coords,
     )
 
     # Store results on file, if requested

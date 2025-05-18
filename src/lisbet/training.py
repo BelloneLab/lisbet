@@ -92,7 +92,8 @@ def _load_records(
     test_ratio,
     dev_seed,
     test_seed,
-    keypoints_subset,
+    select_coords,
+    rename_coords,
     task_ids,
     task_data,
 ):
@@ -134,7 +135,8 @@ def _load_records(
             test_ratio=test_ratio,
             dev_seed=dev_seed,
             test_seed=test_seed,
-            keypoints_subset=keypoints_subset,
+            select_coords=select_coords,
+            rename_coords=rename_coords,
         )
         for dataset, datapath in datasources
     ]
@@ -667,7 +669,8 @@ def train(
     data_path: str = "datasets/CalMS21",
     data_scale: Optional[str] = None,
     data_filter: Optional[str] = None,
-    keypoints_subset: Optional[str] = None,
+    select_coords: Optional[str] = None,
+    rename_coords: Optional[str] = None,
     window_size: int = 200,
     window_offset: int = 0,
     fps_scaling: float = 1.0,
@@ -722,9 +725,13 @@ def train(
     data_filter : str or None, optional
         Comma-separated substrings; a record is kept if any substring occurs in its
         relative path. By default, all records are kept.
-    keypoints_subset : str or None, optional
-        Optional subset string in the format 'INDIVS;COORDS;PARTS', where each field is
-        a comma-separated list or '*' for all. If None, all data is loaded.
+    select_coords : str or None, optional
+        Optional subset string in the format 'INDIVIDUALS;AXES;KEYPOINTS', where each
+        field is a comma-separated list or '*' for all. If None, all data is loaded.
+    rename_coords : str or None, optional
+        Optional coordinate names remapping in the format 'INDIVIDUALS;AXES;KEYPOINTS',
+        where each field is a comma-separated list of maps 'old_id:new_id' or '*' for
+        no remapping at that level. If None, original dataset names are used.
     window_size : int, default=200
         Number of frames to consider at each time.
     window_offset : int, default=0
@@ -821,9 +828,10 @@ def train(
         test_ratio,
         run_seeds.get("dev_split"),
         run_seeds.get("test_split"),
-        keypoints_subset,
-        task_ids_list,
-        task_data,
+        select_coords=select_coords,
+        rename_coords=rename_coords,
+        task_ids=task_ids_list,
+        task_data=task_data,
     )
 
     # Determine data shape from first record

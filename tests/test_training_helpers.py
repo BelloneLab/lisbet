@@ -51,7 +51,8 @@ def test_load_records_success(tmp_path):
         test_ratio=None,
         dev_seed=None,
         test_seed=None,
-        keypoints_subset=None,
+        select_coords=None,
+        rename_coords=None,
         task_ids=["task"],
         task_data=None,
     )
@@ -77,7 +78,8 @@ def test_load_records_inconsistent_features_raises(tmp_path):
             test_ratio=None,
             dev_seed=None,
             test_seed=None,
-            keypoints_subset=None,
+            select_coords=None,
+            rename_coords=None,
             task_ids=["task"],
             task_data=None,
         )
@@ -138,6 +140,8 @@ def test_process_inference_dataset_input_features_success(tmp_path):
         window_offset=0,
         fps_scaling=1.0,
         batch_size=2,
+        select_coords=None,
+        rename_coords=None,
     )
     assert isinstance(result, list)
 
@@ -192,6 +196,8 @@ def test_process_inference_dataset_input_features_incompatible(tmp_path):
             window_offset=0,
             fps_scaling=1.0,
             batch_size=2,
+            select_coords=None,
+            rename_coords=None,
         )
 
 
