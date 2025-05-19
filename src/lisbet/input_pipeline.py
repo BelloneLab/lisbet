@@ -325,7 +325,7 @@ class NextWindowPredictionDataset(BaseDataset):
 
             if self.rng.random() < 0.5:
                 # Select a valid next window from same sequence (past current idx)
-                curr_len = self.records[curr_key]["keypoints"].shape[0]
+                curr_len = self.records[curr_key]["posetracks"].sizes["time"]
                 next_idx = curr_idx + self.rng.integers(curr_len - curr_loc)
 
                 # OBS: In order to generate a valid next window for every frame,
@@ -456,7 +456,7 @@ class DelayMousePredictionDataset(BaseDataset):
         for curr_idx in self.main_indices:
             # Select keypoints data
             curr_key, curr_loc = self.window_catalog[curr_idx]
-            curr_len = self.records[curr_key]["keypoints"].shape[0]
+            curr_len = self.records[curr_key]["posetracks"].sizes["time"]
 
             # Compute shift bounds
             lower_bound = max(curr_loc + self.min_delay, 0)

@@ -162,7 +162,7 @@ def _load_posetracks(seq_path, data_format, data_scale, select_coords, rename_co
         if min_val < 0.0 or max_val > 1.0:
             raise ValueError(
                 f"After applying data_scale={data_scale}, coordinates are not in "
-                f"[0, 1] (min={min_val}, max={max_val}). "
+                f"[0, 1] (min={min_val.values}, max={max_val.values}). "
                 "Explicit scaling assumes that the video has already been cropped to "
                 "the region of interest during pose estimation, its origin is at "
                 "(0,0), and the maximum dimensions match the scale provided. If this "
@@ -402,7 +402,7 @@ def dump_records(data_path, records):
 
     """
     for key, data in tqdm(records, desc="Dumping records to disk"):
-        rec_path = data_path / key
+        rec_path = Path(data_path) / key
         rec_path.mkdir(parents=True, exist_ok=True)
 
         # Save posetracks
