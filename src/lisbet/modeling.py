@@ -1,10 +1,10 @@
-"""Pytorch models and their extensions.
+"""PyTorch models and their extensions.
 The transformer model is based on ViT [1] and its reference implementation in JAX/Flax,
 available at https://github.com/google-research/vision_transformer.
 
 Notes
 -----
-[a] Early versions of LISBET were using Tensorflow/Keras.
+[a] Early versions of LISBET were using TensorFlow/Keras.
 
 References
 ----------
@@ -17,11 +17,14 @@ References
 
 import logging
 import math
+import pprint
 from pathlib import Path
 
 import torch
 import yaml
 from huggingface_hub import snapshot_download
+from rich.console import Console
+from rich.table import Table
 from torch import nn
 from torchinfo import summary
 
@@ -161,15 +164,16 @@ def load_model(config_path, weights_path):
 
     Returns
     -------
-    toch.nn.Module : The loaded model.
+    torch.nn.Module : The loaded model.
 
     """
-    with open(config_path, "r", encoding="utf-8") as f_yaml:
+    with open(config_path, encoding="utf-8") as f_yaml:
         model_config = yaml.safe_load(f_yaml)
 
     if "out_dim" in model_config:
         # TODO: I should probably revise the way the MultiTaskModel is initialized.
-        #       The EmbeddingModel style is probably a better choice.
+        #       The old EmbeddingModel style (**model_config) is probably a better
+        #       choice if we remove the extra keys.
         backbone = Backbone(
             bp_dim=model_config["bp_dim"],
             emb_dim=model_config["emb_dim"],
@@ -192,7 +196,15 @@ def load_model(config_path, weights_path):
             },
         )
     else:
-        model = EmbeddingModel(**model_config)
+        model = EmbeddingModel(
+            output_token_idx=model_config["output_token_idx"],
+            bp_dim=model_config["bp_dim"],
+            emb_dim=model_config["emb_dim"],
+            hidden_dim=model_config["hidden_dim"],
+            num_heads=model_config["num_heads"],
+            num_layers=model_config["num_layers"],
+            max_len=model_config["max_len"],
+        )
 
     # Load weights
     # NOTE: Setting strict=False allows for partial loading (i.e., dropping
@@ -212,11 +224,13 @@ def load_model(config_path, weights_path):
 
 def export_embedder(model_path, weights_path, output_path=Path(".")):
     # Get hyper-parameters
-    with open(model_path, "r", encoding="utf-8") as f_yaml:
+    with open(model_path, encoding="utf-8") as f_yaml:
         yaml_config = yaml.safe_load(f_yaml)
 
     # Create behavior embedding model
+    # TODO: This should be improved.
     model_config = {
+        "input_features": yaml_config["input_features"],
         "bp_dim": yaml_config["bp_dim"],
         "emb_dim": yaml_config["emb_dim"],
         "hidden_dim": yaml_config["hidden_dim"],
@@ -224,7 +238,15 @@ def export_embedder(model_path, weights_path, output_path=Path(".")):
         "num_layers": yaml_config["num_layers"],
         "max_len": yaml_config["max_len"],
     }
-    embedding_model = EmbeddingModel(output_token_idx=-1, **model_config)
+    embedding_model = EmbeddingModel(
+        output_token_idx=-1,
+        bp_dim=model_config["bp_dim"],
+        emb_dim=model_config["emb_dim"],
+        hidden_dim=model_config["hidden_dim"],
+        num_heads=model_config["num_heads"],
+        num_layers=model_config["num_layers"],
+        max_len=model_config["max_len"],
+    )
     summary(embedding_model)
 
     # Load weights from pretrained model
@@ -255,11 +277,34 @@ def fetch_model(model_id, download_path=Path(".")):
         "lisbet32x4-calms21UftT1-classifier",
         "lisbet32x4-calms21U-embedder",
     ]
-    assert (
-        model_id in valid_model_ids
-    ), f"Model ID '{model_id}' not found in the list of available models."
+    assert model_id in valid_model_ids, (
+        f"Model ID '{model_id}' not found in the list of available models."
+    )
 
     model_path = download_path / model_id
     snapshot_download(
         repo_id=f"gchindemi/{model_id}", repo_type="model", local_dir=model_path
     )
+
+
+def model_info(model_path):
+    """Print information about a LISBET model config file."""
+
+    with open(model_path, encoding="utf-8") as f:
+        config = yaml.safe_load(f)
+
+    console = Console()
+    table = Table(title="LISBET Model Configuration")
+
+    table.add_column("Key", style="cyan", no_wrap=True)
+    table.add_column("Value", style="magenta")
+
+    for key, value in config.items():
+        # Pretty-print nested dicts/lists
+        if isinstance(value, (dict, list)):
+            value_str = pprint.pformat(value, compact=True, width=60)
+        else:
+            value_str = str(value)
+        table.add_row(str(key), value_str)
+
+    console.print(table)

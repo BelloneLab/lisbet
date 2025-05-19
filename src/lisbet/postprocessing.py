@@ -1,17 +1,16 @@
 """LISBET"""
 
 import logging
-from itertools import combinations, groupby
-from math import comb
+from itertools import groupby
 from pathlib import Path
-from typing import List, Optional, Tuple, Dict
+from typing import Optional
 
 import numpy as np
 import pandas as pd
 from scipy.cluster import hierarchy
 from scipy.signal import savgol_filter
 from scipy.spatial.distance import pdist, squareform
-from sklearn.metrics import f1_score, silhouette_samples, silhouette_score
+from sklearn.metrics import silhouette_samples, silhouette_score
 from tqdm.auto import tqdm
 
 
@@ -168,7 +167,7 @@ def select_prototypes(
     distance_threshold: float = 0.6,
     fps: int = 30,
     output_path: Optional[str] = None,
-) -> Tuple[Dict, List[Tuple[str, pd.DataFrame]]]:
+) -> tuple[dict, list[tuple[str, pd.DataFrame]]]:
     """
     Select motifs from a set of Hidden Markov Models using a posteriori linkage.
 

@@ -52,8 +52,20 @@ The complete path to each leaf directory (e.g., ``wild-type/protocol-A/experimen
 Key Point Configuration
 -----------------------
 
-Currently, LISBET enforces a fixed set of body parts (key points) and their names.
-This constraint is particularly important when working with pre-trained models, ensuring meaningful and comparable results across experiments, and maintaining consistency in behavioral analysis.
+LISBET models require that the set of body parts (key points) and their names match exactly (including order) the configuration used during model training.
+This is especially important when using pre-trained models, as the input features must correspond to those expected by the model.
 
-While this might seem restrictive, it ensures reproducibility and reliable behavior classification.
-We plan to make this more flexible in future releases by supporting custom key point sets during training, different key point configurations at inference time, and providing tools to map between different key point naming conventions.
+To accommodate datasets with different keypoint names, extra keypoints, or different orders, LISBET provides the `--select_coords` and `--rename_coords` options in its CLI.
+These options allow you to drop unnecessary keypoints, reorder them, and rename individuals or keypoints to match the model’s requirements.
+
+You can inspect the required keypoint layout for any model using:
+
+.. code-block:: console
+
+   $ betman model_info models/<your_model>/model_config.yml
+
+This will display the expected `input_features` for the model.
+Make sure your dataset matches this specification using the selection and renaming options as needed.
+
+While this requirement may seem restrictive, it ensures reproducibility and reliable behavior classification.
+Future releases may provide more flexibility for custom keypoint sets and automatic mapping between conventions.

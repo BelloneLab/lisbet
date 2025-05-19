@@ -1,13 +1,11 @@
 """Tests for the analysis module."""
 
 import pandas as pd
-import pytest
 
 from lisbet import analysis
 
 
 class TestBoutStats:
-
     def test_bout_stats_basic(self):
         sequences = [1, 1, 2, 2, 2, 1, 1, 1, 3, 3, 1, 1, 2]
         lengths = [8, 5]

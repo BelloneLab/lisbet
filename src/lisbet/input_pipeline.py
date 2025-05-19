@@ -1,4 +1,4 @@
-"""Input data managment."""
+"""Input data management."""
 
 import logging
 from abc import ABC
@@ -25,7 +25,7 @@ class BaseDataset(Dataset, ABC):
         self.window_catalog = [
             idx
             for key, data in records
-            for idx in product([key], range(data["keypoints"].shape[0]))
+            for idx in product([key], range(data["posetracks"].sizes["time"]))
         ]
 
     def __len__(self):
@@ -42,8 +42,8 @@ class BaseDataset(Dataset, ABC):
         if window_size is None:
             window_size = self.window_size
 
-        x_data = self.records[curr_key]["keypoints"]
-        seq_len = x_data.shape[0]
+        x_data = self.records[curr_key]["posetracks"]
+        seq_len = x_data.sizes["time"]
 
         # Compute actual window size
         act_window_size = int(np.rint(self.fps_scaling * window_size))
@@ -65,10 +65,15 @@ class BaseDataset(Dataset, ABC):
         # logging.debug("Data bounds: (%d, %d, %d)", start_idx, curr_loc, stop_idx)
 
         # Pad data with zeros
-        past_pad = np.zeros((past_n, *x_data.shape[1:]))
-        future_pad = np.zeros((future_n, *x_data.shape[1:]))
+        past_pad = np.zeros((past_n, x_data.sizes["features"]))
+        future_pad = np.zeros((future_n, x_data.sizes["features"]))
         x_data = np.concatenate(
-            [past_pad, x_data[start_idx:stop_idx], future_pad], axis=0
+            [
+                past_pad,
+                x_data["position"].isel(time=slice(start_idx, stop_idx)),
+                future_pad,
+            ],
+            axis=0,
         )
 
         # assert (
@@ -130,7 +135,11 @@ class FrameClassificationDataset(BaseDataset):
 
         # Select annotation data, if requested, return x_data only otherwise
         if self.num_classes is not None:
-            y_data = self.records[curr_key]["annotations"][curr_loc]
+            y_data = (
+                self.records[curr_key]["annotations"]
+                .label_cat.isel(time=curr_loc)
+                .values
+            )
 
             return x_data, y_data
 
@@ -316,7 +325,7 @@ class NextWindowPredictionDataset(BaseDataset):
 
             if self.rng.random() < 0.5:
                 # Select a valid next window from same sequence (past current idx)
-                curr_len = self.records[curr_key]["keypoints"].shape[0]
+                curr_len = self.records[curr_key]["posetracks"].sizes["time"]
                 next_idx = curr_idx + self.rng.integers(curr_len - curr_loc)
 
                 # OBS: In order to generate a valid next window for every frame,
@@ -447,7 +456,7 @@ class DelayMousePredictionDataset(BaseDataset):
         for curr_idx in self.main_indices:
             # Select keypoints data
             curr_key, curr_loc = self.window_catalog[curr_idx]
-            curr_len = self.records[curr_key]["keypoints"].shape[0]
+            curr_len = self.records[curr_key]["posetracks"].sizes["time"]
 
             # Compute shift bounds
             lower_bound = max(curr_loc + self.min_delay, 0)
@@ -598,4 +607,3 @@ class VideoSpeedPredictionDataset(BaseDataset):
             curr_data = self.transform(curr_data)
 
         return curr_data, label
-

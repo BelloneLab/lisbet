@@ -5,14 +5,16 @@ behavior annotation and embedding computation. It supports both single-sequence
 and dataset-wide inference.
 """
 
-import logging
+from itertools import zip_longest
 from pathlib import Path
-from typing import Callable, List, Optional, Tuple, Union
+from typing import Callable, Optional
 
 import numpy as np
 import pandas as pd
 import torch
 import yaml
+from rich.console import Console
+from rich.table import Table
 from torchvision import transforms
 from tqdm.auto import tqdm
 
@@ -85,30 +87,39 @@ def run_inference_for_sequence(
     return np.concatenate(predictions)
 
 
-def _process_dataset(
-    model: torch.nn.Module,
+def _process_inference_dataset(
+    model_path: str,
+    weights_path: str,
     forward_fn: Callable[[torch.nn.Module, torch.Tensor], torch.Tensor],
     data_format: str,
     data_path: str,
+    data_scale: str,
     window_size: int,
     window_offset: int,
     fps_scaling: float,
     batch_size: int,
     data_filter: Optional[str] = None,
+    select_coords: Optional[str] = None,
+    rename_coords: Optional[str] = None,
     device: Optional[torch.device] = None,
-) -> List[Tuple[str, np.ndarray]]:
-    """Process an entire dataset with the given model and forward function.
+) -> list[tuple[str, np.ndarray]]:
+    """
+    Load model, records, check input_features compatibility, and process the dataset.
 
     Parameters
     ----------
-    model : torch.nn.Module
-        The model to use for inference.
+    model_path : str
+        Path to the model config (YAML format).
+    weights_path : str
+        Path to the model weights.
     forward_fn : callable
         Function defining how to process model outputs.
     data_format : str
         Format of the dataset to analyze.
     data_path : str
         Path to the directory containing the dataset files.
+    data_scale : str or None
+        Scaling string or None for auto-scaling.
     window_size : int
         Size of the sliding window.
     window_offset : int
@@ -119,6 +130,13 @@ def _process_dataset(
         Batch size for inference.
     data_filter : str, optional
         Filter to apply when loading records.
+    select_coords : str, optional
+        Optional subset string in the format 'INDIVIDUALS;AXES;KEYPOINTS', where each
+        field is a comma-separated list or '*' for all. If None, all data is loaded.
+    rename_coords : str, optional
+        Optional coordinate names remapping in the format 'INDIVIDUALS;AXES;KEYPOINTS',
+        where each field is a comma-separated list of maps 'old_id:new_id' or '*' for
+        no remapping at that level. If None, original dataset names are used.
     device : str, optional
         Device to use. Defaults to CUDA if available.
 
@@ -131,6 +149,8 @@ def _process_dataset(
     ------
     RuntimeError
         If duplicate sequence IDs are found across dataset splits.
+    ValueError
+        If input features are incompatible.
     """
     if device is None:
         # Configure accelerator
@@ -142,29 +162,63 @@ def _process_dataset(
             device_type = "cpu"
         device = torch.device(device_type)
 
-    # Transfer model to device
+    # Load model config and model
+    with open(model_path, encoding="utf-8") as f:
+        config = yaml.safe_load(f)
+    model = modeling.load_model(model_path, weights_path)
     model.to(device)
 
     # Load records
-    # NOTE: If the dataset has an explicit test set, the corresponding records will be
-    #       allocated to the 'test' group. Otherwise, all records will be in the 'train'
-    #       group. However, no training is performed here. Data are simply analyzed and
-    #       returned, regardless of the group.
-    group_records = load_records(data_format, data_path, data_filter=data_filter)
-    seen_keys = set()
+    group_records = load_records(
+        data_format,
+        data_path,
+        data_filter=data_filter,
+        data_scale=data_scale,
+        select_coords=select_coords,
+        rename_coords=rename_coords,
+    )
+
+    # Input features compatibility check
+    model_features = [tuple(x) for x in config.get("input_features")]
+    dataset_features = (
+        group_records["main_records"][0][1]["posetracks"]
+        .coords["features"]
+        .values.tolist()
+    )
+    if dataset_features != model_features:
+        # Make table for better visualization
+        console = Console()
+        table = Table(title="Input Features Compatibility Check")
+        table.add_column("Model", style="cyan")
+        table.add_column("Dataset", style="magenta")
+
+        # Add rows to the table
+        rows = zip_longest(model_features, dataset_features, fillvalue="")
+        for m_feat, d_feat in rows:
+            table.add_row(str(m_feat), str(d_feat))
+
+        # Print the table to string
+        with console.capture() as capture:
+            console.print(
+                "[bold red]ERROR: Incompatible input features between model and "
+                "dataset!\nPlease use 'select_coords' and 'rename_coords' to "
+                "align model and dataset input features.[/bold red]"
+            )
+            console.print(table)
+        table_str = capture.get()
+
+        raise ValueError(f"Incompatible input features.\n{table_str}")
+
+    # Analyze records
+    # NOTE: We assume no overlapping record IDs. That is, records could be stored in a
+    #       single list with no ambiguity. To ensure that, we keep a set of observed
+    #       keys and check for duplicates. This safety check is not strictly necessary
+    #       and should be removed in the future or moved to the dataset loading.
     results = []
-
-    # Analyze every group (i.e. train, test and dev)
-    # NOTE: We assume no overlapping record IDs in the groups. That is, records could be
-    #       stored in a single list with no ambiguity. To ensure that, we keep a set of
-    #       observed keys and check for duplicates.
-    for group, records in zip(("train", "test", "dev"), group_records):
-        if records is None:
-            logging.debug("Empty %s group, skipping", group)
-            continue
-
+    seen_keys = set()
+    for group_name, group_data in group_records.items():
         for seq in tqdm(
-            records, desc=f"Analyzing {data_format} dataset, {group} group"
+            group_data, desc=f"Analyzing {data_format} dataset, {group_name} group"
         ):
             # Extract sequence ID
             key = seq[0]
@@ -234,14 +288,18 @@ def annotate_behavior(
     weights_path: str,
     data_format: str,
     data_path: str,
+    data_scale: Optional[str] = None,
     data_filter: Optional[str] = None,
     window_size: int = 200,
     window_offset: int = 0,
     fps_scaling: float = 1.0,
     batch_size: int = 128,
     output_path: Optional[str] = None,
-) -> List[Tuple[str, np.ndarray]]:
-    """Run LISBET behavior classification for every record in a dataset.
+    select_coords: Optional[str] = None,
+    rename_coords: Optional[str] = None,
+) -> list[tuple[str, np.ndarray]]:
+    """
+    Run LISBET behavior classification for every record in a dataset.
 
     This function loads a classification model and processes an entire dataset,
     producing behavior annotations for each sequence.
@@ -256,6 +314,8 @@ def annotate_behavior(
         Format of the dataset to analyze.
     data_path : str
         Path to the directory containing the dataset files.
+    data_scale : str or None
+        Scaling string or None for auto-scaling.
     data_filter : str, optional
         Filter to apply when loading records.
     window_size : int, default=200
@@ -268,6 +328,13 @@ def annotate_behavior(
         Batch size for inference.
     output_path : str or None, optional
         If given, predictions will be saved as CSV files in this directory.
+    select_coords : str, optional
+        Optional subset string in the format 'INDIVIDUALS;AXES;KEYPOINTS', where each
+        field is a comma-separated list or '*' for all. If None, all data is loaded.
+    rename_coords : str, optional
+        Optional coordinate names remapping in the format 'INDIVIDUALS;AXES;KEYPOINTS',
+        where each field is a comma-separated list of maps 'old_id:new_id' or '*' for
+        no remapping at that level. If None, original dataset names are used.
 
     Returns
     -------
@@ -279,20 +346,20 @@ def annotate_behavior(
     ValueError
         If the loaded model is not a classification model.
     """
-    model = modeling.load_model(model_path, weights_path)
-    if not isinstance(model, modeling.MultiTaskModel) or "cfc" not in model.task_heads:
-        raise ValueError("Model must be a classification model for behavior annotation")
-
-    results = _process_dataset(
-        model=model,
+    results = _process_inference_dataset(
+        model_path=model_path,
+        weights_path=weights_path,
         forward_fn=_classification_forward,
         data_format=data_format,
         data_path=data_path,
+        data_scale=data_scale,
         window_size=window_size,
         window_offset=window_offset,
         fps_scaling=fps_scaling,
         batch_size=batch_size,
         data_filter=data_filter,
+        select_coords=select_coords,
+        rename_coords=rename_coords,
     )
 
     # Store results on file, if requested
@@ -312,14 +379,18 @@ def compute_embeddings(
     weights_path: str,
     data_format: str,
     data_path: str,
+    data_scale: Optional[str] = None,
     data_filter: Optional[str] = None,
     window_size: int = 200,
     window_offset: int = 0,
     fps_scaling: float = 1.0,
     batch_size: int = 128,
     output_path: Optional[str] = None,
-) -> List[Tuple[str, np.ndarray]]:
-    """Compute LISBET embeddings for every record in a dataset.
+    select_coords: Optional[str] = None,
+    rename_coords: Optional[str] = None,
+) -> list[tuple[str, np.ndarray]]:
+    """
+    Compute LISBET embeddings for every record in a dataset.
 
     This function loads an embedding model and processes an entire dataset,
     computing embeddings for each sequence.
@@ -334,6 +405,8 @@ def compute_embeddings(
         Format of the dataset to analyze.
     data_path : str
         Path to the directory containing the dataset files.
+    data_scale : str or None
+        Scaling string or None for auto-scaling.
     data_filter : str, optional
         Filter to apply when loading records.
     window_size : int, default=200
@@ -346,6 +419,13 @@ def compute_embeddings(
         Batch size for inference.
     output_path : str or None, optional
         If given, embeddings will be saved as CSV files in this directory.
+    select_coords : str, optional
+        Optional subset string in the format 'INDIVIDUALS;AXES;KEYPOINTS', where each
+        field is a comma-separated list or '*' for all. If None, all data is loaded.
+    rename_coords : str, optional
+        Optional coordinate names remapping in the format 'INDIVIDUALS;AXES;KEYPOINTS',
+        where each field is a comma-separated list of maps 'old_id:new_id' or '*' for
+        no remapping at that level. If None, original dataset names are used.
 
     Returns
     -------
@@ -357,20 +437,20 @@ def compute_embeddings(
     ValueError
         If the loaded model is not an embedding model.
     """
-    model = modeling.load_model(model_path, weights_path)
-    if not isinstance(model, modeling.EmbeddingModel):
-        raise ValueError("Model must be an embedding model for computing embeddings")
-
-    results = _process_dataset(
-        model=model,
+    results = _process_inference_dataset(
+        model_path=model_path,
+        weights_path=weights_path,
         forward_fn=_embedding_forward,
         data_format=data_format,
         data_path=data_path,
+        data_scale=data_scale,
         window_size=window_size,
         window_offset=window_offset,
         fps_scaling=fps_scaling,
         batch_size=batch_size,
         data_filter=data_filter,
+        select_coords=select_coords,
+        rename_coords=rename_coords,
     )
 
     # Store results on file, if requested

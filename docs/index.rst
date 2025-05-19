@@ -77,7 +77,7 @@ For a detailed guide on using this approach, see :ref:`social-behavior-discovery
 Design Philosophy
 -----------------
 
-LISBET works with standard body tracking data from common tools like DeepLabCut, SLEAP, and MARS.
+LISBET works with standard body tracking data from common tools like DeepLabCut and SLEAP.
 The model captures interactions across multiple timescales and can correlate motifs with neural recordings, making it particularly valuable for neuroscience research.
 
 The design of LISBET addresses fundamental challenges in social behavior research by moving beyond human-defined behavioral categories.

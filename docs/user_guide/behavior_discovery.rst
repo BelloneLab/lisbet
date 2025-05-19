@@ -5,7 +5,10 @@ Social behavior discovery using a pre-trained model
 
 One of the most common applications of LISBET is using a pre-trained model to automatically discover social behaviors in your dataset.
 
-Requirements: - A pre-trained LISBET embedding model - A keypoints dataset in the standard LISBET format
+Requirements:
+
+- A pre-trained LISBET embedding model
+- A keypoints dataset in the standard LISBET format
 
 .. _social-behavior-discovery-step0:
 
@@ -41,13 +44,13 @@ For example, your ``betman predict`` command might look something like this:
 .. code-block:: console
 
    $ betman compute_embeddings \
-      --data_format=maDLC \
+      --data_format=DLC \
       --window_size=200 \
       --fps_scaling=0.833 \
       -v \
       datasets/MyDataset \
-      models/lisbet32x8-calms21U-embedder/model_config.yml \
-      models/lisbet32x8-calms21U-embedder/weights/weights_last.pt
+      models/lisbet32x4-calms21U-embedder/model_config.yml \
+      models/lisbet32x4-calms21U-embedder/weights/weights_last.pt
 
 Please use ``betman compute_embeddings --help`` for a list of all available option.
 

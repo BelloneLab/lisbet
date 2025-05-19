@@ -11,17 +11,16 @@ We use the data from the CalMS21 Task1 dataset (Sun et al., 2021).
 # Import and configure modules
 # ----------------------------
 # Import the necessary modules and configure the plotting settings.
-from pathlib import Path
 
-import lisbet.plotting as betp
 import matplotlib.pyplot as plt
 import numpy as np
-import pooch
-from scipy.spatial.distance import squareform
 from huggingface_hub import hf_hub_download
+from scipy.spatial.distance import squareform
+
+import lisbet.plotting as betp
 
 # Configure
-plt.rcParams['figure.constrained_layout.use'] = True
+plt.rcParams["figure.constrained_layout.use"] = True
 
 # %%
 # Fetch the sample data from HuggingFace

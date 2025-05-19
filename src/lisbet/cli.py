@@ -4,9 +4,21 @@ import argparse
 import importlib
 import inspect
 import logging
+import textwrap
 from importlib.metadata import version as get_version
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Optional
+
+
+class RawDefaultsHelpFormatter(
+    argparse.ArgumentDefaultsHelpFormatter, argparse.RawTextHelpFormatter
+):
+    """
+    Show default values **and** keep all newline / indent formatting
+    exactly as written in help strings.
+    """
+
+    pass
 
 
 def setup_logging(verbose: int = 0, log_level: Optional[str] = None) -> None:
@@ -23,6 +35,7 @@ def setup_logging(verbose: int = 0, log_level: Optional[str] = None) -> None:
 
     logging.basicConfig(level=level)
     logging.getLogger("movement.io.load_poses").setLevel(logging.WARNING)
+    logging.getLogger("numba").setLevel(logging.WARNING)
 
 
 def add_verbosity_args(parser: argparse.ArgumentParser) -> None:
@@ -47,9 +60,81 @@ def add_keypoints_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--data_format",
         type=str,
-        default="maDLC",
-        choices=["maDLC", "saDLC", "SLEAP", "h5archive"],
+        default="DLC",
+        choices=["DLC", "SLEAP", "movement"],
         help="Keypoints dataset format",
+    )
+    parser.add_argument(
+        "--data_scale",
+        type=str,
+        help=textwrap.dedent(
+            """\
+            Spatial dimensions of the dataset.
+
+            - For 2D data:  WIDTHxHEIGHT         (e.g., 1920x1080)
+            - For 3D data:  WIDTHxHEIGHTxDEPTH   (e.g., 1920x1080x480)
+
+            When specified, input coordinates (x, y, z) are interpreted in data units
+            and normalized to the [0, 1] range by dividing by the given scale.
+
+            If omitted, the scale is inferred from the dataset.
+            """
+        ),
+    )
+    parser.add_argument(
+        "--select_coords",
+        type=str,
+        metavar="INDIVIDUALS;AXES;KEYPOINTS",
+        help=textwrap.dedent(
+            """\
+            Optional subset of coordinates to load (quote or escape the spec).
+
+              Example:
+                'individual1,individual2;x,y;nose,neck,tail'
+
+              Format:  INDIVIDUALS;AXES;KEYPOINTS
+                INDIVIDUALS = comma‑separated individuals   | *
+                AXES        = comma‑separated spatial axes  | *
+                KEYPOINTS   = comma‑separated keypoints     | *
+
+              Wildcards:
+                *        include all items at that level
+
+              If omitted, the entire dataset is loaded.
+
+              NOTE: ';' and '*' are shell meta-characters, use single quotes
+              on Unix‑like shells, double quotes on Windows, or escape them.
+            """
+        ),
+    )
+    parser.add_argument(
+        "--rename_coords",
+        type=str,
+        metavar=(
+            "OLD_INDIVIDUALS:NEW_INDIVIDUALS;"
+            "OLD_AXES:NEW_AXES;"
+            "OLD_KEYPOINTS:NEW_KEYPOINTS"
+        ),
+        help=textwrap.dedent(
+            """\
+            Optional mapping to rename coordinates (quote or escape the spec).
+
+              Example:
+                '*;*;nose:snout,tail:tailbase'
+
+              Format:  INDIVIDUALS;AXES;KEYPOINTS
+                INDIVIDUALS = comma‑separated individual mappings   | *
+                AXES        = comma‑separated spatial axis mappings | *
+                KEYPOINTS   = comma‑separated keypoint mappings     | *
+
+              Each mapping is OLD_NAME:NEW_NAME. Use * to skip renaming at that level.
+
+              If omitted, original dataset names are used.
+
+              NOTE: ';' and '*' are shell meta-characters. Use single quotes
+              on Unix‑like shells, double quotes on Windows, or escape them.
+            """
+        ),
     )
     parser.add_argument(
         "--window_size",
@@ -74,8 +159,12 @@ def add_data_io_args(parser: argparse.ArgumentParser, data_help: str) -> None:
     parser.add_argument(
         "--data_filter",
         type=str,
-        help="""Comma-separated list of sub-keys to keep in the dataset
-        For example, 'mouse001,mouse002' or 'approach'""",
+        help=textwrap.dedent(
+            """\
+            Comma-separated list of sub-keys to keep in the dataset
+            For example, 'mouse001,mouse002' or 'approach'
+            """
+        ),
     )
     parser.add_argument(
         "--output_path", type=Path, default=Path("."), help="Output path"
@@ -83,7 +172,7 @@ def add_data_io_args(parser: argparse.ArgumentParser, data_help: str) -> None:
 
 
 def lazy_load_handler(
-    module_path: str, function_name: str, args: Dict[str, Any]
+    module_path: str, function_name: str, args: dict[str, Any]
 ) -> None:
     """Dynamically import and call a command handler."""
     module = importlib.import_module(module_path)
@@ -330,7 +419,7 @@ def configure_fetch_dataset_parser(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--download_path",
-        default=Path("datasets"),
+        default=Path("."),
         type=Path,
         help="Dataset destination path on the local machine",
     )
@@ -352,6 +441,14 @@ def configure_fetch_model_parser(parser: argparse.ArgumentParser) -> None:
         default=Path("models"),
         type=Path,
         help="Model destination path on the local machine",
+    )
+
+
+def configure_model_info_parser(parser: argparse.ArgumentParser) -> None:
+    """Configure model_info command parser."""
+    add_verbosity_args(parser)
+    parser.add_argument(
+        "model_path", type=Path, help="Path to model config (YAML file)"
     )
 
 
@@ -436,6 +533,12 @@ def main() -> None:
             "function": "fetch_model",
             "configure": configure_fetch_model_parser,
         },
+        "model_info": {
+            "description": "Show information about a LISBET model config file",
+            "module": ".modeling",
+            "function": "model_info",
+            "configure": configure_model_info_parser,
+        },
     }
 
     # Add all subparsers
@@ -444,7 +547,7 @@ def main() -> None:
             cmd_name,
             description=cmd_config["description"],
             add_help=False,
-            formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+            formatter_class=RawDefaultsHelpFormatter,
         )
         cmd_parser.add_argument(
             "-h",
