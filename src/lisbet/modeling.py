@@ -238,7 +238,15 @@ def export_embedder(model_path, weights_path, output_path=Path(".")):
         "num_layers": yaml_config["num_layers"],
         "max_len": yaml_config["max_len"],
     }
-    embedding_model = EmbeddingModel(output_token_idx=-1, **model_config)
+    embedding_model = EmbeddingModel(
+        output_token_idx=-1,
+        bp_dim=model_config["bp_dim"],
+        emb_dim=model_config["emb_dim"],
+        hidden_dim=model_config["hidden_dim"],
+        num_heads=model_config["num_heads"],
+        num_layers=model_config["num_layers"],
+        max_len=model_config["max_len"],
+    )
     summary(embedding_model)
 
     # Load weights from pretrained model
