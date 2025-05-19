@@ -3,7 +3,7 @@
 Fine tuning a classification model on a custom dataset
 ======================================================
 
-After pre-training the LISBET encoder on a large unlabeled dataset (see :ref:`model-training`), the model can be fine-tuned to reproduce the annotation style and prefereces of the user using a smaller labeled dataset.
+After pre-training the LISBET encoder on a large unlabeled dataset (see :ref:`model-training`), the model can be fine-tuned to reproduce the annotation style and preferences of the user using a smaller labeled dataset.
 We demonstrate this process on the CalMS21 dataset - Task 1 (Sun et al., 2021).
 This dataset contains key points tracking for 70 training videos and 19 testing videos of mice pairs in free interaction, annotated with 4 classes: *attack*, *investigation*, *mount*, and *other*.
 
