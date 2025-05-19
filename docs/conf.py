@@ -7,7 +7,7 @@ from importlib.metadata import version as get_version
 sys.path.insert(0, os.path.abspath("../src"))
 
 # Project information
-project = "LSIBET"
+project = "LISBET"
 copyright = f"{datetime.now().year}, Giuseppe Chindemi"
 author = "Giuseppe Chindemi"
 release = get_version("lisbet")
