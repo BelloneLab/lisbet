@@ -43,6 +43,7 @@ def _load_posetracks(seq_path, data_format, data_scale, select_coords, rename_co
     -------
     xarray.Dataset
         The loaded and preprocessed dataset.
+
     """
     # Valid filenames and their corresponding loading functions
     # TODO: Test re matching for all supported formats.
@@ -187,6 +188,7 @@ def _load_annotations(seq_path):
     -------
     xarray.Dataset or None
         The loaded annotations, or None if not found.
+
     """
     # Find all files matching the annotations regex and load them
     rx = re.compile(r"(?i)(manual_scoring|annotations).*\.nc$")
@@ -252,27 +254,28 @@ def load_records(
     test_ratio : float, optional
         Fraction of all records to devote to the test set. If None, no test split is
         performed.
-    dev_seed, test_seed : int, optional
-        Random seeds for reproducibility of the dev and test splits, respectively.
+    dev_seed : int, optional
+        Random seeds for reproducibility of the dev split.
+    test_seed : int, optional
+        Random seeds for reproducibility of the test split.
     select_coords : str or None
         Optional subset string in the format 'INDIVIDUALS;AXES;KEYPOINTS', where each
         field is a comma-separated list or '*' for all. If None, all data is loaded.
-        Example: 'mouse1,mouse2;x,y;nose,tail'
+        Example: 'mouse1,mouse2;x,y;nose,tail'.
     rename_coords : str or None
         Optional coordinate names remapping in the format 'INDIVIDUALS;AXES;KEYPOINTS',
         where each field is a comma-separated list of maps 'old_id:new_id' or '*' for
         no remapping at that level. If None, original dataset names are used.
-        Example: 'mouse1:resident,mouse2:intruder;*;nose:snout,tail:tailbase'
+        Example: 'mouse1:resident,mouse2:intruder;*;nose:snout,tail:tailbase'.
 
     Returns
     -------
     dict[str, list[tuple[str, dict[str, xarray.Dataset]]]]
-        A mapping whose keys are:
-            * 'main_records' – always present
-            * 'test_records' – present only if test_ratio was supplied
-            * 'dev_records' – present only if dev_ratio was supplied
-        Each value is a list of (record_id, data_dict) pairs; every data_dict contains
-        at least 'posetracks' (xarray.Dataset), and optionally 'annotations'.
+        A mapping whose keys are: 'main_records', always present; 'test_records',
+        present only if test_ratio was supplied; 'dev_records', present only if
+        dev_ratio was supplied. Each value is a list of (record_id, data_dict) pairs;
+        every data_dict contains at least 'posetracks' (xarray.Dataset), and optionally
+        'annotations'.
 
     Raises
     ------
@@ -445,6 +448,7 @@ def fetch_dataset(dataset_id, download_path):
     The function handles downloads with checksums and caching using pooch.
     Downloaded data is temporarily stored in a cache directory before being
     processed into the final standardized format.
+
     """
     if dataset_id == "CalMS21_Task1":
         # Get data from Caltech repo
