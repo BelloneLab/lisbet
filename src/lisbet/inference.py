@@ -5,6 +5,7 @@ behavior annotation and embedding computation. It supports both single-sequence
 and dataset-wide inference.
 """
 
+from itertools import zip_longest
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -12,6 +13,8 @@ import numpy as np
 import pandas as pd
 import torch
 import yaml
+from rich.console import Console
+from rich.table import Table
 from torchvision import transforms
 from tqdm.auto import tqdm
 
@@ -183,11 +186,28 @@ def _process_inference_dataset(
         .values.tolist()
     )
     if dataset_features != model_features:
-        raise ValueError(
-            f"Incompatible input features!\n"
-            f"Model expects: {model_features}\n"
-            f"Dataset provides: {dataset_features}"
-        )
+        # Make table for better visualization
+        console = Console()
+        table = Table(title="Input Features Compatibility Check")
+        table.add_column("Model", style="cyan")
+        table.add_column("Dataset", style="magenta")
+
+        # Add rows to the table
+        rows = zip_longest(model_features, dataset_features, fillvalue="")
+        for m_feat, d_feat in rows:
+            table.add_row(str(m_feat), str(d_feat))
+
+        # Print the table to string
+        with console.capture() as capture:
+            console.print(
+                "[bold red]ERROR: Incompatible input features between model and "
+                "dataset!\nPlease use 'select_coords' and 'rename_coords' to "
+                "align model and dataset input features.[/bold red]"
+            )
+            console.print(table)
+        table_str = capture.get()
+
+        raise ValueError(f"Incompatible input features.\n{table_str}")
 
     # Analyze records
     # NOTE: We assume no overlapping record IDs. That is, records could be stored in a
