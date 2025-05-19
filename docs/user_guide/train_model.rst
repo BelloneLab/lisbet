@@ -21,7 +21,7 @@ This dataset contains a large corpus of tracking data of mice pairs in free soci
    $ betman fetch_dataset CalMS21_Unlabeled
 
 This command will download the dataset to the datasets directory in the current working directory.
-The dataset is preprocessed for training and stored in the `movement` format, which is a binary format that can store large amounts of data efficiently (currently NetCFD).
+The dataset is preprocessed for training and stored in the `movement` format, which is a binary format that can store large amounts of data efficiently (currently NetCDF).
 
 Step 2: Train the model
 -----------------------
