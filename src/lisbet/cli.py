@@ -459,6 +459,15 @@ def configure_evaluate_model_parser(parser: argparse.ArgumentParser) -> None:
     add_data_io_args(parser, "Keypoint data location")
     parser.add_argument("model_path", type=Path, help="Path to model config")
     parser.add_argument("weights_path", type=Path, help="Path to model weights")
+    parser.add_argument(
+        "--labels",
+        type=str,
+        default=None,
+        help=(
+            "Comma-separated list of integer labels to use for F1 score (e.g. "
+            "'0,1,2'). If not set, use all labels."
+        ),
+    )
 
 
 def main() -> None:

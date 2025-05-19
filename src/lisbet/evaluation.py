@@ -25,6 +25,7 @@ def evaluate_model(
     batch_size: int = 128,
     select_coords: Optional[str] = None,
     rename_coords: Optional[str] = None,
+    labels: Optional[str] = None,
 ):
     """
     Evaluate a classification model on a labeled dataset and print F1 score.
@@ -32,6 +33,10 @@ def evaluate_model(
     Parameters
     ----------
     (same as inference.annotate_behavior)
+    Returns
+    -------
+    None
+        Prints F1 score and classification report.
     """
     # Run inference to get predictions
     results = inference._process_inference_dataset(
@@ -66,17 +71,24 @@ def evaluate_model(
     for key, pred_arr in results:
         # Find corresponding record
         rec = next(rec for rec in group_records["main_records"] if rec[0] == key)
-        labels = rec[1]["annotations"].label_cat.values
+        true_labels = rec[1]["annotations"].label_cat.values
 
         # pred_arr is one-hot, take argmax
         pred_labels = np.argmax(pred_arr, axis=1)
 
-        y_true.append(labels)
+        y_true.append(true_labels)
         y_pred.append(pred_labels)
 
     y_true = np.concatenate(y_true)
     y_pred = np.concatenate(y_pred)
 
-    # 3. Compute and print F1 score
-    print("Macro F1 score:", f1_score(y_true, y_pred, average="macro"))
-    print(classification_report(y_true, y_pred, digits=3))
+    # Process user-specified labels if provided
+    label_list = None
+    if labels is not None:
+        label_list = [int(x) for x in labels.split(",") if x.strip() != ""]
+
+    # Compute and print F1 score
+    print(
+        "Macro F1 score:", f1_score(y_true, y_pred, average="macro", labels=label_list)
+    )
+    print(classification_report(y_true, y_pred, digits=3, labels=label_list))
