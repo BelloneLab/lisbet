@@ -18,101 +18,165 @@ The second method uses cached HMMs to annotate new data, but it is not recommend
 It is worth noting that the cached HMMs method provides an exact match to the original prototype labels, whereas the the classifier approach only offers an approximation.
 In our experience, the advantages of the classifier approach outweigh its drawbacks, as it is less error-prone and yields a reusable model that can be shared for future use.
 
-[RECOMMENDED] Method 1: Train a LISBET classifier using prototypes as labels
-----------------------------------------------------------------------------------
+Recommended Approach: Train a LISBET Classifier on Prototypes
+-------------------------------------------------------------
 
-In this guide we are going to use Task1 training records in the CalMS21 dataset (Sun et al. 2021) as an example, and suppose that you have already run the prototype selection process on it.
-To train a LISBET classifier on the selected prototypes, you need to create a new dataset with the prototypes as labels.
-This can easily be done using functions available in the LISBET API, for example:
+The recommended and most robust way to annotate new data with previously selected prototypes is to train a LISBET classifier using the prototype labels as ground truth. This approach is simple, reproducible, and produces a reusable model.
+
+Prepare a Labeled Dataset with Prototype Annotations
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+After running prototype selection, you will have CSV files with prototype labels for each sequence.
+You need to convert these into a dataset format suitable for LISBET training (e.g., directory structure with `tracking` and `annotations`).
+
+Example Python snippet to patch the CalMS21 dataset (Sun et al. 2021) with prototype labels, please adapt to your dataset:
 
 .. code-block:: python
 
-    """
-    Patch the CalMS21 dataset (Sun et al. 2021) to use selected prototypes as labels.
-    """
-    from lisbet.datasets.h5archive import load, dump
+    import numpy as np
     import pandas as pd
+    import xarray as xr
+
+    from lisbet.datasets import dump_records, load_records
 
 
     def extract_labels(csv_path):
         df = pd.read_csv(csv_path, index_col=0)
 
-        # Find indices of covered (i.e., labeled) rows
-        covered = (df == 1).any(axis=1)
+        # Rows that already have at least one positive label
+        covered = df.eq(1).any(axis=1)
 
-        # Create a dummy class "Other" for all rows not covered
-        df["Other"] = 1
-        df.loc[covered, "Other"] = 0
+        # Create / update the fallback class
+        df["Other"] = (~covered).astype(int)
 
-        # Make labels for multi-class classification
-        labels = df.values.argmax(axis=1)
+        # Keep only the first 1 in every row
+        first_mask = df.eq(1).cumsum(axis=1).eq(1)
 
-        return labels
+        # Apply the mask – everything that isn’t the first 1 becomes 0
+        df &= first_mask
+
+        return df.values
 
 
     def patch_dataset():
-        records, _ = load("datasets/CalMS21/task1_classic_classification/train_records.h5")
+        records = load_records(
+            data_format="movement",
+            data_path="datasets/CalMS21/task1_classic_classification",
+            data_scale="1024x570",
+            data_filter="train",
+        )["main_records"]
 
         patched_records = []
         for key, data in records:
+            posetracks = data["posetracks"].unstack("features")
+
             labels = extract_labels(f"prototypes/{key}/machineAnnotation_hmmbest_6_32.csv")
 
-            assert (
-                labels.shape[0] == data["keypoints"].shape[0]
-            ), f"Labels length {labels.shape[0]} does not match keypoints length {data['keypoints'].shape[0]}"
+            assert labels.shape[0] == posetracks.sizes["time"]
 
-            patched_record = (key, {"keypoints": data["keypoints"], "annotations": labels})
+            # Convert to xarray Dataset
+            annotations = xr.Dataset(
+                data_vars=dict(
+                    label=(
+                        ["time", "behaviors", "annotators"],
+                        labels[..., np.newaxis],
+                    )
+                ),
+                coords=dict(
+                    time=posetracks.time,
+                    behaviors=[f"motif_{motif_id}" for motif_id in range(labels.shape[1])],
+                    annotators=["LISBET"],
+                ),
+                attrs=dict(
+                    source_software=posetracks.source_software,
+                    ds_type="annotations",
+                    fps=posetracks.fps,
+                    time_unit=posetracks.time_unit,
+                ),
+            )
+
+            patched_record = (
+                key,
+                {"posetracks": posetracks, "annotations": annotations},
+            )
 
             patched_records.append(patched_record)
 
-        dump("proto_train.h5", patched_records)
+        dump_records("datasets/proto_CalMS21", patched_records)
 
 
     if __name__ == "__main__":
         patch_dataset()
 
-This script loads the original dataset, extracts the labels from the HMM annotations, and creates a new dataset with the prototypes as labels.
+This will create a new dataset with prototype labels as annotations.
 
-The new dataset is saved in the HDF5 format, which is compatible with LISBET and can be directly used for training.
-To train the classifier, for example one based on the standard ``lisbet32x4-calms21U-embedder`` (see :ref:`social-behavior-discovery-step0`), you can use the ``betman train_model`` command as usual (see :ref:`model-training`):
+Train a Classifier on the Prototype Labels
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Use the LISBET CLI to train a classifier on your new labeled dataset. For example:
 
 .. code-block:: console
 
-   $ betman train_model \
-      --run_id=lisbet32x4-calms21UftProto-classifier \
-      --data_format=h5archive \
-      --learning_rate=1e-4 \
-      --epochs=10 \
-      --load_backbone_weights=models/lisbet32x4-calms21U-embedder/weights/weights_last.pt \
-      --freeze_backbone_weights \
-      --save_history \
-      -v \
-      proto_train.h5
+    $ betman train_model \
+        --run_id=proto_classifier \
+        --data_format=movement \
+        --data_scale="1x1" \
+        --data_filter=train \
+        --learning_rate=1e-4 \
+        --epochs=10 \
+        --load_backbone_weights=models/lisbet32x4-calms21U-embedder/weights/weights_last.pt \
+        --freeze_backbone_weights \
+        --save_history \
+        -v \
+        datasets/proto_CalMS21
 
-Please note the use of ``--freeze_backbone_weights``, which is required to match as closely as possible the input of the original prototype selection process.
+- Use `--freeze_backbone_weights` to ensure the classifier matches the embedding model used for prototype discovery.
+- Adjust `--data_format` and paths as needed for your dataset.
 
-As mentioned above, the training approach produces an approximation of the original prototype labels.
-In particular, compared to HMMs, classification models operate on regular windows rather than embedding stacks.
-This slightly change the information available to the two models, and can potentially affect the performance of the classifier.
-Moreover, overlapping prototype labels are currently not supported (multi-label classification) and resolved by assigning the label of the first prototype in the list.
-Support for multi-label classification in LISBET is planned, though it is not expected to significantly impact results, as most prototypes overlap only briefly (typically for just a few frames in our experience).
+Annotate New Data Using the Trained Classifier
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Method 2: Using cached HMMs to annotate new data
-------------------------------------------------
+Once trained, use the classifier to annotate new datasets:
+
+.. code-block:: console
+
+    $ betman annotate_behavior \
+        --data_format=movement \
+        --data_scale="1024x570" \
+        --data_filter=test \
+        -v \
+        datasets/CalMS21/task1_classic_classification \
+        models/proto_classifier/model_config.yml \
+        models/proto_classifier/weights/weights_last.pt
+
+The output will be CSV files with predicted prototype labels for each frame.
+
+.. note::
+  - This approach provides an approximation of the original prototype labels
+  - Overlapping prototypes are currently resolved by assigning the first label; multi-label support is planned.
+  - Always ensure your new data matches the keypoint configuration expected by the model (see :ref:`data-preparation`).
+
+Alternative: Using Cached HMMs
+------------------------------
+
+For advanced users, LISBET allows you to use cached HMM models to annotate new data. This method is not recommended for most users due to complexity and potential safety issues with loading pickle files.
+
+If you wish to proceed:
+
+1. Ensure you have the original HMM `.joblib` files saved from the initial scan.
+2. Run:
+
+   .. code-block:: console
+
+      $ betman segment_motifs \
+          --pretrained_path=PATH_TO_HMM_MODELS \
+          --output_path=NEW_OUTPUT_PATH \
+          datasets/NewDataset
+
+   You can then extract the relevant prototype columns from the output annotation files.
 
 .. warning::
-   This method is not recommended for most users, as it requires loading the fitted HMM models from ``pickle`` files.
-   It is primarily intended for local use by advanced users who are comfortable with the underlying assumptions of the prototype selection algorithm and its implementation in LISBET.
-
-   Pickle serialization has known limitations, including potential safety issues (arbitrary code execution) and compatibility across different Python versions.
-
-   DO NOT LOAD PICKLE FILES FROM UNTRUSTED SOURCES.
-
-   For most users, we recommend using the classifier method described above, as it provides a more straightforward and user-friendly approach to annotating new data.
-
-When running the HMM scan, LISBET stores the fitting results as ``pickle`` files via ``joblib``.
-These models can be used to annotate new data via ``betman segment_motifs --pretrained_path=HMM_PATH``, where HMM_PATH is the location used as ``--output_path`` in the original HMM scan command.
-As prototypes are simply a selection of motifs from the scan, you can simply locate them in the new annotation files generated by ``betman segment_motifs``.
+   Loading pickle/joblib files can be unsafe if the source is untrusted. Only use this method with files you generated yourself, DO NOT LOAD PICKLE FILES FROM UNTRUSTED SOURCES.
 
 References
 ----------
@@ -121,3 +185,7 @@ Sun, J. J., Karigo, T., Chakraborty, D., Mohanty, S. P., Wild, B., Sun, Q., Chen
 The Multi-Agent Behavior Dataset: Mouse Dyadic Social Interactions (arXiv:2104.02710).
 arXiv.
 https://doi.org/10.48550/arXiv.2104.02710
+
+Chindemi, G., Girard, B., & Bellone, C. (2023). LISBET: a machine learning model for the automatic segmentation of social behavior motifs (arXiv:2311.04069).
+arXiv.
+https://doi.org/10.48550/arXiv.2311.04069

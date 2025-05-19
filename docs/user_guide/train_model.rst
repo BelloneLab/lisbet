@@ -21,7 +21,7 @@ This dataset contains a large corpus of tracking data of mice pairs in free soci
    $ betman fetch_dataset CalMS21_Unlabeled
 
 This command will download the dataset to the datasets directory in the current working directory.
-The dataset is preprocessed for training and stored in the hdf5 format, which is a binary format that can store large amounts of data efficiently.
+The dataset is preprocessed for training and stored in the `movement` format, which is a binary format that can store large amounts of data efficiently (currently NetCFD).
 
 Step 2: Train the model
 -----------------------
@@ -38,7 +38,8 @@ The training history is saved to a file for later review.
    $ betman train_model \
       -v \
       --task_ids=nwp,smp,vsp,dmp \  # Use all the available self-supervised tasks
-      --data_format=h5archive \
+      --data_format=movement \
+      --data_scale="1024x570" \
       --run_id=lisbet64x8-calms21U \
       --seed=1234 \
       --epochs=100 \
@@ -48,7 +49,7 @@ The training history is saved to a file for later review.
       --hidden_dim=256 \
       --train_sample=0.05 \
       --save_history \
-      datasets/CalMS21/unlabeled_videos/all_records.h5
+      datasets/CalMS21/unlabeled_videos
 
 The training process can take a long time depending on the size of the dataset and the complexity of the model.
 For reference, running the command above required approximatively 1h15 per epoch on a MacBook Pro (Apple M1 Pro), or approximatively 12 minutes on a Linux compute node with GPU (AMD EPYC-7742, NVIDIA RTX A5500).
