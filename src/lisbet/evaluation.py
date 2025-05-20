@@ -109,13 +109,15 @@ def evaluate_model(
         rename_coords=rename_coords,
     )
 
+    # Convert to dict for easier access
+    group_records = dict(group_records["main_records"])
+
     # Flatten all records
     y_true = []
     y_pred = []
     for key, pred_arr in results:
         # Find corresponding record
-        rec = next(rec for rec in group_records["main_records"] if rec[0] == key)
-        true_labels = rec[1]["annotations"].label_cat.values
+        true_labels = group_records[key]["annotations"].label_cat.values
 
         # pred_arr is one-hot, take argmax
         pred_labels = np.argmax(pred_arr, axis=1)
