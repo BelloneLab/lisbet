@@ -56,6 +56,9 @@ def evaluate_model(
     )
 
     # Load ground-truth labels
+    # NOTE: We load the records twice, but at least we don't have to re-implement the
+    #       forward pass. In the future, we could consider decomposing the inference
+    #       function into smaller components to avoid this duplication.
     group_records = load_records(
         data_format,
         data_path,
