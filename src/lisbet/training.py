@@ -637,6 +637,7 @@ def _save_model_config(
 ):
     """Internal helper. Saves model config."""
     model_config = {
+        "model_id": run_id,
         "window_size": window_size,
         "window_offset": window_offset,
         "output_token_idx": output_token_idx,

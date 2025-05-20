@@ -226,17 +226,19 @@ def export_embedder(model_path, weights_path, output_path=Path(".")):
     # Get hyper-parameters
     with open(model_path, encoding="utf-8") as f_yaml:
         yaml_config = yaml.safe_load(f_yaml)
+    model_id = yaml_config["model_id"] + "-embedder"
 
     # Create behavior embedding model
     # TODO: This should be improved.
     model_config = {
-        "input_features": yaml_config["input_features"],
+        "model_id": model_id,
         "bp_dim": yaml_config["bp_dim"],
         "emb_dim": yaml_config["emb_dim"],
         "hidden_dim": yaml_config["hidden_dim"],
         "num_heads": yaml_config["num_heads"],
         "num_layers": yaml_config["num_layers"],
         "max_len": yaml_config["max_len"],
+        "input_features": yaml_config["input_features"],
     }
     embedding_model = EmbeddingModel(
         output_token_idx=-1,
@@ -256,7 +258,7 @@ def export_embedder(model_path, weights_path, output_path=Path(".")):
     )
 
     # Create output directory
-    output_path = output_path / "models" / f"{model_path.parent.stem}-embedder"
+    output_path = output_path / "models" / model_id
 
     # Store configuration
     model_config["output_token_idx"] = -1
