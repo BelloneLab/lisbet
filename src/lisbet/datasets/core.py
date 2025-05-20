@@ -130,8 +130,25 @@ def _load_posetracks(seq_path, data_format, data_scale, select_coords, rename_co
         if remap_dict:
             ds = ds.assign_coords(**remap_dict)
 
-    # Rescale coordinates in the (0, 1) range, if requested
-    if data_scale is None:
+    # Rescale coordinates in the (0, 1) range
+    if data_scale is not None:
+        # Explicit scaling
+        factor = [1 / float(val) for val in data_scale.split("x")]
+        ds = ds.assign(position=scale(ds["position"], factor=factor))
+
+        logging.debug("Rescaled coordinates by factor %s", factor)
+
+    elif "image_size_px" in ds.attrs:
+        # Rescale using image size
+        factor = [1 / float(val) for val in ds.attrs["image_size_px"]]
+        ds = ds.assign(position=scale(ds["position"], factor=factor))
+
+        logging.debug(
+            "Rescaled coordinates by image size %s", ds.attrs["image_size_px"]
+        )
+
+    else:
+        # Auto-scaling
         reduce_dims = ("time", "keypoints", "individuals")
 
         pos = ds["position"]
@@ -149,25 +166,19 @@ def _load_posetracks(seq_path, data_format, data_scale, select_coords, rename_co
             min_val.values,
             max_val.values,
         )
-    else:
-        # Compute scaling factor and rescale coordinates
-        factor = [1 / float(val) for val in data_scale.split("x")]
-        ds = ds.assign(position=scale(ds["position"], factor=factor))
 
-        logging.debug("Rescaled coordinates by factor %s", factor)
-
-        # After explicit scaling, enforce [0, 1] range and raise if not satisfied
-        min_val = ds["position"].min()
-        max_val = ds["position"].max()
-        if min_val < 0.0 or max_val > 1.0:
-            raise ValueError(
-                f"After applying data_scale={data_scale}, coordinates are not in "
-                f"[0, 1] (min={min_val.values}, max={max_val.values}). "
-                "Explicit scaling assumes that the video has already been cropped to "
-                "the region of interest during pose estimation, its origin is at "
-                "(0,0), and the maximum dimensions match the scale provided. If this "
-                "is not the case, use auto mode (data_scale=None) for normalization."
-            )
+    # After scaling, enforce [0, 1] range and raise if not satisfied
+    min_val = ds["position"].min()
+    max_val = ds["position"].max()
+    if min_val < 0.0 or max_val > 1.0:
+        raise ValueError(
+            f"After applying data_scale={data_scale}, coordinates are not in [0, 1] "
+            f"(min={min_val.values}, max={max_val.values}). Explicit scaling assumes "
+            "that the video has already been cropped to the region of interest during "
+            "pose estimation, its origin is at (0,0), and the maximum dimensions match "
+            "the scale provided. If this is not the case, use auto mode "
+            "(data_scale=None) for normalization."
+        )
 
     # Stack variables into a single dimension
     # NOTE: This is done already here for performance reasons, as stacking in the

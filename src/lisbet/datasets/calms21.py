@@ -37,6 +37,7 @@ def _preprocess_calms21(raw_data):
             fps=30,
             source_software="MARS",
         )
+        posetracks.attrs["image_size_px"] = [1024, 570]
 
         # Create record data structure
         rec_data = {"posetracks": posetracks}
