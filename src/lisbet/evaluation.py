@@ -3,10 +3,12 @@
 This module provides functions to evaluate classification models on labeled datasets.
 """
 
+from pathlib import Path
 from typing import Optional
 
 import numpy as np
-from sklearn.metrics import classification_report, f1_score
+import yaml
+from sklearn.metrics import classification_report
 
 from . import inference
 from .datasets import load_records
@@ -26,17 +28,56 @@ def evaluate_model(
     select_coords: Optional[str] = None,
     rename_coords: Optional[str] = None,
     labels: Optional[str] = None,
+    output_path: Optional[str] = None,
 ):
     """
     Evaluate a classification model on a labeled dataset and print F1 score.
 
+    This function loads a classification model, runs inference on a labeled dataset,
+    and computes classification metrics (F1 score and others). Optionally, it saves
+    the classification report to a YAML file.
+
     Parameters
     ----------
-    (same as inference.annotate_behavior)
+    model_path : str
+        Path to the model config (YAML format).
+    weights_path : str
+        Path to the model weights.
+    data_format : str
+        Format of the dataset to analyze.
+    data_path : str
+        Path to the directory containing the dataset files.
+    data_scale : str or None, optional
+        Scaling string or None for auto-scaling.
+    data_filter : str, optional
+        Filter to apply when loading records.
+    window_size : int, default=200
+        Size of the sliding window to apply on the input sequences.
+    window_offset : int, default=0
+        Sliding window offset.
+    fps_scaling : float, default=1.0
+        FPS scaling factor.
+    batch_size : int, default=128
+        Batch size for inference.
+    select_coords : str, optional
+        Optional subset string in the format 'INDIVIDUALS;AXES;KEYPOINTS', where each
+        field is a comma-separated list or '*' for all. If None, all data is loaded.
+    rename_coords : str, optional
+        Optional coordinate names remapping in the format 'INDIVIDUALS;AXES;KEYPOINTS',
+        where each field is a comma-separated list of maps 'old_id:new_id' or '*' for
+        no remapping at that level. If None, original dataset names are used.
+    labels : str, optional
+        Comma-separated list of integer class labels to include in the report. If None,
+        all labels present in the data are used.
+    output_path : str, optional
+        If given, the classification report will be saved as a YAML file in this
+        directory.
+
     Returns
     -------
-    None
-        Prints F1 score and classification report.
+    dict
+        Classification report as returned by `sklearn.metrics.classification_report`.
+
     """
     # Run inference to get predictions
     results = inference._process_inference_dataset(
@@ -91,7 +132,30 @@ def evaluate_model(
         label_list = [int(x) for x in labels.split(",") if x.strip() != ""]
 
     # Compute and print F1 score
-    print(
-        "Macro F1 score:", f1_score(y_true, y_pred, average="macro", labels=label_list)
+    # NOTE: This repetition is not ideal, but we need to print the report in a
+    #       human-readable format and also save it to a file. We could consider
+    #       refactoring, but the current approach is simple and works well.
+    report_dict = classification_report(
+        y_true, y_pred, digits=3, labels=label_list, output_dict=True
     )
-    print(classification_report(y_true, y_pred, digits=3, labels=label_list))
+    report_str = classification_report(y_true, y_pred, digits=3, labels=label_list)
+    print(report_str)
+
+    # Save classification report to file if output_path is provided
+    if output_path is not None:
+        # Find model ID
+        with open(model_path, encoding="utf-8") as f_yaml:
+            model_config = yaml.safe_load(f_yaml)
+        model_id = model_config["model_id"]
+
+        # Create output directory if it doesn't exist
+        report_path = (
+            Path(output_path) / "evaluations" / model_id / "classification_report.yml"
+        )
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Save report
+        with open(report_path, "w", encoding="utf-8") as f_yaml:
+            yaml.safe_dump(report_dict, f_yaml)
+
+    return report_dict
