@@ -13,7 +13,7 @@ from movement.transforms import scale
 from sklearn.model_selection import train_test_split
 from tqdm.auto import tqdm
 
-from . import calms21
+from . import calms21, mabe22
 
 
 def _load_posetracks(seq_path, data_format, data_scale, select_coords, rename_coords):
@@ -464,7 +464,10 @@ def fetch_dataset(dataset_id, download_path):
     if dataset_id == "CalMS21_Task1":
         # Get data from Caltech repo
         fnames = pooch.retrieve(
-            url="https://data.caltech.edu/records/s0vdx-0k302/files/task1_classic_classification.zip?download=1",
+            url=(
+                "https://data.caltech.edu/records/s0vdx-0k302/files/"
+                "task1_classic_classification.zip?download=1"
+            ),
             known_hash="md5:8a02654fddae28614ee24a6a082261b8",
             path=Path(download_path) / "datasets" / ".cache" / "lisbet",
             processor=pooch.Unzip(
@@ -493,7 +496,10 @@ def fetch_dataset(dataset_id, download_path):
     elif dataset_id == "CalMS21_Unlabeled":
         # Get data from Caltech repo
         fnames = pooch.retrieve(
-            url="https://data.caltech.edu/records/s0vdx-0k302/files/unlabeled_videos.zip?download=1",
+            url=(
+                "https://data.caltech.edu/records/s0vdx-0k302/files/"
+                "unlabeled_videos.zip?download=1"
+            ),
             known_hash="md5:35ab3acdeb231a3fe1536e38ad223b2e",
             path=Path(download_path) / "datasets" / ".cache" / "lisbet",
             processor=pooch.Unzip(
@@ -514,6 +520,46 @@ def fetch_dataset(dataset_id, download_path):
         # Store data in LISBET-compatible format
         data_path = Path(download_path) / "datasets" / "CalMS21" / "unlabeled_videos"
         dump_records(data_path, all_records)
+
+    elif dataset_id == "MABe22_MouseTriplets":
+        # Get data from Caltech repo
+        train_path = pooch.retrieve(
+            url=(
+                "https://data.caltech.edu/records/rdsa8-rde65/files/"
+                "mouse_triplet_train.npy?download=1"
+            ),
+            known_hash="md5:76a48f3a1679a219a0e7e8a87871cc74",
+            path=Path(download_path) / "datasets" / ".cache" / "lisbet",
+            progressbar=True,
+        )
+        test_seq_path = pooch.retrieve(
+            url=(
+                "https://data.caltech.edu/records/rdsa8-rde65/files/"
+                "mouse_triplet_test.npy?download=1"
+            ),
+            known_hash="md5:f43f0f8824ffe6a4496eaf3ba7559d5c",
+            path=Path(download_path) / "datasets" / ".cache" / "lisbet",
+            progressbar=True,
+        )
+        test_labels_path = pooch.retrieve(
+            url=(
+                "https://data.caltech.edu/records/rdsa8-rde65/files/"
+                "mouse_triplets_test_labels.npy?download=1"
+            ),
+            known_hash="md5:5a54f2d29a13a256aabbefc61a633176",
+            path=Path(download_path) / "datasets" / ".cache" / "lisbet",
+            progressbar=True,
+        )
+
+        # Preprocess keypoints
+        train_records, test_records = mabe22.load_mouse_triplets(
+            train_path, test_seq_path, test_labels_path
+        )
+
+        # Store records in LISBET-compatible format
+        data_path = Path(download_path) / "datasets" / "MABe22" / "mouse_triplets"
+        dump_records(data_path / "train", train_records)
+        dump_records(data_path / "test", test_records)
 
     elif dataset_id == "SampleData":
         # Fetch data from HuggingFace repo

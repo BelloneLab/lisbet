@@ -413,6 +413,7 @@ def configure_fetch_dataset_parser(parser: argparse.ArgumentParser) -> None:
         choices=(
             "CalMS21_Task1",
             "CalMS21_Unlabeled",
+            "MABe22_MouseTriplets",
             "SampleData",
         ),
         help="Dataset ID",
