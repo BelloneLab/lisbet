@@ -534,10 +534,11 @@ def fetch_dataset(dataset_id, download_path):
         )
         test_seq_path = pooch.retrieve(
             url=(
-                "https://data.caltech.edu/records/rdsa8-rde65/files/"
+                # TMP, bug in default Caltech repo
+                "https://data.caltech.edu/records/8kdn3-95j37/files/"
                 "mouse_triplet_test.npy?download=1"
             ),
-            known_hash="md5:f43f0f8824ffe6a4496eaf3ba7559d5c",
+            known_hash="md5:20dc132300118a64aac665dd68153b20",
             path=Path(download_path) / "datasets" / ".cache" / "lisbet",
             progressbar=True,
         )
