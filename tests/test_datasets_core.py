@@ -340,3 +340,71 @@ def test_inconsistent_features_raises(tmp_path):
         ValueError, match="Inconsistent posetracks coordinates in record"
     ):
         load_records(data_format="movement", data_path=root)
+
+
+def test_explicit_scaling_raises_on_out_of_range(tmp_path):
+    """
+    Test that explicit scaling raises ValueError if data is not in [0, 1] after scaling.
+    """
+    coords = {
+        "time": np.arange(10),
+        "individuals": ["mouse"],
+        "keypoints": ["nose", "tail"],
+        "space": ["x", "y"],
+    }
+    arr = np.arange(40).reshape((10, 1, 2, 2)).astype(np.float32)
+    exp1_dir = tmp_path / "exp1" / "exp0"
+    exp1_dir.mkdir(parents=True)
+    ds1 = xr.Dataset(
+        {"position": (("time", "individuals", "keypoints", "space"), arr)},
+        coords=coords,
+    )
+    ds1.to_netcdf(exp1_dir / "tracking.nc", engine="scipy")
+
+    with pytest.raises(ValueError, match="coordinates are not in \\[0, 1\\]"):
+        load_records(
+            data_format="movement", data_path=tmp_path / "exp1", data_scale="10x10"
+        )
+
+
+def test_explicit_and_image_size_px_scaling_identical_in_range(tmp_path):
+    """
+    Test that explicit scaling and image_size_px attribute scaling produce identical
+    results when data is in the expected range.
+    """
+    coords = {
+        "time": np.arange(10),
+        "individuals": ["mouse"],
+        "keypoints": ["nose", "tail"],
+        "space": ["x", "y"],
+    }
+    arr_ok = np.linspace(0, 10, 40).reshape((10, 1, 2, 2)).astype(np.float32)
+
+    exp1_dir = tmp_path / "exp1" / "exp0"
+    exp1_dir.mkdir(parents=True)
+    ds1 = xr.Dataset(
+        {"position": (("time", "individuals", "keypoints", "space"), arr_ok)},
+        coords=coords,
+    )
+    ds1.to_netcdf(exp1_dir / "tracking.nc", engine="scipy")
+
+    exp2_dir = tmp_path / "exp2" / "exp0"
+    exp2_dir.mkdir(parents=True)
+    ds2 = xr.Dataset(
+        {"position": (("time", "individuals", "keypoints", "space"), arr_ok)},
+        coords=coords,
+    )
+    ds2.attrs["image_size_px"] = [10, 10]
+    ds2.to_netcdf(exp2_dir / "tracking.nc", engine="scipy")
+
+    groups_explicit = load_records(
+        data_format="movement", data_path=tmp_path / "exp1", data_scale="10x10"
+    )
+    groups_image_size = load_records(
+        data_format="movement", data_path=tmp_path / "exp2", data_scale=None
+    )
+
+    arr1 = groups_explicit["main_records"][0][1]["posetracks"]["position"].values
+    arr2 = groups_image_size["main_records"][0][1]["posetracks"]["position"].values
+
+    np.testing.assert_array_equal(arr1, arr2)

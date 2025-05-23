@@ -124,7 +124,7 @@ def test_process_inference_dataset_input_features_incompatible(tmp_path):
             return torch.zeros((x.shape[0], 2))
 
     inference.modeling.load_model = lambda *a, **k: DummyMultiTaskModel()
-    with pytest.raises(ValueError, match="Incompatible input features!"):
+    with pytest.raises(ValueError, match="Incompatible input features"):
         inference._process_inference_dataset(
             model_path=str(config_path),
             weights_path=str(weights_path),

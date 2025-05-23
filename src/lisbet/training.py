@@ -484,7 +484,7 @@ def _configure_optimizer_and_scheduler(model, learning_rate, mixed_precision):
     return optimizer, scheduler, scaler
 
 
-def _configure_dataloaders(tasks, group, batch_size, group_sample):
+def _configure_dataloaders(tasks, group, batch_size, group_sample, pin_memory):
     """Internal helper. Configures dataloaders for a group."""
     # Estimate number of samples
     num_samples = min(len(task["datasets"][group]) for task in tasks)
@@ -508,7 +508,7 @@ def _configure_dataloaders(tasks, group, batch_size, group_sample):
             batch_size=batch_size,
             sampler=sampler,
             num_workers=1,
-            pin_memory=True,
+            pin_memory=pin_memory,
         )
         dataloaders.append(dataloader)
 
@@ -808,10 +808,13 @@ def train(
     # Configure accelerator
     if torch.cuda.is_available():
         device_type = "cuda"
+        pin_memory = True
     elif torch.mps.is_available():
         device_type = "mps"
+        pin_memory = False
     else:
         device_type = "cpu"
+        pin_memory = False
     device = torch.device(device_type)
     logging.info("Using %s for training model %s.", device_type, run_id)
 
@@ -935,7 +938,7 @@ def train(
 
         # Get dataloaders
         train_dataloaders = _configure_dataloaders(
-            tasks, "train", batch_size, train_sample
+            tasks, "train", batch_size, train_sample, pin_memory=pin_memory
         )
 
         # Run training epoch
@@ -964,7 +967,7 @@ def train(
         if dev_ratio is not None:
             # Get dataloaders
             dev_dataloaders = _configure_dataloaders(
-                tasks, "dev", batch_size, dev_sample
+                tasks, "dev", batch_size, dev_sample, pin_memory=pin_memory
             )
 
             # Run dev epoch
