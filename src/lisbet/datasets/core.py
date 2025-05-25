@@ -218,13 +218,13 @@ def _load_annotations(seq_path):
 
     logging.debug("Annotations: %s", annotations.coords["behaviors"].values)
 
-    # Convert annotations to label encoding format
-    # NOTE: This is a temporary solution to maintain compatibility with the current
-    #       implementation of training and inference pipelines.
-    # TODO: Add full support for one-hot and multi-label annotations
-    annotations = annotations.assign(
-        label_cat=annotations.label.argmax("behaviors").squeeze()
-    )
+    # # Convert annotations to label encoding format
+    # # NOTE: This is a temporary solution to maintain compatibility with the current
+    # #       implementation of training and inference pipelines.
+    # # TODO: Add full support for one-hot and multi-label annotations
+    # annotations = annotations.assign(
+    #     label_cat=annotations.label.argmax("behaviors").squeeze()
+    # )
 
     return annotations
 

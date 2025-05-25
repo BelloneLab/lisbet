@@ -206,7 +206,10 @@ def _configure_classification_task(
 
     # Find number of behaviors in the training set
     labels = np.concatenate(
-        [data["annotations"].label_cat for _, data in train_rec["cfc"]]
+        [
+            data["annotations"].label.argmax("behaviors").squeeze().values
+            for _, data in train_rec["cfc"]
+        ]
     )
     classes = np.unique(labels)
     num_classes = len(classes)

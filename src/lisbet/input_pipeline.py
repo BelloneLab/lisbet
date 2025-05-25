@@ -17,9 +17,9 @@ class BaseDataset(Dataset, ABC):
         # Extract individuals and their feature indices from the first record
         first_key = next(iter(self.records))
         features = self.records[first_key]["posetracks"].coords["features"].to_index()
-        self.individuals = features.get_level_values('individuals').unique().tolist()
+        self.individuals = features.get_level_values("individuals").unique().tolist()
         self.individual_feature_indices = {
-            ind: np.where(features.get_level_values('individuals') == ind)[0]
+            ind: np.where(features.get_level_values("individuals") == ind)[0]
             for ind in self.individuals
         }
 
@@ -146,7 +146,9 @@ class FrameClassificationDataset(BaseDataset):
         if self.num_classes is not None:
             y_data = (
                 self.records[curr_key]["annotations"]
-                .label_cat.isel(time=curr_loc)
+                .label.isel(time=curr_loc)
+                .argmax("behaviors")
+                .squeeze()
                 .values
             )
 
