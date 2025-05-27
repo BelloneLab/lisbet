@@ -288,6 +288,19 @@ def load_records(
     # Find all potential record paths
     seq_paths = [f for f in Path(data_path).rglob("*") if f.is_dir()]
 
+    # Filter data, if requested
+    if data_filter is not None:
+        filters = data_filter.split(",")
+
+        seq_paths = [
+            seq_path
+            for seq_path in seq_paths
+            if any(flt in str(seq_path.relative_to(data_path)) for flt in filters)
+        ]
+
+        logging.info("%d potential paths after filtering", len(seq_paths))
+        logging.debug(seq_paths)
+
     # Load and preprocess raw data
     records = []
     for seq_path in tqdm(seq_paths, desc="Loading dataset"):
@@ -323,15 +336,6 @@ def load_records(
                     f"Reference features:\n{ref_features}\n"
                     f"Record features:\n{ds_features}"
                 )
-
-    # Filter data, if requested
-    if data_filter is not None:
-        filters = data_filter.split(",")
-
-        records = [rec for rec in records if any(flt in rec[0] for flt in filters)]
-
-        logging.info("Filtered dataset size =  %d videos", len(records))
-        logging.debug([key for key, val in records])
 
     return records
 
