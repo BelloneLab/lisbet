@@ -100,9 +100,9 @@ def evaluate_model(
     # NOTE: We load the records twice, but at least we don't have to re-implement the
     #       forward pass. In the future, we could consider decomposing the inference
     #       function into smaller components to avoid this duplication.
-    group_records = load_records(
-        data_format,
-        data_path,
+    records = load_records(
+        data_format=data_format,
+        data_path=data_path,
         data_filter=data_filter,
         data_scale=data_scale,
         select_coords=select_coords,
@@ -110,7 +110,7 @@ def evaluate_model(
     )
 
     # Convert to dict for easier access
-    group_records = dict(group_records["main_records"])
+    records = dict(records)
 
     # Flatten all records
     y_true = []
@@ -118,10 +118,7 @@ def evaluate_model(
     for key, pred_arr in results:
         # Find corresponding record
         true_labels = (
-            group_records[key]["annotations"]
-            .target_cls.argmax("behaviors")
-            .squeeze()
-            .values
+            records[key]["annotations"].target_cls.argmax("behaviors").squeeze().values
         )
 
         # pred_arr is one-hot, take argmax

@@ -169,9 +169,9 @@ def _process_inference_dataset(
     model.to(device)
 
     # Load records
-    group_records = load_records(
-        data_format,
-        data_path,
+    records = load_records(
+        data_format=data_format,
+        data_path=data_path,
         data_filter=data_filter,
         data_scale=data_scale,
         select_coords=select_coords,
@@ -180,11 +180,7 @@ def _process_inference_dataset(
 
     # Input features compatibility check
     model_features = [tuple(x) for x in config.get("input_features")]
-    dataset_features = (
-        group_records["main_records"][0][1]["posetracks"]
-        .coords["features"]
-        .values.tolist()
-    )
+    dataset_features = records[0][1]["posetracks"].coords["features"].values.tolist()
     if dataset_features != model_features:
         # Make table for better visualization
         console = Console()
@@ -216,7 +212,7 @@ def _process_inference_dataset(
     #       and should be removed in the future or moved to the dataset loading.
     results = []
     seen_keys = set()
-    for group_name, group_data in group_records.items():
+    for group_name, group_data in records.items():
         for seq in tqdm(
             group_data, desc=f"Analyzing {data_format} dataset, {group_name} group"
         ):

@@ -10,7 +10,6 @@ import xarray as xr
 from huggingface_hub import snapshot_download
 from movement.io import load_poses
 from movement.transforms import scale
-from sklearn.model_selection import train_test_split
 from tqdm.auto import tqdm
 
 from . import calms21, mabe22
@@ -226,16 +225,12 @@ def load_records(
     data_path,
     data_scale=None,
     data_filter=None,
-    dev_ratio=None,
-    test_ratio=None,
-    dev_seed=None,
-    test_seed=None,
     select_coords=None,
     rename_coords=None,
 ):
     """
     Load pose-tracking records from a directory, with optional filtering, coordinate
-    selection, coordinate renaming, and train/dev/test splitting.
+    selection and renaming.
 
     Parameters
     ----------
@@ -251,16 +246,6 @@ def load_records(
     data_filter : str, optional
         Comma-separated substrings; a record is kept if any substring occurs in its
         relative path. By default, all records are kept.
-    dev_ratio : float, optional
-        Fraction of the post-test remainder to devote to the dev set.
-        If None, no dev split is performed.
-    test_ratio : float, optional
-        Fraction of all records to devote to the test set. If None, no test split is
-        performed.
-    dev_seed : int, optional
-        Random seeds for reproducibility of the dev split.
-    test_seed : int, optional
-        Random seeds for reproducibility of the test split.
     select_coords : str or None
         Optional subset string in the format 'INDIVIDUALS;AXES;KEYPOINTS', where each
         field is a comma-separated list or '*' for all. If None, all data is loaded.
@@ -273,12 +258,9 @@ def load_records(
 
     Returns
     -------
-    dict[str, list[tuple[str, dict[str, xarray.Dataset]]]]
-        A mapping whose keys are: 'main_records', always present; 'test_records',
-        present only if test_ratio was supplied; 'dev_records', present only if
-        dev_ratio was supplied. Each value is a list of (record_id, data_dict) pairs;
-        every data_dict contains at least 'posetracks' (xarray.Dataset), and optionally
-        'annotations'.
+    list[tuple[str, dict[str, xarray.Dataset]]]
+        A list of (record_id, data_dict) pairs; every data_dict contains at least
+        'posetracks' (xarray.Dataset), and optionally 'annotations'.
 
     Raises
     ------
@@ -287,32 +269,27 @@ def load_records(
     NotImplementedError
         For recognized but unimplemented formats.
 
-    Notes
-    -----
-    When dev_ratio is supplied it applies after any test split; i.e. the dev set is
-    carved out of what remains.
-
     Examples
     --------
-    >>> groups = load_records(
+    >>> records = load_records(
     ...     data_format="movement",
     ...     data_path="~/datasets/mice",
-    ...     test_ratio=0.2,
-    ...     dev_ratio=0.1,
-    ...     test_seed=0,
-    ...     dev_seed=0,
     ...     select_coords="mouse1,mouse2;x,y;nose,tail",
     ...     rename_coords="mouse1:resident,mouse2:intruder;*;nose:snout,tail:tailbase",
     ... )
-    >>> groups.keys()
-    dict_keys(['main_records', 'test_records', 'dev_records'])
+    >>> print(len(records))
+    42
+    >>> print(records[0][0])
+    'session1/seq001'
+    >>> print(records[0][1].keys())
+    dict_keys(['posetracks', 'annotations'])
 
     """
     # Find all potential record paths
     seq_paths = [f for f in Path(data_path).rglob("*") if f.is_dir()]
 
     # Load and preprocess raw data
-    all_records = []
+    records = []
     for seq_path in tqdm(seq_paths, desc="Loading dataset"):
         # Load pose-tracking data
         ds = _load_posetracks(
@@ -332,15 +309,13 @@ def load_records(
         rec_id = str(seq_path.relative_to(data_path))
 
         # Add record to the list
-        all_records.append((rec_id, rec_data))
+        records.append((rec_id, rec_data))
 
     # Sanity check: All posetracks must have the same 'features' coordinate (summary of
     #               individuals/keypoints/space)
-    if all_records:
-        ref_features = (
-            all_records[0][1]["posetracks"].coords["features"].values.tolist()
-        )
-        for rec_id, rec_data in all_records:
+    if records:
+        ref_features = records[0][1]["posetracks"].coords["features"].values.tolist()
+        for rec_id, rec_data in records:
             ds_features = rec_data["posetracks"].coords["features"].values.tolist()
             if ds_features != ref_features:
                 raise ValueError(
@@ -353,40 +328,12 @@ def load_records(
     if data_filter is not None:
         filters = data_filter.split(",")
 
-        all_records = [
-            rec for rec in all_records if any(flt in rec[0] for flt in filters)
-        ]
+        records = [rec for rec in records if any(flt in rec[0] for flt in filters)]
 
-        logging.info("Filtered dataset size =  %d videos", len(all_records))
-        logging.debug([key for key, val in all_records])
+        logging.info("Filtered dataset size =  %d videos", len(records))
+        logging.debug([key for key, val in records])
 
-    # Split dataset into train/test/dev sets
-    groups = {}
-
-    # Optional test‑set split
-    if test_ratio is not None:
-        all_records, groups["test_records"] = train_test_split(
-            all_records, test_size=test_ratio, random_state=test_seed
-        )
-
-    # Optional dev‑set split (performed on what’s left after the test split)
-    # NOTE: We assume that dev_ratio refers to the dataset size after the test split.
-    if dev_ratio is not None:
-        all_records, groups["dev_records"] = train_test_split(
-            all_records, test_size=dev_ratio, random_state=dev_seed
-        )
-
-    # Remaining records become the “main” set
-    # NOTE: We call this "main_records", rather than "train_records" to avoid
-    #       confusion in inference mode. That is, "main_records" refers to all data
-    #       during inference or an unsplit dataset during training.
-    groups["main_records"] = all_records
-
-    for group_id, group_data in groups.items():
-        logging.info("Placing %d sequences in the %s group", len(group_data), group_id)
-        logging.debug([key for key, val in group_data])
-
-    return groups
+    return records
 
 
 def dump_records(data_path, records):
@@ -507,11 +454,11 @@ def fetch_dataset(dataset_id, download_path):
 
         # Preprocess keypoints
         rawdata_path = Path(fnames[0]).parents[1]
-        all_records = calms21.load_unlabeled(rawdata_path)
+        records = calms21.load_unlabeled(rawdata_path)
 
         # Store data in LISBET-compatible format
         data_path = Path(download_path) / "datasets" / "CalMS21" / "unlabeled_videos"
-        dump_records(data_path, all_records)
+        dump_records(data_path, records)
 
     elif dataset_id == "MABe22_MouseTriplets":
         # Get data from Caltech repo
