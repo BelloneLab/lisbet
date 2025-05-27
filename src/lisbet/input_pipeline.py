@@ -507,9 +507,9 @@ class DelayMousePredictionDataset(BaseDataset):
         # Get shift data
         sft_data = self._select_and_pad(curr_key, sft_loc)
 
-        # Apply swapping: only swap the second individual's features
-        swap_idx = self.individual_feature_indices[self.individuals[1]]
-        curr_data[..., swap_idx] = sft_data[..., swap_idx]
+        # Apply shifting: only shift the second individual's features
+        sft_idx = self.individual_feature_indices[self.individuals[1]]
+        curr_data[..., sft_idx] = sft_data[..., sft_idx]
 
         if self.transform:
             curr_data = self.transform(curr_data)
