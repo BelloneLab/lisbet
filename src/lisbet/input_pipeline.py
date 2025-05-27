@@ -146,7 +146,7 @@ class FrameClassificationDataset(BaseDataset):
         if self.num_classes is not None:
             y_data = (
                 self.records[curr_key]["annotations"]
-                .label.isel(time=curr_loc)
+                .target_cls.isel(time=curr_loc)
                 .argmax("behaviors")
                 .squeeze()
                 .values
