@@ -62,7 +62,7 @@ def _preprocess_calms21(raw_data):
             # Convert to xarray Dataset
             rec_data["annotations"] = xr.Dataset(
                 data_vars=dict(
-                    label=(
+                    target_cls=(
                         ["time", "behaviors", "annotators"],
                         one_hot_annotations[..., np.newaxis],
                     )
