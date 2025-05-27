@@ -254,8 +254,8 @@ class SwapMousePredictionDataset(BaseDataset):
         swap_data = self._select_and_pad(swap_key, swap_loc)
 
         # Apply swapping: always swap the second individual's features
-        swap_idx = self.individual_feature_indices[self.individuals[1]]
-        curr_data[..., swap_idx] = swap_data[..., swap_idx]
+        feature_idx = self.individual_feature_indices[self.individuals[1]]
+        curr_data[..., feature_idx] = swap_data[..., feature_idx]
 
         if self.transform:
             curr_data = self.transform(curr_data)
