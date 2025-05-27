@@ -8,7 +8,7 @@ import lisbet.training as training
 def test_train_integration(tmp_path):
     # Download a small sample dataset using the LISBET API
     datasets_core.fetch_dataset("SampleData", download_path=tmp_path)
-    data_path = tmp_path / "sample_keypoints"
+    data_path = tmp_path / "datasets" / "sample_keypoints"
     # Run a minimal training (1 epoch, small batch, minimal model)
     model = training.train(
         data_format="DLC",

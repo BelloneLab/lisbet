@@ -14,6 +14,15 @@ class BaseDataset(Dataset, ABC):
         # Store raw data
         self.records = dict(records)
 
+        # Extract individuals and their feature indices from the first record
+        first_key = next(iter(self.records))
+        features = self.records[first_key]["posetracks"].coords["features"].to_index()
+        self.individuals = features.get_level_values("individuals").unique().tolist()
+        self.individual_feature_indices = {
+            ind: np.where(features.get_level_values("individuals") == ind)[0]
+            for ind in self.individuals
+        }
+
         # Store other params
         self.window_size = window_size
         self.window_offset = window_offset
@@ -137,7 +146,9 @@ class FrameClassificationDataset(BaseDataset):
         if self.num_classes is not None:
             y_data = (
                 self.records[curr_key]["annotations"]
-                .label_cat.isel(time=curr_loc)
+                .label.isel(time=curr_loc)
+                .argmax("behaviors")
+                .squeeze()
                 .values
             )
 
@@ -242,9 +253,9 @@ class SwapMousePredictionDataset(BaseDataset):
         swap_key, swap_loc = self.window_catalog[swap_idx]
         swap_data = self._select_and_pad(swap_key, swap_loc)
 
-        # Apply swapping
-        half = curr_data.shape[1] // 2
-        curr_data[..., half:] = swap_data[..., half:]
+        # Apply swapping: always swap the second individual's features
+        feature_idx = self.individual_feature_indices[self.individuals[1]]
+        curr_data[..., feature_idx] = swap_data[..., feature_idx]
 
         if self.transform:
             curr_data = self.transform(curr_data)
@@ -496,9 +507,9 @@ class DelayMousePredictionDataset(BaseDataset):
         # Get shift data
         sft_data = self._select_and_pad(curr_key, sft_loc)
 
-        # Apply swapping
-        half = curr_data.shape[1] // 2
-        curr_data[..., half:] = sft_data[..., half:]
+        # Apply shifting: only shift the second individual's features
+        sft_idx = self.individual_feature_indices[self.individuals[1]]
+        curr_data[..., sft_idx] = sft_data[..., sft_idx]
 
         if self.transform:
             curr_data = self.transform(curr_data)

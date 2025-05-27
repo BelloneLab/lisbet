@@ -129,7 +129,7 @@ def test_configure_dataloaders_min_samples(monkeypatch):
         },
     ]
     dataloaders = training._configure_dataloaders(
-        tasks, "train", batch_size=4, group_sample=None
+        tasks, "train", batch_size=4, group_sample=None, pin_memory=False
     )
     assert len(dataloaders) == 2
     assert isinstance(dataloaders[0], DummyDataLoader)

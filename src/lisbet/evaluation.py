@@ -117,7 +117,12 @@ def evaluate_model(
     y_pred = []
     for key, pred_arr in results:
         # Find corresponding record
-        true_labels = group_records[key]["annotations"].label_cat.values
+        true_labels = (
+            group_records[key]["annotations"]
+            .target_cls.argmax("behaviors")
+            .squeeze()
+            .values
+        )
 
         # pred_arr is one-hot, take argmax
         pred_labels = np.argmax(pred_arr, axis=1)
