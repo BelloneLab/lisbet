@@ -26,6 +26,7 @@ import pandas as pd
 import torch
 import yaml
 from sklearn.metrics import accuracy_score, f1_score
+from sklearn.model_selection import train_test_split
 from sklearn.utils.class_weight import compute_class_weight
 from torchinfo import summary
 from torchvision import transforms
@@ -57,7 +58,7 @@ class RandomXYSwap:
         return transformed_sample
 
 
-def _generate_seeds(seed, task_ids, seed_test_split):
+def _generate_seeds(seed, task_ids):
     """Internal helper. Generates multiple seeds from the base one."""
     rng = np.random.default_rng(seed)
     seed_keys = (
@@ -72,30 +73,18 @@ def _generate_seeds(seed, task_ids, seed_test_split):
     )
     run_seeds = {sk: rng.integers(low=0, high=2**32) for sk in seed_keys}
 
-    # Override test_split seed if needed
-    # NOTE: This prevents test set spillover during HP tuning
-    if seed_test_split is not None:
-        run_seeds["test_split"] = seed_test_split
-        logging.debug("Overriding test set split seed")
-
     logging.debug("Generated seeds: %s", run_seeds)
 
     return run_seeds
 
 
-def _load_records(
+def _load_multi_records(
     data_format,
     data_path,
     data_scale,
     data_filter,
-    dev_ratio,
-    test_ratio,
-    dev_seed,
-    test_seed,
     select_coords,
     rename_coords,
-    task_ids,
-    task_data,
 ):
     """Internal helper. Loads and splits records for all tasks."""
     datasets = data_format.split(",")
@@ -111,30 +100,13 @@ def _load_records(
         )
     logging.debug(datasources)
 
-    # Build task to data mapping, by default use all data for every task
-    task_data_map = {task_id: list(range(len(datasources))) for task_id in task_ids}
-
-    # Update task to data mapping, if requested
-    if task_data is not None:
-        logging.debug("Updating task to data mapping")
-        pattern = r"(\b(?:" + r"|".join(task_ids) + r")\b):(\[(.*?)\])"
-        matches = re.findall(pattern, task_data)
-        task_data_map |= {
-            key: [int(x) for x in vals.split(",")] for key, _, vals in matches
-        }
-    logging.debug(task_data_map)
-
     # Load records
-    records = [
+    multi_records = [
         load_records(
             dataset,
             datapath,
             data_scale=data_scale,
             data_filter=data_filter,
-            dev_ratio=dev_ratio,
-            test_ratio=test_ratio,
-            dev_seed=dev_seed,
-            test_seed=test_seed,
             select_coords=select_coords,
             rename_coords=rename_coords,
         )
@@ -146,8 +118,8 @@ def _load_records(
     #               only need to check the first record of each dataset against the
     #               others.
     main_features = [
-        recs["main_records"][0][1]["posetracks"].coords["features"].values.tolist()
-        for recs in records
+        recs[0][1]["posetracks"].coords["features"].values.tolist()
+        for recs in multi_records
     ]
     ref_features = main_features[0]
     for i, features in enumerate(main_features):
@@ -158,19 +130,56 @@ def _load_records(
                 f"Record features:\n{features}"
             )
 
+    return multi_records
+
+
+def _split_multi_records(
+    multi_records,
+    dev_ratio,
+    dev_seed,
+    task_ids,
+    task_data,
+):
+    """Split records into train and dev sets."""
+    # Build task to data mapping, by default use all data for every task
+    task_data_map = {task_id: list(range(len(multi_records))) for task_id in task_ids}
+
+    # Update task to data mapping, if requested
+    if task_data is not None:
+        logging.debug("Updating task to data mapping")
+        pattern = r"(\b(?:" + r"|".join(task_ids) + r")\b):(\[(.*?)\])"
+        matches = re.findall(pattern, task_data)
+        task_data_map |= {
+            key: [int(x) for x in vals.split(",")] for key, _, vals in matches
+        }
+    logging.debug(task_data_map)
+
     # Create the lists of records for each task
     train_rec = defaultdict(list)
-    test_rec = defaultdict(list)
     dev_rec = defaultdict(list)
 
     # Assign records
     for task_id, dataidx_lst in task_data_map.items():
         for dataidx in dataidx_lst:
-            train_rec[task_id].extend(records[dataidx]["main_records"])
-            if "test_records" in records[dataidx]:
-                test_rec[task_id].extend(records[dataidx]["test_records"])
-            if "dev_records" in records[dataidx]:
-                dev_rec[task_id].extend(records[dataidx]["dev_records"])
+            # Locate records for the current task
+            records = multi_records[dataidx]
+
+            # Split records
+            if dev_ratio is not None:
+                train_rec_task, dev_rec_task = train_test_split(
+                    records,
+                    test_size=dev_ratio,
+                    random_state=dev_seed,
+                )
+
+                # Assign records to train and dev sets
+                train_rec[task_id].extend(train_rec_task)
+                dev_rec[task_id].extend(dev_rec_task)
+
+            else:
+                # Assign all records to train sets
+                train_rec[task_id].extend(records)
+
             logging.info(
                 "Assigning records from dataset no. %d to task %s", dataidx, task_id
             )
@@ -178,19 +187,15 @@ def _load_records(
         logging.info("Final training set size = %d", len(train_rec[task_id]))
         logging.debug([key for key, _ in train_rec[task_id]])
 
-        logging.info("Final test set size = %d", len(test_rec[task_id]))
-        logging.debug([key for key, _ in test_rec[task_id]])
-
         logging.info("Final dev set size = %d", len(dev_rec[task_id]))
         logging.debug([key for key, _ in dev_rec[task_id]])
 
-    return train_rec, test_rec, dev_rec
+    return train_rec, dev_rec
 
 
 def _configure_classification_task(
     train_rec,
     dev_rec,
-    test_rec,
     window_size,
     window_offset,
     emb_dim,
@@ -252,7 +257,6 @@ def _configure_classification_task(
         for key, rec, transform in [
             ("train", train_rec["cfc"], train_transform),
             ("dev", dev_rec["cfc"], eval_transform),
-            ("test", test_rec["cfc"], eval_transform),
         ]
         if rec
     }
@@ -281,7 +285,6 @@ def _configure_selfsupervised_task(
     task_id,
     train_rec,
     dev_rec,
-    test_rec,
     window_size,
     window_offset,
     emb_dim,
@@ -329,7 +332,6 @@ def _configure_selfsupervised_task(
         for key, rec, transform in [
             ("train", train_rec[task_id], train_transform),
             ("dev", dev_rec[task_id], eval_transform),
-            ("test", test_rec[task_id], eval_transform),
         ]
         if rec
     }
@@ -353,7 +355,6 @@ def _configure_selfsupervised_task(
 def _configure_tasks(
     train_rec,
     dev_rec,
-    test_rec,
     task_ids,
     window_size,
     window_offset,
@@ -372,7 +373,6 @@ def _configure_tasks(
                 _configure_classification_task(
                     train_rec,
                     dev_rec,
-                    test_rec,
                     window_size,
                     window_offset,
                     emb_dim,
@@ -393,7 +393,6 @@ def _configure_tasks(
                     task_id,
                     train_rec,
                     dev_rec,
-                    test_rec,
                     window_size,
                     window_offset,
                     emb_dim,
@@ -682,7 +681,6 @@ def train(
     window_size: int = 200,
     window_offset: int = 0,
     fps_scaling: float = 1.0,
-    test_ratio: Optional[float] = None,
     dev_ratio: Optional[float] = None,
     train_sample: Optional[float] = None,
     dev_sample: Optional[float] = None,
@@ -690,7 +688,6 @@ def train(
     epochs: int = 10,
     batch_size: int = 32,
     seed: int = 1991,
-    seed_test_split: Optional[int] = None,
     run_id: Optional[str] = None,
     data_augmentation: bool = False,
     # Task parameters
@@ -746,9 +743,6 @@ def train(
         Window offset for classification tasks.
     fps_scaling : float, default=1.0
         FPS scaling factor.
-    test_ratio : float or None, optional
-        Fraction of all records to devote to the test set. If None, no test split is
-        performed.
     dev_ratio : float or None, optional
         Fraction of the training set to hold out for hyper-parameter tuning. If None,
         no dev split is performed.
@@ -762,8 +756,6 @@ def train(
         Batch size for training.
     seed : int, default=1991
         Base random seed.
-    seed_test_split : int or None, optional
-        Random seed for test set split.
     run_id : str or None, optional
         ID of the run. If None, a timestamp is used.
     data_augmentation : bool, default=False
@@ -826,21 +818,24 @@ def train(
     logging.info("Using %s for training model %s.", device_type, run_id)
 
     # Configure RNGs
-    run_seeds = _generate_seeds(seed, task_ids_list, seed_test_split)
+    run_seeds = _generate_seeds(seed, task_ids_list)
     torch.manual_seed(run_seeds["torch"])
 
     # Load records
-    train_rec, test_rec, dev_rec = _load_records(
-        data_format,
-        data_path,
-        data_scale,
-        data_filter,
-        dev_ratio,
-        test_ratio,
-        run_seeds.get("dev_split"),
-        run_seeds.get("test_split"),
+    multi_records = _load_multi_records(
+        data_format=data_format,
+        data_path=data_path,
+        data_scale=data_scale,
+        data_filter=data_filter,
         select_coords=select_coords,
         rename_coords=rename_coords,
+    )
+
+    # Split records
+    train_rec, dev_rec = _split_multi_records(
+        multi_records=multi_records,
+        dev_ratio=dev_ratio,
+        dev_seed=run_seeds.get("dev_split"),
         task_ids=task_ids_list,
         task_data=task_data,
     )
@@ -885,7 +880,6 @@ def train(
     tasks = _configure_tasks(
         train_rec,
         dev_rec,
-        test_rec,
         task_ids_list,
         window_size,
         window_offset,

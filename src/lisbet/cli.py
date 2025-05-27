@@ -225,15 +225,12 @@ def configure_train_model_parser(parser: argparse.ArgumentParser) -> None:
         help="i.e., cfc:[0],nwp:[0,1]",
     )
     parser.add_argument("--seed", default=1991, type=int, help="Base RNG seed")
-    parser.add_argument(
-        "--seed_test_split", type=int, help="RNG seed for test set split"
-    )
     parser.add_argument("--run_id", type=str, help="ID of the run")
     parser.add_argument(
         "--data_augmentation", action="store_true", help="Enable data augmentation"
     )
     parser.add_argument(
-        "--train_sample", type=float, help="Fraction of samples from the training set"
+        "--train_sample", type=float, help="Fraction of samples from the train set"
     )
     parser.add_argument(
         "--dev_sample", type=float, help="Fraction of samples from the dev set"
@@ -241,13 +238,7 @@ def configure_train_model_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--dev_ratio",
         type=float,
-        help="Fraction of the training set to held out for hyper-parameters tuning",
-    )
-    parser.add_argument(
-        "--test_ratio",
-        type=float,
-        help="""Fraction of the training set to held out for testing,
-        if a test set is not available in the dataset""",
+        help="Fraction of the train set to be held out as dev set",
     )
 
     # Model architecture

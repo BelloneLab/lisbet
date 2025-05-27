@@ -27,7 +27,6 @@ def test_train_integration(tmp_path):
         save_weights="last",
         save_history=True,
         dev_ratio=None,
-        test_ratio=None,
         data_augmentation=False,
         train_sample=None,
         dev_sample=None,
