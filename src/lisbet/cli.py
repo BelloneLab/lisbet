@@ -200,7 +200,24 @@ def configure_train_model_parser(parser: argparse.ArgumentParser) -> None:
         "--task_ids",
         type=str,
         default="cfc",
-        help="Task ID or comma-separated list of task IDS.",
+        help=textwrap.dedent(
+            """\
+            Task ID or comma-separated list of task IDS.
+
+            Valid (supervised) tasks are:
+              - cfc: multi-Class Frame Classification
+              - lfc: multi-Label Frame Classification
+
+            Valid (self-supervised) tasks are:
+              - nwp: Next Window Prediction
+              - smp: Swap Mouse Prediction
+              - vsp: Video Speed Prediction
+              - dmp: Delay Mouse Prediction
+
+            Example:
+              nwp,smp
+            """
+        ),
     )
     parser.add_argument(
         "--task_data",

@@ -383,6 +383,10 @@ def _configure_tasks(
                     data_format,
                 )
             )
+        elif task_id == "lfc":
+            raise NotImplementedError(
+                "Multi-Label Frame Classification task is not implemented yet."
+            )
         elif task_id in ("nwp", "smp", "vsp", "dmp"):
             tasks.append(
                 _configure_selfsupervised_task(
