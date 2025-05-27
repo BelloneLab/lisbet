@@ -78,7 +78,7 @@ def _generate_seeds(seed, task_ids):
     return run_seeds
 
 
-def _load_records(
+def _load_multi_records(
     data_format,
     data_path,
     data_scale,
@@ -101,7 +101,7 @@ def _load_records(
     logging.debug(datasources)
 
     # Load records
-    records = [
+    multi_records = [
         load_records(
             dataset,
             datapath,
@@ -118,7 +118,8 @@ def _load_records(
     #               only need to check the first record of each dataset against the
     #               others.
     main_features = [
-        recs[0][1]["posetracks"].coords["features"].values.tolist() for recs in records
+        recs[0][1]["posetracks"].coords["features"].values.tolist()
+        for recs in multi_records
     ]
     ref_features = main_features[0]
     for i, features in enumerate(main_features):
@@ -129,11 +130,11 @@ def _load_records(
                 f"Record features:\n{features}"
             )
 
-    return records
+    return multi_records
 
 
-def _split_records(
-    records,
+def _split_multi_records(
+    multi_records,
     dev_ratio,
     dev_seed,
     task_ids,
@@ -141,7 +142,7 @@ def _split_records(
 ):
     """Split records into train and dev sets."""
     # Build task to data mapping, by default use all data for every task
-    task_data_map = {task_id: list(range(len(records))) for task_id in task_ids}
+    task_data_map = {task_id: list(range(len(multi_records))) for task_id in task_ids}
 
     # Update task to data mapping, if requested
     if task_data is not None:
@@ -160,10 +161,13 @@ def _split_records(
     # Assign records
     for task_id, dataidx_lst in task_data_map.items():
         for dataidx in dataidx_lst:
+            # Locate records for the current task
+            records = multi_records[dataidx]
+
             # Split records
             if dev_ratio is not None:
                 train_rec_task, dev_rec_task = train_test_split(
-                    records[dataidx],
+                    records,
                     test_size=dev_ratio,
                     random_state=dev_seed,
                 )
@@ -174,7 +178,7 @@ def _split_records(
 
             else:
                 # Assign all records to test sets
-                train_rec[task_id].extend(records[dataidx])
+                train_rec[task_id].extend(records)
 
             logging.info(
                 "Assigning records from dataset no. %d to task %s", dataidx, task_id
@@ -818,7 +822,7 @@ def train(
     torch.manual_seed(run_seeds["torch"])
 
     # Load records
-    records = _load_records(
+    multi_records = _load_multi_records(
         data_format=data_format,
         data_path=data_path,
         data_scale=data_scale,
@@ -828,8 +832,8 @@ def train(
     )
 
     # Split records
-    train_rec, dev_rec = _split_records(
-        records=records,
+    train_rec, dev_rec = _split_multi_records(
+        multi_records=multi_records,
         dev_ratio=dev_ratio,
         dev_seed=run_seeds.get("dev_split"),
         task_ids=task_ids_list,

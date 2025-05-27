@@ -212,30 +212,27 @@ def _process_inference_dataset(
     #       and should be removed in the future or moved to the dataset loading.
     results = []
     seen_keys = set()
-    for group_name, group_data in records.items():
-        for seq in tqdm(
-            group_data, desc=f"Analyzing {data_format} dataset, {group_name} group"
-        ):
-            # Extract sequence ID
-            key = seq[0]
+    for seq in tqdm(records, desc=f"Analyzing {data_format} dataset"):
+        # Extract sequence ID
+        key = seq[0]
 
-            # Check for duplicated keys
-            if key in seen_keys:
-                raise RuntimeError(f"Duplicated key {key}")
-            seen_keys.add(key)
+        # Check for duplicated keys
+        if key in seen_keys:
+            raise RuntimeError(f"Duplicated key {key}")
+        seen_keys.add(key)
 
-            # Run inference
-            model_output = run_inference_for_sequence(
-                model,
-                seq,
-                forward_fn,
-                window_size,
-                window_offset,
-                fps_scaling,
-                batch_size,
-                device,
-            )
-            results.append((key, model_output))
+        # Run inference
+        model_output = run_inference_for_sequence(
+            model,
+            seq,
+            forward_fn,
+            window_size,
+            window_offset,
+            fps_scaling,
+            batch_size,
+            device,
+        )
+        results.append((key, model_output))
 
     return results
 

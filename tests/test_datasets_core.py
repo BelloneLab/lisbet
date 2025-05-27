@@ -84,8 +84,8 @@ def test_data_scaling_default(dummy_dataset):
     dummy_dataset : Path
         Path to the dummy dataset fixture.
     """
-    groups = load_records(data_format="movement", data_path=dummy_dataset)
-    for _, rec in groups["main_records"]:
+    records = load_records(data_format="movement", data_path=dummy_dataset)
+    for _, rec in records:
         ds = rec["posetracks"]
         arr = ds["position"].values
         assert np.all(arr >= 0.0)
@@ -138,61 +138,11 @@ def test_data_scaling_explicit_valid(tmp_path):
         },
     )
     data.to_netcdf(exp_dir / "tracking.nc", engine="scipy")
-    groups = load_records(data_format="movement", data_path=root, data_scale="1x1")
-    ds = groups["main_records"][0][1]["posetracks"]
+    records = load_records(data_format="movement", data_path=root, data_scale="1x1")
+    ds = records[0][1]["posetracks"]
     arr = ds["position"].values
     assert np.all(arr >= 0.0)
     assert np.all(arr <= 1.0)
-
-
-def test_splits_raises(dummy_dataset):
-    """
-    Test that requesting three splits on a tiny dataset raises ValueError.
-
-    Parameters
-    ----------
-    dummy_dataset : Path
-        Path to the dummy dataset fixture.
-    """
-    with pytest.raises(ValueError, match="the resulting train set will be empty"):
-        load_records(
-            data_format="movement",
-            data_path=dummy_dataset,
-            test_ratio=0.5,
-            dev_ratio=0.5,
-            test_seed=42,
-            dev_seed=43,
-        )
-
-
-def test_valid_three_way_split(large_dummy_dataset):
-    """
-    Test that a valid three-way split works and all splits are non-empty.
-
-    Parameters
-    ----------
-    large_dummy_dataset : Path
-        Path to the large dummy dataset fixture.
-    """
-    groups = load_records(
-        data_format="movement",
-        data_path=large_dummy_dataset,
-        test_ratio=0.2,
-        dev_ratio=0.25,
-        test_seed=42,
-        dev_seed=43,
-    )
-    # Should have 1 test, 1 dev, 3 main
-    assert len(groups["test_records"]) == 1
-    assert len(groups["dev_records"]) == 1
-    assert len(groups["main_records"]) == 3
-    # All record IDs should be unique across splits
-    all_ids = [rec[0] for group in groups.values() for rec in group]
-    assert len(set(all_ids)) == 5
-    splits = [set(rec[0] for rec in group) for group in groups.values()]
-    for i in range(len(splits)):
-        for j in range(i + 1, len(splits)):
-            assert splits[i].isdisjoint(splits[j])
 
 
 def test_data_filter(dummy_dataset):
@@ -204,11 +154,11 @@ def test_data_filter(dummy_dataset):
     dummy_dataset : Path
         Path to the dummy dataset fixture.
     """
-    groups = load_records(
+    records = load_records(
         data_format="movement", data_path=dummy_dataset, data_filter="exp0"
     )
-    assert len(groups["main_records"]) == 1
-    assert groups["main_records"][0][0] == "exp0"
+    assert len(records) == 1
+    assert records[0][0] == "exp0"
 
 
 def test_select_coords_selection(dummy_dataset):
@@ -217,12 +167,12 @@ def test_select_coords_selection(dummy_dataset):
     keypoints.
     """
     # Only select 'mouse', 'x', and 'nose'
-    groups = load_records(
+    records = load_records(
         data_format="movement",
         data_path=dummy_dataset,
         select_coords="mouse;x;nose",
     )
-    ds = groups["main_records"][0][1]["posetracks"]
+    ds = records[0][1]["posetracks"]
     assert list(ds["individuals"].values) == ["mouse"]
     assert list(ds["space"].values) == ["x"]
     assert list(ds["keypoints"].values) == ["nose"]
@@ -232,12 +182,12 @@ def test_select_coords_wildcard(dummy_dataset):
     """
     Test that select_coords with '*' includes all items at that level.
     """
-    groups = load_records(
+    records = load_records(
         data_format="movement",
         data_path=dummy_dataset,
         select_coords="*;*;*",
     )
-    ds = groups["main_records"][0][1]["posetracks"]
+    ds = records[0][1]["posetracks"]
     assert set(str(x) for x in ds["individuals"].values) == {"mouse"}
     assert set(str(x) for x in ds["space"].values) == {"x", "y"}
     assert set(str(x) for x in ds["keypoints"].values) == {"nose", "tail"}
@@ -248,12 +198,12 @@ def test_rename_coords_basic(dummy_dataset):
     Test that rename_coords argument renames individuals, axes, and keypoints as
     expected.
     """
-    groups = load_records(
+    records = load_records(
         data_format="movement",
         data_path=dummy_dataset,
         rename_coords="mouse:rat;x:horizontal;nose:snout,tail:tailbase",
     )
-    ds = groups["main_records"][0][1]["posetracks"]
+    ds = records[0][1]["posetracks"]
     assert set(str(x) for x in ds["individuals"].values) == {"rat"}
     assert set(str(x) for x in ds["space"].values) == {"horizontal", "y"}
     assert set(str(x) for x in ds["keypoints"].values) == {"snout", "tailbase"}
@@ -263,12 +213,12 @@ def test_rename_coords_wildcard(dummy_dataset):
     """
     Test that rename_coords with '*' leaves coordinates unchanged.
     """
-    groups = load_records(
+    records = load_records(
         data_format="movement",
         data_path=dummy_dataset,
         rename_coords="*;*;*",
     )
-    ds = groups["main_records"][0][1]["posetracks"]
+    ds = records[0][1]["posetracks"]
     assert set(ds["individuals"].values) == {"mouse"}
     assert set(ds["space"].values) == {"x", "y"}
     assert set(ds["keypoints"].values) == {"nose", "tail"}
@@ -397,14 +347,14 @@ def test_explicit_and_image_size_px_scaling_identical_in_range(tmp_path):
     ds2.attrs["image_size_px"] = [10, 10]
     ds2.to_netcdf(exp2_dir / "tracking.nc", engine="scipy")
 
-    groups_explicit = load_records(
+    records_explicit = load_records(
         data_format="movement", data_path=tmp_path / "exp1", data_scale="10x10"
     )
-    groups_image_size = load_records(
+    records_image_size = load_records(
         data_format="movement", data_path=tmp_path / "exp2", data_scale=None
     )
 
-    arr1 = groups_explicit["main_records"][0][1]["posetracks"]["position"].values
-    arr2 = groups_image_size["main_records"][0][1]["posetracks"]["position"].values
+    arr1 = records_explicit[0][1]["posetracks"]["position"].values
+    arr2 = records_image_size[0][1]["posetracks"]["position"].values
 
     np.testing.assert_array_equal(arr1, arr2)

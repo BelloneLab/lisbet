@@ -23,12 +23,10 @@ def dummy_inference(monkeypatch):
 def dummy_load_records(monkeypatch):
     # Patch load_records to return dummy ground-truth labels
     def _dummy_load_records(*args, **kwargs):
-        return {
-            "main_records": [
-                ("rec1", {"annotations": DummyAnnotation([0, 1, 0])}),
-                ("rec2", {"annotations": DummyAnnotation([1, 0])}),
-            ]
-        }
+        return [
+            ("rec1", {"annotations": DummyAnnotation([0, 1, 0])}),
+            ("rec2", {"annotations": DummyAnnotation([1, 0])}),
+        ]
 
     monkeypatch.setattr(evaluation, "load_records", _dummy_load_records)
 
@@ -124,12 +122,10 @@ def test_evaluate_model_f1_score_correctness(tmp_path, monkeypatch):
 
     # Patch load_records
     def _dummy_load_records(*args, **kwargs):
-        return {
-            "main_records": [
-                ("rec1", {"annotations": DummyAnnotation(dummy_labels["rec1"])}),
-                ("rec2", {"annotations": DummyAnnotation(dummy_labels["rec2"])}),
-            ]
-        }
+        return [
+            ("rec1", {"annotations": DummyAnnotation(dummy_labels["rec1"])}),
+            ("rec2", {"annotations": DummyAnnotation(dummy_labels["rec2"])}),
+        ]
 
     monkeypatch.setattr(evaluation, "load_records", _dummy_load_records)
 
