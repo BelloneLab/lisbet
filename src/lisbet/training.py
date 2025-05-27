@@ -172,12 +172,12 @@ def _split_multi_records(
                     random_state=dev_seed,
                 )
 
-                # Assign records to test and dev sets
+                # Assign records to train and dev sets
                 train_rec[task_id].extend(train_rec_task)
                 dev_rec[task_id].extend(dev_rec_task)
 
             else:
-                # Assign all records to test sets
+                # Assign all records to train sets
                 train_rec[task_id].extend(records)
 
             logging.info(

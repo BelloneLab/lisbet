@@ -238,7 +238,7 @@ def configure_train_model_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--dev_ratio",
         type=float,
-        help="Fraction of the train set to held out as dev set",
+        help="Fraction of the train set to be held out as dev set",
     )
 
     # Model architecture
