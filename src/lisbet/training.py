@@ -438,7 +438,6 @@ def _build_model(
     num_layers,
     max_len,
     tasks,
-    compile_model,
     load_backbone_weights,
     freeze_backbone_weights,
 ):
@@ -454,9 +453,6 @@ def _build_model(
         ),
         {task["task_id"]: task["head"] for task in tasks},
     )
-
-    if compile_model:
-        model = torch.compile(model)
 
     if load_backbone_weights:
         incompatible_layers = model.load_state_dict(
@@ -705,7 +701,6 @@ def train(
     output_path: Path = Path("."),
     # Performance options
     mixed_precision: bool = False,
-    compile_model: bool = False,
 ) -> torch.nn.Module:
     """
     Train a LISBET model.
@@ -784,8 +779,6 @@ def train(
         Output directory for models and logs.
     mixed_precision : bool, default=False
         Run training in mixed precision mode.
-    compile_model : bool, default=False
-        Compile training with XLA.
 
     Returns
     -------
@@ -897,7 +890,6 @@ def train(
         num_layers,
         max_len,
         tasks,
-        compile_model,
         load_backbone_weights,
         freeze_backbone_weights,
     )

@@ -286,9 +286,6 @@ def configure_train_model_parser(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Run training in mixed precision mode",
     )
-    parser.add_argument(
-        "--compile_model", action="store_true", help="Compile training with XLA"
-    )
 
 
 def configure_annotate_behavior_parser(parser: argparse.ArgumentParser) -> None:
