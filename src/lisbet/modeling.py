@@ -114,6 +114,7 @@ class ClassificationHead(nn.Module):
         x = x[:, self.output_token_idx]
         x, _ = torch.max(x, dim=1)
         x = self.logits(x)
+        x = torch.squeeze(x)
         return x
 
 

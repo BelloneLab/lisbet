@@ -18,31 +18,26 @@ import re
 from collections import defaultdict
 from contextlib import nullcontext
 from datetime import datetime
-from functools import partial
 from itertools import repeat
 from pathlib import Path
 from typing import Optional
 
 import numpy as np
-import pandas as pd
 import torch
 import yaml
-from sklearn.metrics import accuracy_score, f1_score
+from lightning.fabric import Fabric
+from lightning.fabric.loggers import CSVLogger
 from sklearn.model_selection import train_test_split
 from sklearn.utils.class_weight import compute_class_weight
 from torch.profiler import ProfilerActivity, profile, schedule
 from torchinfo import summary
+from torchmetrics.aggregation import MeanMetric
+from torchmetrics.classification import BinaryAccuracy, MulticlassF1Score
 from torchvision import transforms
 from tqdm.auto import tqdm
 
 from . import input_pipeline, modeling
 from .datasets import load_records
-
-
-def binary_loss(inputs, targets):
-    inputs = inputs.view(-1)
-    targets = targets.float()
-    return torch.nn.functional.binary_cross_entropy_with_logits(inputs, targets)
 
 
 class RandomXYSwap:
@@ -266,9 +261,6 @@ def _configure_classification_task(
     )
     logging.debug("Class weights: %s", class_weight)
 
-    # Create loss
-    criterion = torch.nn.CrossEntropyLoss(weight=class_weight.to(device))
-
     # Create data transformers
     train_transform = (
         transforms.Compose([RandomXYSwap(run_seeds["transform_cfc"]), torch.Tensor])
@@ -293,21 +285,19 @@ def _configure_classification_task(
         if rec
     }
 
-    # Metric
-    metric = partial(f1_score, average="macro")
-    metric.__name__ = "macro_f1_score"
-
     # Create task
     # NOTE: This could become a dataclass
     task = {
         "task_id": "cfc",
         "head": head,
         "out_dim": num_classes,
-        "criterion": criterion,
+        "loss_function": torch.nn.CrossEntropyLoss(weight=class_weight.to(device)),
+        "train_loss": MeanMetric().to(device),
+        "train_score": MulticlassF1Score(num_classes, average="macro").to(device),
+        "dev_loss": MeanMetric().to(device),
+        "dev_score": MulticlassF1Score(num_classes, average="macro").to(device),
         "datasets": datasets,
         "resample": False,
-        "predictor": lambda output: torch.argmax(output, dim=1),
-        "metric": metric,
     }
 
     return task
@@ -323,6 +313,7 @@ def _configure_selfsupervised_task(
     hidden_dim,
     data_augmentation,
     run_seeds,
+    device,
 ):
     """Internal helper. Configures a self-supervised task."""
     # Create classification head
@@ -332,9 +323,6 @@ def _configure_selfsupervised_task(
         out_dim=1,
         hidden_dim=hidden_dim,
     )
-
-    # Create loss
-    criterion = binary_loss
 
     # Create data transformers
     train_transform = (
@@ -374,11 +362,13 @@ def _configure_selfsupervised_task(
         "task_id": task_id,
         "head": head,
         "out_dim": 1,
-        "criterion": criterion,
+        "loss_function": torch.nn.BCEWithLogitsLoss(),
+        "train_loss": MeanMetric().to(device),
+        "train_score": BinaryAccuracy().to(device),
+        "dev_loss": MeanMetric().to(device),
+        "dev_score": BinaryAccuracy().to(device),
         "datasets": datasets,
         "resample": True,
-        "predictor": lambda output: output > 0.0,
-        "metric": accuracy_score,
     }
 
     return task
@@ -431,6 +421,7 @@ def _configure_tasks(
                     hidden_dim,
                     data_augmentation,
                     run_seeds,
+                    device,
                 )
             )
         else:
@@ -450,7 +441,6 @@ def _build_model(
     compile_model,
     load_backbone_weights,
     freeze_backbone_weights,
-    device,
 ):
     """Internal helper. Builds the LISBET model."""
     model = modeling.MultiTaskModel(
@@ -463,7 +453,7 @@ def _build_model(
             max_len=max_len,
         ),
         {task["task_id"]: task["head"] for task in tasks},
-    ).to(device)
+    )
 
     if compile_model:
         model = torch.compile(model)
@@ -485,7 +475,7 @@ def _build_model(
     return model
 
 
-def _configure_optimizer_and_scheduler(model, learning_rate, mixed_precision):
+def _configure_optimizer_and_scheduler(model, learning_rate):
     """Internal helper. Configures optimizer, scheduler, and scaler."""
     # Configure optimizer
     optimizer = torch.optim.AdamW(
@@ -516,10 +506,7 @@ def _configure_optimizer_and_scheduler(model, learning_rate, mixed_precision):
         milestones=[warmup_epochs],
     )
 
-    # Configure mixed precision
-    scaler = torch.amp.GradScaler("cuda", enabled=mixed_precision)
-
-    return optimizer, scheduler, scaler
+    return optimizer, scheduler
 
 
 def _configure_dataloaders(tasks, group, batch_size, group_sample, pin_memory):
@@ -558,19 +545,12 @@ def _train_one_epoch(
     dataloaders,
     optimizer,
     scheduler,
-    scaler,
     tasks,
-    device,
-    mixed_precision,
     prof,
+    fabric,
 ):
     """Internal helper. Runs one training epoch."""
     model.train()
-
-    # Logging
-    losses = defaultdict(list)
-    labels = defaultdict(list)
-    predictions = defaultdict(list)
 
     # Iterate over all batches
     for batch_data in tqdm(zip(*dataloaders)):
@@ -579,85 +559,53 @@ def _train_one_epoch(
 
         # Iterate over all tasks
         for task, (data, target) in zip(tasks, batch_data):
-            data = data.to(device, non_blocking=True)
-            target = target.to(device, non_blocking=True)
-
-            with torch.autocast(
-                device_type=device.type,
-                dtype=torch.float16,
-                enabled=mixed_precision,
-            ):
-                output = model(data, task["task_id"])
-                loss = task["criterion"](output, target)
-                predicted = task["predictor"](output)
+            output = model(data, task["task_id"])
+            loss = task["loss_function"](output, target)
 
             if prof is not None:
                 prof.step()
 
             batch_losses.append(loss)
 
-            # Store loss value for stats
-            losses[task["task_id"]].append(loss.item())
-            labels[task["task_id"]].append(target.detach().cpu().numpy())
-            predictions[task["task_id"]].append(predicted.detach().cpu().numpy())
+            # Store loss value and metrics for stats
+            task["train_loss"].update(loss)
+            task["train_score"].update(output, target)
 
-        total_loss = sum(scaler.scale(loss) for loss in batch_losses)
-        total_loss.backward()
-        scaler.step(optimizer)
-        scaler.update()
-    scheduler.step()
-
-    return losses, labels, predictions
+        total_loss = sum(batch_losses)
+        fabric.backward(total_loss)
+        optimizer.step()
 
 
-def _evaluate(model, dataloaders, tasks, device, mixed_precision):
+def _evaluate(model, dataloaders, tasks):
     """Internal helper. Evaluates model on a group."""
     model.eval()
-
-    # Logging
-    losses = defaultdict(list)
-    labels = defaultdict(list)
-    predictions = defaultdict(list)
 
     with torch.no_grad():
         # Iterate over all batches
         for batch_data in tqdm(zip(*dataloaders)):
             # Iterate over all tasks
             for task, (data, target) in zip(tasks, batch_data):
-                data = data.to(device, non_blocking=True)
-                target = target.to(device, non_blocking=True)
+                output = model(data, task["task_id"])
+                loss = task["loss_function"](output, target)
 
-                with torch.autocast(
-                    device_type=device.type,
-                    dtype=torch.float16,
-                    enabled=mixed_precision,
-                ):
-                    output = model(data, task["task_id"])
-                    loss = task["criterion"](output, target)
-                    predicted = task["predictor"](output)
-
-                # Store loss value for stats
-                losses[task["task_id"]].append(loss.item())
-                labels[task["task_id"]].append(target.cpu().numpy())
-                predictions[task["task_id"]].append(predicted.cpu().numpy())
-
-    return losses, labels, predictions
+                # Store loss value and metrics for stats
+                task["dev_loss"].update(loss)
+                task["dev_score"].update(output, target)
 
 
-def _compute_epoch_logs(group_id, tasks, losses, labels, predictions):
+def _compute_epoch_logs(group_id, tasks):
     """Internal helper. Computes metrics and mean losses for an epoch."""
     epoch_log = {}
     for task in tasks:
         # Compute metrics
-        metric_name = f"{task['task_id']}_{group_id}_{task['metric'].__name__}"
-        epoch_log[metric_name] = task["metric"](
-            np.concatenate(labels[task["task_id"]]),
-            np.concatenate(predictions[task["task_id"]]),
-        )
+        metric_name = f"{task['task_id']}_{group_id}_score"
+        epoch_log[metric_name] = task[f"{group_id}_score"].compute()
+        task[f"{group_id}_score"].reset()
 
         # Compute mean losses
         loss_name = f"{task['task_id']}_{group_id}_loss"
-        epoch_log[loss_name] = np.mean(losses[task["task_id"]])
+        epoch_log[loss_name] = task[f"{group_id}_loss"].compute()
+        task[f"{group_id}_loss"].reset()
 
     return epoch_log
 
@@ -703,14 +651,6 @@ def _save_model_config(
     model_path.parent.mkdir(parents=True, exist_ok=True)
     with open(model_path, "w", encoding="utf-8") as f_yaml:
         yaml.safe_dump(model_config, f_yaml)
-
-
-def _save_history(output_path, run_id, history):
-    """Internal helper. Saves training history."""
-    history_path = Path(output_path) / "models" / run_id / "training_history.log"
-    history_path.parent.mkdir(parents=True, exist_ok=True)
-    history = pd.DataFrame.from_dict(history)
-    history.to_csv(history_path)
 
 
 def _save_profiling_results(output_path, run_id, prof):
@@ -862,18 +802,16 @@ def train(
     if run_id is None:
         run_id = datetime.now().strftime("%Y%m%d%H%M%S")
 
-    # Configure accelerator
-    if torch.cuda.is_available():
-        device_type = "cuda"
-        pin_memory = True
-    elif torch.mps.is_available():
-        device_type = "mps"
-        pin_memory = False
-    else:
-        device_type = "cpu"
-        pin_memory = False
-    device = torch.device(device_type)
-    logging.info("Using %s for training model %s.", device_type, run_id)
+    # Create Fabric instance
+    precision = "16-mixed" if mixed_precision else "32-true"
+    history_logger = CSVLogger(
+        Path(output_path) / "models" / run_id,
+        name="training_history",
+        flush_logs_every_n_steps=1,
+    )
+    fabric = Fabric(precision=precision, loggers=history_logger)
+
+    logging.info("Using %s for training model %s.", fabric.device.type, run_id)
 
     # Configure RNGs
     run_seeds = _generate_seeds(seed, task_ids_list)
@@ -945,7 +883,7 @@ def train(
         hidden_dim,
         data_augmentation,
         run_seeds,
-        device,
+        fabric.device,
         data_format,
     )
     n_tasks = len(tasks)
@@ -962,15 +900,12 @@ def train(
         compile_model,
         load_backbone_weights,
         freeze_backbone_weights,
-        device,
     )
     model_stats = summary(model, verbose=0)
     logging.info("Model summary\n" + str(model_stats))
 
     # Optimizer and scheduler
-    optimizer, scheduler, scaler = _configure_optimizer_and_scheduler(
-        model, learning_rate, mixed_precision
-    )
+    optimizer, scheduler = _configure_optimizer_and_scheduler(model, learning_rate)
 
     # Save model config
     _save_model_config(
@@ -989,8 +924,10 @@ def train(
         input_features,
     )
 
+    # Configure Fabric
+    model, optimizer = fabric.setup(model, optimizer)
+
     # Training loop
-    history = []
     with _configure_profiler(steps_multiplier=n_tasks) as prof:
         for epoch in range(epochs):
             history_entry = {"epoch": epoch}
@@ -999,28 +936,25 @@ def train(
 
             # Get dataloaders
             train_dataloaders = _configure_dataloaders(
-                tasks, "train", batch_size, train_sample, pin_memory=pin_memory
+                tasks, "train", batch_size, train_sample, pin_memory=False
             )
+            train_dataloaders = [
+                fabric.setup_dataloaders(dataloader) for dataloader in train_dataloaders
+            ]
 
             # Run training epoch
-            losses, labels, predictions = _train_one_epoch(
+            _train_one_epoch(
                 model,
                 train_dataloaders,
                 optimizer,
                 scheduler,
-                scaler,
                 tasks,
-                device,
-                mixed_precision,
                 prof,
+                fabric,
             )
 
-            # Get epoch logs
-            train_log = _compute_epoch_logs("train", tasks, losses, labels, predictions)
-            logging.info(", ".join(f"{k}: {v:.3f}" for k, v in train_log.items()))
-
             # Update history entry for current epoch
-            history_entry.update(train_log)
+            history_entry.update(_compute_epoch_logs("train", tasks))
 
             # Save weights, if requested
             if save_weights == "all":
@@ -1029,27 +963,22 @@ def train(
             if dev_ratio is not None:
                 # Get dataloaders
                 dev_dataloaders = _configure_dataloaders(
-                    tasks, "dev", batch_size, dev_sample, pin_memory=pin_memory
+                    tasks, "dev", batch_size, dev_sample, pin_memory=False
                 )
+                dev_dataloaders = [
+                    fabric.setup_dataloaders(dataloader)
+                    for dataloader in dev_dataloaders
+                ]
 
                 # Run dev epoch
-                losses, labels, predictions = _evaluate(
-                    model, dev_dataloaders, tasks, device, mixed_precision
-                )
-
-                # Get epoch logs
-                dev_log = _compute_epoch_logs("dev", tasks, losses, labels, predictions)
-                logging.info(", ".join(f"{k}: {v:.3f}" for k, v in dev_log.items()))
+                _evaluate(model, dev_dataloaders, tasks)
 
                 # Update history entry for current epoch
-                history_entry.update(dev_log)
+                history_entry.update(_compute_epoch_logs("dev", tasks))
 
             # Update history
-            history.append(history_entry)
-
-            # Save history, if requested
-            if save_history:
-                _save_history(output_path, run_id, history)
+            fabric.log_dict(history_entry, step=epoch)
+            logging.info(", ".join(f"{k}: {v:.3f}" for k, v in history_entry.items()))
 
     # Save profiling results, if requested
     if prof is not None:
