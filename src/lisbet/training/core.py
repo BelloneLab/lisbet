@@ -14,11 +14,8 @@ Notes
 
 import logging
 import os
-import re
-from collections import defaultdict
 from contextlib import nullcontext
 from datetime import datetime
-from itertools import repeat
 from pathlib import Path
 from typing import Optional
 
@@ -27,33 +24,14 @@ import torch
 import yaml
 from lightning.fabric import Fabric
 from lightning.fabric.loggers import CSVLogger
-from sklearn.model_selection import train_test_split
-from sklearn.utils.class_weight import compute_class_weight
 from torch.profiler import ProfilerActivity, profile, schedule
 from torchinfo import summary
-from torchmetrics.aggregation import MeanMetric
-from torchmetrics.classification import BinaryAccuracy, MulticlassF1Score
-from torchvision import transforms
 from tqdm.auto import tqdm
 
-from . import input_pipeline, modeling
-from .datasets import load_records
+from lisbet import modeling
 
-
-class RandomXYSwap:
-    """Random transformation swapping x and y coordinates"""
-
-    def __init__(self, seed):
-        self.seed = seed
-        self.rng = np.random.default_rng(seed)
-
-    def __call__(self, sample):
-        transformed_sample = (
-            np.stack((sample[:, 1::2], sample[:, ::2]), axis=2).reshape(sample.shape)
-            if self.rng.random() < 0.5
-            else sample
-        )
-        return transformed_sample
+from .preprocessing import load_multi_records, split_multi_records
+from .tasks import configure_tasks
 
 
 def _configure_profiler(steps_multiplier):
@@ -103,331 +81,6 @@ def _generate_seeds(seed, task_ids):
     logging.debug("Generated seeds: %s", run_seeds)
 
     return run_seeds
-
-
-def _load_multi_records(
-    data_format,
-    data_path,
-    data_scale,
-    data_filter,
-    select_coords,
-    rename_coords,
-):
-    """Internal helper. Loads and splits records for all tasks."""
-    datasets = data_format.split(",")
-    datapaths = data_path.split(",")
-    if len(datasets) == len(datapaths):
-        datasources = list(zip(datasets, datapaths))
-    elif len(datapaths) == 1:
-        datasources = list(zip(datasets, repeat(datapaths[0])))
-    else:
-        raise ValueError(
-            "Input arguments datasets and datapaths must have the same length, or"
-            " datapath must be a single element."
-        )
-    logging.debug(datasources)
-
-    # Load records
-    multi_records = [
-        load_records(
-            dataset,
-            datapath,
-            data_scale=data_scale,
-            data_filter=data_filter,
-            select_coords=select_coords,
-            rename_coords=rename_coords,
-        )
-        for dataset, datapath in datasources
-    ]
-
-    # Sanity check: All posetracks must have the same 'features' coordinate across
-    #               datasets. As consistency within a dataset is already checked, we
-    #               only need to check the first record of each dataset against the
-    #               others.
-    main_features = [
-        recs[0][1]["posetracks"].coords["features"].values.tolist()
-        for recs in multi_records
-    ]
-    ref_features = main_features[0]
-    for i, features in enumerate(main_features):
-        if features != ref_features:
-            raise ValueError(
-                f"Inconsistent posetracks coordinates in loaded records, dataset {i}:\n"
-                f"Reference features:\n{ref_features}\n"
-                f"Record features:\n{features}"
-            )
-
-    return multi_records
-
-
-def _split_multi_records(
-    multi_records,
-    dev_ratio,
-    dev_seed,
-    task_ids,
-    task_data,
-):
-    """Split records into train and dev sets."""
-    # Build task to data mapping, by default use all data for every task
-    task_data_map = {task_id: list(range(len(multi_records))) for task_id in task_ids}
-
-    # Update task to data mapping, if requested
-    if task_data is not None:
-        logging.debug("Updating task to data mapping")
-        pattern = r"(\b(?:" + r"|".join(task_ids) + r")\b):(\[(.*?)\])"
-        matches = re.findall(pattern, task_data)
-        task_data_map |= {
-            key: [int(x) for x in vals.split(",")] for key, _, vals in matches
-        }
-    logging.debug(task_data_map)
-
-    # Create the lists of records for each task
-    train_rec = defaultdict(list)
-    dev_rec = defaultdict(list)
-
-    # Assign records
-    for task_id, dataidx_lst in task_data_map.items():
-        for dataidx in dataidx_lst:
-            # Locate records for the current task
-            records = multi_records[dataidx]
-
-            # Split records
-            if dev_ratio is not None:
-                train_rec_task, dev_rec_task = train_test_split(
-                    records,
-                    test_size=dev_ratio,
-                    random_state=dev_seed,
-                )
-
-                # Assign records to train and dev sets
-                train_rec[task_id].extend(train_rec_task)
-                dev_rec[task_id].extend(dev_rec_task)
-
-            else:
-                # Assign all records to train sets
-                train_rec[task_id].extend(records)
-
-            logging.info(
-                "Assigning records from dataset no. %d to task %s", dataidx, task_id
-            )
-
-        logging.info("Final training set size = %d", len(train_rec[task_id]))
-        logging.debug([key for key, _ in train_rec[task_id]])
-
-        logging.info("Final dev set size = %d", len(dev_rec[task_id]))
-        logging.debug([key for key, _ in dev_rec[task_id]])
-
-    return train_rec, dev_rec
-
-
-def _configure_classification_task(
-    train_rec,
-    dev_rec,
-    window_size,
-    window_offset,
-    emb_dim,
-    hidden_dim,
-    data_augmentation,
-    run_seeds,
-    device,
-    data_format,
-):
-    """Internal helper. Configures the classification task."""
-    if "annotations" not in train_rec["cfc"][0][1]:
-        raise RuntimeError("The provided dataset does not contain annotations.")
-
-    # Find number of behaviors in the training set
-    labels = np.concatenate(
-        [
-            data["annotations"].target_cls.argmax("behaviors").squeeze().values
-            for _, data in train_rec["cfc"]
-        ]
-    )
-    classes = np.unique(labels)
-    num_classes = len(classes)
-    np.testing.assert_array_equal(classes, np.array(range(num_classes)))
-
-    # Create classification head
-    head = modeling.ClassificationHead(
-        output_token_idx=-(window_offset + 1),
-        emb_dim=emb_dim,
-        out_dim=num_classes,
-        hidden_dim=hidden_dim,
-    )
-
-    # Compute class weight
-    class_weight = torch.Tensor(
-        compute_class_weight("balanced", classes=classes, y=labels)
-    )
-    logging.debug("Class weights: %s", class_weight)
-
-    # Create data transformers
-    train_transform = (
-        transforms.Compose([RandomXYSwap(run_seeds["transform_cfc"]), torch.Tensor])
-        if data_augmentation
-        else transforms.Compose([torch.Tensor])
-    )
-    eval_transform = transforms.Compose([torch.Tensor])
-
-    # Create dataloaders
-    datasets = {
-        key: input_pipeline.FrameClassificationDataset(
-            records=rec,
-            window_size=window_size,
-            window_offset=window_offset,
-            transform=transform,
-            num_classes=num_classes,
-        )
-        for key, rec, transform in [
-            ("train", train_rec["cfc"], train_transform),
-            ("dev", dev_rec["cfc"], eval_transform),
-        ]
-        if rec
-    }
-
-    # Create task
-    # NOTE: This could become a dataclass
-    task = {
-        "task_id": "cfc",
-        "head": head,
-        "out_dim": num_classes,
-        "loss_function": torch.nn.CrossEntropyLoss(weight=class_weight.to(device)),
-        "train_loss": MeanMetric().to(device),
-        "train_score": MulticlassF1Score(num_classes, average="macro").to(device),
-        "dev_loss": MeanMetric().to(device),
-        "dev_score": MulticlassF1Score(num_classes, average="macro").to(device),
-        "datasets": datasets,
-        "resample": False,
-    }
-
-    return task
-
-
-def _configure_selfsupervised_task(
-    task_id,
-    train_rec,
-    dev_rec,
-    window_size,
-    window_offset,
-    emb_dim,
-    hidden_dim,
-    data_augmentation,
-    run_seeds,
-    device,
-):
-    """Internal helper. Configures a self-supervised task."""
-    # Create classification head
-    head = modeling.ClassificationHead(
-        output_token_idx=None,
-        emb_dim=emb_dim,
-        out_dim=1,
-        hidden_dim=hidden_dim,
-    )
-
-    # Create data transformers
-    train_transform = (
-        transforms.Compose(
-            [RandomXYSwap(run_seeds[f"transform_{task_id}"]), torch.Tensor]
-        )
-        if data_augmentation
-        else transforms.Compose([torch.Tensor])
-    )
-    eval_transform = transforms.Compose([torch.Tensor])
-
-    # Create dataloaders
-    task_map = {
-        "nwp": input_pipeline.NextWindowPredictionDataset,
-        "smp": input_pipeline.SwapMousePredictionDataset,
-        "vsp": input_pipeline.VideoSpeedPredictionDataset,
-        "dmp": input_pipeline.DelayMousePredictionDataset,
-    }
-    datasets = {
-        key: task_map[task_id](
-            records=rec,
-            window_size=window_size,
-            window_offset=window_offset,
-            transform=transform,
-            seed=run_seeds[f"dataset_{task_id}"],
-        )
-        for key, rec, transform in [
-            ("train", train_rec[task_id], train_transform),
-            ("dev", dev_rec[task_id], eval_transform),
-        ]
-        if rec
-    }
-
-    # Create task
-    # NOTE: This could become a dataclass
-    task = {
-        "task_id": task_id,
-        "head": head,
-        "out_dim": 1,
-        "loss_function": torch.nn.BCEWithLogitsLoss(),
-        "train_loss": MeanMetric().to(device),
-        "train_score": BinaryAccuracy().to(device),
-        "dev_loss": MeanMetric().to(device),
-        "dev_score": BinaryAccuracy().to(device),
-        "datasets": datasets,
-        "resample": True,
-    }
-
-    return task
-
-
-def _configure_tasks(
-    train_rec,
-    dev_rec,
-    task_ids,
-    window_size,
-    window_offset,
-    emb_dim,
-    hidden_dim,
-    data_augmentation,
-    run_seeds,
-    device,
-    data_format,
-):
-    """Internal helper. Configures all tasks."""
-    tasks = []
-    for task_id in task_ids:
-        if task_id == "cfc":
-            tasks.append(
-                _configure_classification_task(
-                    train_rec,
-                    dev_rec,
-                    window_size,
-                    window_offset,
-                    emb_dim,
-                    hidden_dim,
-                    data_augmentation,
-                    run_seeds,
-                    device,
-                    data_format,
-                )
-            )
-        elif task_id == "lfc":
-            raise NotImplementedError(
-                "Multi-Label Frame Classification task is not implemented yet."
-            )
-        elif task_id in ("nwp", "smp", "vsp", "dmp"):
-            tasks.append(
-                _configure_selfsupervised_task(
-                    task_id,
-                    train_rec,
-                    dev_rec,
-                    window_size,
-                    window_offset,
-                    emb_dim,
-                    hidden_dim,
-                    data_augmentation,
-                    run_seeds,
-                    device,
-                )
-            )
-        else:
-            raise ValueError(f"Unknown task {task_id}")
-
-    return tasks
 
 
 def _build_model(
@@ -811,7 +464,7 @@ def train(
     torch.manual_seed(run_seeds["torch"])
 
     # Load records
-    multi_records = _load_multi_records(
+    multi_records = load_multi_records(
         data_format=data_format,
         data_path=data_path,
         data_scale=data_scale,
@@ -821,7 +474,7 @@ def train(
     )
 
     # Split records
-    train_rec, dev_rec = _split_multi_records(
+    train_rec, dev_rec = split_multi_records(
         multi_records=multi_records,
         dev_ratio=dev_ratio,
         dev_seed=run_seeds.get("dev_split"),
@@ -866,7 +519,7 @@ def train(
     logging.debug("Output token IDX = %d", output_token_idx)
 
     # Configure tasks
-    tasks = _configure_tasks(
+    tasks = configure_tasks(
         train_rec,
         dev_rec,
         task_ids_list,
