@@ -13,8 +13,10 @@ Notes
 """
 
 import logging
+import os
 import re
 from collections import defaultdict
+from contextlib import nullcontext
 from datetime import datetime
 from functools import partial
 from itertools import repeat
@@ -28,6 +30,7 @@ import yaml
 from sklearn.metrics import accuracy_score, f1_score
 from sklearn.model_selection import train_test_split
 from sklearn.utils.class_weight import compute_class_weight
+from torch.profiler import ProfilerActivity, profile, schedule
 from torchinfo import summary
 from torchvision import transforms
 from tqdm.auto import tqdm
@@ -56,6 +59,35 @@ class RandomXYSwap:
             else sample
         )
         return transformed_sample
+
+
+def _configure_profiler(steps_multiplier):
+    """Internal helper. Configures the profiler."""
+    if os.environ.get("TORCH_PROFILER", "0") == "1":
+        logging.info("Profiler is enabled.")
+
+        profiler = profile(
+            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+            schedule=schedule(
+                skip_first=4 * steps_multiplier,
+                wait=steps_multiplier,
+                warmup=steps_multiplier,
+                active=8 * steps_multiplier,
+                repeat=1,
+            ),
+            record_shapes=True,
+            profile_memory=True,
+            with_stack=True,
+            # NOTE: ExperimentalConfig needed until bug in torch.profiler is fixed, see
+            #       https://github.com/pytorch/pytorch/issues/100253
+            experimental_config=torch._C._profiler._ExperimentalConfig(verbose=True),
+        )
+
+    else:
+        logging.debug("Profiler is disabled.")
+        profiler = nullcontext()
+
+    return profiler
 
 
 def _generate_seeds(seed, task_ids):
@@ -522,7 +554,15 @@ def _configure_dataloaders(tasks, group, batch_size, group_sample, pin_memory):
 
 
 def _train_one_epoch(
-    model, dataloaders, optimizer, scheduler, scaler, tasks, device, mixed_precision
+    model,
+    dataloaders,
+    optimizer,
+    scheduler,
+    scaler,
+    tasks,
+    device,
+    mixed_precision,
+    prof,
 ):
     """Internal helper. Runs one training epoch."""
     model.train()
@@ -550,6 +590,9 @@ def _train_one_epoch(
                 output = model(data, task["task_id"])
                 loss = task["criterion"](output, target)
                 predicted = task["predictor"](output)
+
+            if prof is not None:
+                prof.step()
 
             batch_losses.append(loss)
 
@@ -668,6 +711,21 @@ def _save_history(output_path, run_id, history):
     history_path.parent.mkdir(parents=True, exist_ok=True)
     history = pd.DataFrame.from_dict(history)
     history.to_csv(history_path)
+
+
+def _save_profiling_results(output_path, run_id, prof):
+    """Internal helper. Saves profiling results."""
+    # Create profiling directory
+    profiling_path = Path(output_path) / "models" / run_id / "profiler"
+    profiling_path.mkdir(parents=True, exist_ok=True)
+
+    # Save profiling results
+    prof.export_chrome_trace(str(profiling_path / "chrome_trace.json"))
+    prof.export_memory_timeline(str(profiling_path / "memory_trace.html"))
+    prof.export_stacks(str(profiling_path / "cpu_stacks.txt"), "self_cpu_time_total")
+    prof.export_stacks(str(profiling_path / "cuda_stacks.txt"), "self_cuda_time_total")
+    with open(profiling_path / "profilig_summary.txt", "w", encoding="utf-8") as f:
+        f.write(prof.key_averages().table(sort_by="self_cpu_time_total", row_limit=10))
 
 
 def train(
@@ -890,6 +948,7 @@ def train(
         device,
         data_format,
     )
+    n_tasks = len(tasks)
 
     # Build model
     model = _build_model(
@@ -932,63 +991,69 @@ def train(
 
     # Training loop
     history = []
-    for epoch in range(epochs):
-        history_entry = {"epoch": epoch}
-        print(f"Epoch {epoch}")
-        logging.info("Current LR = %f", scheduler.get_last_lr()[0])
+    with _configure_profiler(steps_multiplier=n_tasks) as prof:
+        for epoch in range(epochs):
+            history_entry = {"epoch": epoch}
+            print(f"Epoch {epoch}")
+            logging.info("Current LR = %f", scheduler.get_last_lr()[0])
 
-        # Get dataloaders
-        train_dataloaders = _configure_dataloaders(
-            tasks, "train", batch_size, train_sample, pin_memory=pin_memory
-        )
-
-        # Run training epoch
-        losses, labels, predictions = _train_one_epoch(
-            model,
-            train_dataloaders,
-            optimizer,
-            scheduler,
-            scaler,
-            tasks,
-            device,
-            mixed_precision,
-        )
-
-        # Get epoch logs
-        train_log = _compute_epoch_logs("train", tasks, losses, labels, predictions)
-        logging.info(", ".join(f"{k}: {v:.3f}" for k, v in train_log.items()))
-
-        # Update history entry for current epoch
-        history_entry.update(train_log)
-
-        # Save weights, if requested
-        if save_weights == "all":
-            _save_weights(model, output_path, run_id, f"weights_epoch{epoch}.pt")
-
-        if dev_ratio is not None:
             # Get dataloaders
-            dev_dataloaders = _configure_dataloaders(
-                tasks, "dev", batch_size, dev_sample, pin_memory=pin_memory
+            train_dataloaders = _configure_dataloaders(
+                tasks, "train", batch_size, train_sample, pin_memory=pin_memory
             )
 
-            # Run dev epoch
-            losses, labels, predictions = _evaluate(
-                model, dev_dataloaders, tasks, device, mixed_precision
+            # Run training epoch
+            losses, labels, predictions = _train_one_epoch(
+                model,
+                train_dataloaders,
+                optimizer,
+                scheduler,
+                scaler,
+                tasks,
+                device,
+                mixed_precision,
+                prof,
             )
 
             # Get epoch logs
-            dev_log = _compute_epoch_logs("dev", tasks, losses, labels, predictions)
-            logging.info(", ".join(f"{k}: {v:.3f}" for k, v in dev_log.items()))
+            train_log = _compute_epoch_logs("train", tasks, losses, labels, predictions)
+            logging.info(", ".join(f"{k}: {v:.3f}" for k, v in train_log.items()))
 
             # Update history entry for current epoch
-            history_entry.update(dev_log)
+            history_entry.update(train_log)
 
-        # Update history
-        history.append(history_entry)
+            # Save weights, if requested
+            if save_weights == "all":
+                _save_weights(model, output_path, run_id, f"weights_epoch{epoch}.pt")
 
-        # Save history, if requested
-        if save_history:
-            _save_history(output_path, run_id, history)
+            if dev_ratio is not None:
+                # Get dataloaders
+                dev_dataloaders = _configure_dataloaders(
+                    tasks, "dev", batch_size, dev_sample, pin_memory=pin_memory
+                )
+
+                # Run dev epoch
+                losses, labels, predictions = _evaluate(
+                    model, dev_dataloaders, tasks, device, mixed_precision
+                )
+
+                # Get epoch logs
+                dev_log = _compute_epoch_logs("dev", tasks, losses, labels, predictions)
+                logging.info(", ".join(f"{k}: {v:.3f}" for k, v in dev_log.items()))
+
+                # Update history entry for current epoch
+                history_entry.update(dev_log)
+
+            # Update history
+            history.append(history_entry)
+
+            # Save history, if requested
+            if save_history:
+                _save_history(output_path, run_id, history)
+
+    # Save profiling results, if requested
+    if prof is not None:
+        _save_profiling_results(output_path, run_id, prof)
 
     # Save final weights, if requested
     if save_weights == "last":

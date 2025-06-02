@@ -34,6 +34,7 @@ def setup_logging(verbose: int = 0, log_level: Optional[str] = None) -> None:
         level = level_map.get(verbose, logging.DEBUG)
 
     logging.basicConfig(level=level)
+    logging.getLogger("matplotlib.font_manager").setLevel(logging.WARNING)
     logging.getLogger("movement.io.load_poses").setLevel(logging.WARNING)
     logging.getLogger("numba").setLevel(logging.WARNING)
 
