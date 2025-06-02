@@ -16,6 +16,7 @@ dependencies = [
     "hmmlearn",
     "huggingface_hub",
     "joblib",
+    "lightning",
     "matplotlib",
     "movement",
     "numpy",
