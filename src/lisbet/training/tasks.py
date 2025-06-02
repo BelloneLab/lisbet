@@ -61,23 +61,15 @@ def _configure_classification_task(
         if data_augmentation
         else transforms.Compose([torch.Tensor])
     )
-    eval_transform = transforms.Compose([torch.Tensor])
 
     # Create dataloaders
-    datasets = {
-        key: input_pipeline.FrameClassificationDataset(
-            records=rec,
-            window_size=window_size,
-            window_offset=window_offset,
-            transform=transform,
-            num_classes=num_classes,
-        )
-        for key, rec, transform in [
-            ("train", train_rec["cfc"], train_transform),
-            ("dev", dev_rec["cfc"], eval_transform),
-        ]
-        if rec
-    }
+    train_dataset = input_pipeline.FrameClassificationDataset(
+        records=train_rec["cfc"],
+        window_size=window_size,
+        window_offset=window_offset,
+        transform=train_transform,
+        num_classes=num_classes,
+    )
 
     # Create task
     # NOTE: This could become a dataclass
@@ -86,13 +78,29 @@ def _configure_classification_task(
         "head": head,
         "out_dim": num_classes,
         "loss_function": torch.nn.CrossEntropyLoss(weight=class_weight.to(device)),
+        "train_dataset": train_dataset,
         "train_loss": MeanMetric().to(device),
         "train_score": MulticlassF1Score(num_classes, average="macro").to(device),
-        "dev_loss": MeanMetric().to(device),
-        "dev_score": MulticlassF1Score(num_classes, average="macro").to(device),
-        "datasets": datasets,
         "resample": False,
     }
+
+    if dev_rec is not None:
+        dev_transform = transforms.Compose([torch.Tensor])
+        dev_dataset = input_pipeline.FrameClassificationDataset(
+            records=dev_rec["cfc"],
+            window_size=window_size,
+            window_offset=window_offset,
+            transform=dev_transform,
+            num_classes=num_classes,
+        )
+
+        task.update(
+            {
+                "dev_dataset": dev_dataset,
+                "dev_loss": MeanMetric().to(device),
+                "dev_score": MulticlassF1Score(num_classes, average="macro").to(device),
+            }
+        )
 
     return task
 
@@ -126,7 +134,6 @@ def _configure_selfsupervised_task(
         if data_augmentation
         else transforms.Compose([torch.Tensor])
     )
-    eval_transform = transforms.Compose([torch.Tensor])
 
     # Create dataloaders
     task_map = {
@@ -135,20 +142,13 @@ def _configure_selfsupervised_task(
         "vsp": input_pipeline.VideoSpeedPredictionDataset,
         "dmp": input_pipeline.DelayMousePredictionDataset,
     }
-    datasets = {
-        key: task_map[task_id](
-            records=rec,
-            window_size=window_size,
-            window_offset=window_offset,
-            transform=transform,
-            seed=run_seeds[f"dataset_{task_id}"],
-        )
-        for key, rec, transform in [
-            ("train", train_rec[task_id], train_transform),
-            ("dev", dev_rec[task_id], eval_transform),
-        ]
-        if rec
-    }
+    train_dataset = task_map[task_id](
+        records=train_rec[task_id],
+        window_size=window_size,
+        window_offset=window_offset,
+        transform=train_transform,
+        seed=run_seeds[f"dataset_{task_id}"],
+    )
 
     # Create task
     # NOTE: This could become a dataclass
@@ -157,13 +157,29 @@ def _configure_selfsupervised_task(
         "head": head,
         "out_dim": 1,
         "loss_function": torch.nn.BCEWithLogitsLoss(),
+        "train_dataset": train_dataset,
         "train_loss": MeanMetric().to(device),
         "train_score": BinaryAccuracy().to(device),
-        "dev_loss": MeanMetric().to(device),
-        "dev_score": BinaryAccuracy().to(device),
-        "datasets": datasets,
         "resample": True,
     }
+
+    if dev_rec is not None:
+        dev_transform = transforms.Compose([torch.Tensor])
+        dev_dataset = task_map[task_id](
+            records=dev_rec[task_id],
+            window_size=window_size,
+            window_offset=window_offset,
+            transform=dev_transform,
+            seed=run_seeds[f"dataset_{task_id}"],
+        )
+
+        task.update(
+            {
+                "dev_dataset": dev_dataset,
+                "dev_loss": MeanMetric().to(device),
+                "dev_score": BinaryAccuracy().to(device),
+            }
+        )
 
     return task
 

@@ -161,7 +161,7 @@ def _configure_optimizer_and_scheduler(model, learning_rate):
 def _configure_dataloaders(tasks, group, batch_size, group_sample, pin_memory):
     """Internal helper. Configures dataloaders for a group."""
     # Estimate number of samples
-    num_samples = min(len(task["datasets"][group]) for task in tasks)
+    num_samples = min(len(task[f"{group}_dataset"]) for task in tasks)
     if group_sample is not None:
         num_samples = int(num_samples * group_sample)
     logging.info("Using %d samples from the %s group", num_samples, group)
@@ -169,16 +169,15 @@ def _configure_dataloaders(tasks, group, batch_size, group_sample, pin_memory):
     # Create a dataloader for each task
     dataloaders = []
     for task in tasks:
+        dataset = task[f"{group}_dataset"]
         # Create new sample, if requested
         # NOTE: This has a regularization effect in self-supervised training
         if task["resample"]:
-            task["datasets"][group].resample_dataset()
+            dataset.resample_dataset()
 
-        sampler = torch.utils.data.RandomSampler(
-            task["datasets"][group], num_samples=num_samples
-        )
+        sampler = torch.utils.data.RandomSampler(dataset, num_samples=num_samples)
         dataloader = torch.utils.data.DataLoader(
-            task["datasets"][group],
+            dataset,
             batch_size=batch_size,
             sampler=sampler,
             num_workers=1,
