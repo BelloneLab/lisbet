@@ -1,10 +1,14 @@
 """Task configuration module."""
 
 import logging
+from dataclasses import dataclass
+from typing import Optional
 
 import numpy as np
 import torch
 from sklearn.utils.class_weight import compute_class_weight
+from torch.utils.data import Dataset
+from torchmetrics import Metric
 from torchmetrics.aggregation import MeanMetric
 from torchmetrics.classification import BinaryAccuracy, MulticlassF1Score
 from torchvision import transforms
@@ -12,6 +16,21 @@ from torchvision import transforms
 from lisbet import input_pipeline, modeling
 
 from .augmentation import RandomXYSwap
+
+
+@dataclass
+class Task:
+    task_id: str
+    head: torch.nn.Module
+    out_dim: int
+    loss_function: torch.nn.Module
+    train_dataset: Dataset
+    train_loss: Metric
+    train_score: Metric
+    resample: bool
+    dev_dataset: Optional[Dataset] = None
+    dev_loss: Optional[Metric] = None
+    dev_score: Optional[Metric] = None
 
 
 def _configure_classification_task(
@@ -71,36 +90,30 @@ def _configure_classification_task(
         num_classes=num_classes,
     )
 
-    # Create task
-    # NOTE: This could become a dataclass
-    task = {
-        "task_id": "cfc",
-        "head": head,
-        "out_dim": num_classes,
-        "loss_function": torch.nn.CrossEntropyLoss(weight=class_weight.to(device)),
-        "train_dataset": train_dataset,
-        "train_loss": MeanMetric().to(device),
-        "train_score": MulticlassF1Score(num_classes, average="macro").to(device),
-        "resample": False,
-    }
+    # Create task as dataclass with default dev attributes
+    task = Task(
+        task_id="cfc",
+        head=head,
+        out_dim=num_classes,
+        loss_function=torch.nn.CrossEntropyLoss(weight=class_weight.to(device)),
+        train_dataset=train_dataset,
+        train_loss=MeanMetric().to(device),
+        train_score=MulticlassF1Score(num_classes, average="macro").to(device),
+        resample=False,
+    )
 
+    # Update dev attributes if dev records are provided
     if dev_rec is not None:
         dev_transform = transforms.Compose([torch.Tensor])
-        dev_dataset = input_pipeline.FrameClassificationDataset(
+        task.dev_dataset = input_pipeline.FrameClassificationDataset(
             records=dev_rec["cfc"],
             window_size=window_size,
             window_offset=window_offset,
             transform=dev_transform,
             num_classes=num_classes,
         )
-
-        task.update(
-            {
-                "dev_dataset": dev_dataset,
-                "dev_loss": MeanMetric().to(device),
-                "dev_score": MulticlassF1Score(num_classes, average="macro").to(device),
-            }
-        )
+        task.dev_loss = MeanMetric().to(device)
+        task.dev_score = MulticlassF1Score(num_classes, average="macro").to(device)
 
     return task
 
@@ -150,36 +163,30 @@ def _configure_selfsupervised_task(
         seed=run_seeds[f"dataset_{task_id}"],
     )
 
-    # Create task
-    # NOTE: This could become a dataclass
-    task = {
-        "task_id": task_id,
-        "head": head,
-        "out_dim": 1,
-        "loss_function": torch.nn.BCEWithLogitsLoss(),
-        "train_dataset": train_dataset,
-        "train_loss": MeanMetric().to(device),
-        "train_score": BinaryAccuracy().to(device),
-        "resample": True,
-    }
+    # Create task as dataclass with default dev attributes
+    task = Task(
+        task_id=task_id,
+        head=head,
+        out_dim=1,
+        loss_function=torch.nn.BCEWithLogitsLoss(),
+        train_dataset=train_dataset,
+        train_loss=MeanMetric().to(device),
+        train_score=BinaryAccuracy().to(device),
+        resample=True,
+    )
 
+    # Update dev attributes if dev records are provided
     if dev_rec is not None:
         dev_transform = transforms.Compose([torch.Tensor])
-        dev_dataset = task_map[task_id](
+        task.dev_dataset = task_map[task_id](
             records=dev_rec[task_id],
             window_size=window_size,
             window_offset=window_offset,
             transform=dev_transform,
             seed=run_seeds[f"dataset_{task_id}"],
         )
-
-        task.update(
-            {
-                "dev_dataset": dev_dataset,
-                "dev_loss": MeanMetric().to(device),
-                "dev_score": BinaryAccuracy().to(device),
-            }
-        )
+        task.dev_loss = MeanMetric().to(device)
+        task.dev_score = BinaryAccuracy().to(device)
 
     return task
 

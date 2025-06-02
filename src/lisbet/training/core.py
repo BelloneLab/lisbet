@@ -104,7 +104,7 @@ def _build_model(
             num_layers=num_layers,
             max_len=max_len,
         ),
-        {task["task_id"]: task["head"] for task in tasks},
+        {task.task_id: task.head for task in tasks},
     )
 
     if load_backbone_weights:
@@ -161,7 +161,7 @@ def _configure_optimizer_and_scheduler(model, learning_rate):
 def _configure_dataloaders(tasks, group, batch_size, group_sample, pin_memory):
     """Internal helper. Configures dataloaders for a group."""
     # Estimate number of samples
-    num_samples = min(len(task[f"{group}_dataset"]) for task in tasks)
+    num_samples = min(len(getattr(task, f"{group}_dataset")) for task in tasks)
     if group_sample is not None:
         num_samples = int(num_samples * group_sample)
     logging.info("Using %d samples from the %s group", num_samples, group)
@@ -169,10 +169,10 @@ def _configure_dataloaders(tasks, group, batch_size, group_sample, pin_memory):
     # Create a dataloader for each task
     dataloaders = []
     for task in tasks:
-        dataset = task[f"{group}_dataset"]
+        dataset = getattr(task, f"{group}_dataset")
         # Create new sample, if requested
         # NOTE: This has a regularization effect in self-supervised training
-        if task["resample"]:
+        if task.resample:
             dataset.resample_dataset()
 
         sampler = torch.utils.data.RandomSampler(dataset, num_samples=num_samples)
@@ -207,8 +207,8 @@ def _train_one_epoch(
 
         # Iterate over all tasks
         for task, (data, target) in zip(tasks, batch_data):
-            output = model(data, task["task_id"])
-            loss = task["loss_function"](output, target)
+            output = model(data, task.task_id)
+            loss = task.loss_function(output, target)
 
             if prof is not None:
                 prof.step()
@@ -216,8 +216,8 @@ def _train_one_epoch(
             batch_losses.append(loss)
 
             # Store loss value and metrics for stats
-            task["train_loss"].update(loss)
-            task["train_score"].update(output, target)
+            task.train_loss.update(loss)
+            task.train_score.update(output, target)
 
         total_loss = sum(batch_losses)
         fabric.backward(total_loss)
@@ -233,12 +233,12 @@ def _evaluate(model, dataloaders, tasks):
         for batch_data in tqdm(zip(*dataloaders)):
             # Iterate over all tasks
             for task, (data, target) in zip(tasks, batch_data):
-                output = model(data, task["task_id"])
-                loss = task["loss_function"](output, target)
+                output = model(data, task.task_id)
+                loss = task.loss_function(output, target)
 
                 # Store loss value and metrics for stats
-                task["dev_loss"].update(loss)
-                task["dev_score"].update(output, target)
+                task.dev_loss.update(loss)
+                task.dev_score.update(output, target)
 
 
 def _compute_epoch_logs(group_id, tasks):
@@ -246,14 +246,14 @@ def _compute_epoch_logs(group_id, tasks):
     epoch_log = {}
     for task in tasks:
         # Compute metrics
-        metric_name = f"{task['task_id']}_{group_id}_score"
-        epoch_log[metric_name] = task[f"{group_id}_score"].compute()
-        task[f"{group_id}_score"].reset()
+        metric_name = f"{task.task_id}_{group_id}_score"
+        epoch_log[metric_name] = getattr(task, f"{group_id}_score").compute()
+        getattr(task, f"{group_id}_score").reset()
 
         # Compute mean losses
-        loss_name = f"{task['task_id']}_{group_id}_loss"
-        epoch_log[loss_name] = task[f"{group_id}_loss"].compute()
-        task[f"{group_id}_loss"].reset()
+        loss_name = f"{task.task_id}_{group_id}_loss"
+        epoch_log[loss_name] = getattr(task, f"{group_id}_loss").compute()
+        getattr(task, f"{group_id}_loss").reset()
 
     return epoch_log
 
@@ -292,7 +292,7 @@ def _save_model_config(
         "num_heads": num_heads,
         "num_layers": num_layers,
         "max_len": max_len,
-        "out_dim": {task["task_id"]: task["out_dim"] for task in tasks},
+        "out_dim": {task.task_id: task.out_dim for task in tasks},
         "input_features": input_features,
     }
     model_path = Path(output_path) / "models" / run_id / "model_config.yml"
