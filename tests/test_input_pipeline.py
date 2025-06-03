@@ -6,6 +6,7 @@ import pytest
 import xarray as xr
 
 from lisbet import input_pipeline
+from lisbet.datasets.core import Record
 
 
 @pytest.fixture
@@ -38,18 +39,8 @@ def records():
         return ds
 
     rec = [
-        (
-            "a",
-            {
-                "posetracks": make_posetracks(np.arange(40)),
-            },
-        ),
-        (
-            "b",
-            {
-                "posetracks": make_posetracks(np.arange(40, 60)),
-            },
-        ),
+        Record(id="a", posetracks=make_posetracks(np.arange(40))),
+        Record(id="b", posetracks=make_posetracks(np.arange(40, 60))),
     ]
 
     return rec
@@ -100,7 +91,7 @@ def make_multi_individual_record(n_frames=5, n_inds=3, n_keypoints=2, n_space=2)
 
 def test_base_dataset_individual_indices():
     rec = [
-        ("rec1", {"posetracks": make_multi_individual_record(n_inds=3)}),
+        Record(id="rec1", posetracks=make_multi_individual_record(n_inds=3)),
     ]
     ds = input_pipeline.BaseDataset(
         rec, window_size=3, window_offset=0, fps_scaling=1.0, transform=None
@@ -114,8 +105,8 @@ def test_base_dataset_individual_indices():
 
 def test_swap_mouse_prediction_dataset_swaps_only_second_individual():
     rec = [
-        ("rec1", {"posetracks": make_multi_individual_record(n_inds=3)}),
-        ("rec2", {"posetracks": make_multi_individual_record(n_inds=3) + 1000}),
+        Record(id="rec1", posetracks=make_multi_individual_record(n_inds=3)),
+        Record(id="rec2", posetracks=make_multi_individual_record(n_inds=3) + 1000),
     ]
     ds = input_pipeline.SwapMousePredictionDataset(
         rec, window_size=3, window_offset=0, fps_scaling=1.0, transform=None, seed=42
@@ -126,10 +117,10 @@ def test_swap_mouse_prediction_dataset_swaps_only_second_individual():
         idxs = ds.individual_feature_indices
         # Get the original and swapped data
         curr_idx = ds.main_indices[i]
-        curr_key, curr_loc = ds.window_catalog[curr_idx]
+        curr_key, curr_loc = ds._global_to_local(curr_idx)
         orig_data = ds._select_and_pad(curr_key, curr_loc)
         swap_idx = ds.extras[i]
-        swap_key, swap_loc = ds.window_catalog[swap_idx]
+        swap_key, swap_loc = ds._global_to_local(swap_idx)
         swap_data = ds._select_and_pad(swap_key, swap_loc)
         # Only the second individual's features should be swapped if label==1
         if label == 1:
@@ -151,7 +142,7 @@ def test_swap_mouse_prediction_dataset_swaps_only_second_individual():
 
 def test_delay_mouse_prediction_dataset_shifts_only_second_individual():
     rec = [
-        ("rec1", {"posetracks": make_multi_individual_record(n_inds=3)}),
+        Record(id="rec1", posetracks=make_multi_individual_record(n_inds=3)),
     ]
     ds = input_pipeline.DelayMousePredictionDataset(
         rec, window_size=3, window_offset=0, fps_scaling=1.0, transform=None, seed=123
@@ -160,7 +151,7 @@ def test_delay_mouse_prediction_dataset_shifts_only_second_individual():
     for i, (actual_data, _) in enumerate(ds):
         idxs = ds.individual_feature_indices
         curr_idx = ds.main_indices[i]
-        curr_key, curr_loc = ds.window_catalog[curr_idx]
+        curr_key, curr_loc = ds._global_to_local(curr_idx)
         orig_data = ds._select_and_pad(curr_key, curr_loc)
         sft_loc = ds.extras[i]
         sft_data = ds._select_and_pad(curr_key, sft_loc)

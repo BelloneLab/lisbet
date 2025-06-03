@@ -7,6 +7,7 @@ import xarray as xr
 import yaml
 from sklearn.utils._param_validation import InvalidParameterError
 
+from lisbet.datasets.core import Record
 from lisbet.training.core import _compute_epoch_logs, _configure_dataloaders
 from lisbet.training.io import dump_model_config, dump_weights, load_multi_records
 from lisbet.training.preprocessing import split_multi_records
@@ -153,7 +154,9 @@ def test_splits_raises(dummy_dataset):
         Path to the dummy dataset fixture.
     """
     # Create dummy multi_records: one dataset with two records
-    multi_records = [[("exp0", {"posetracks": None}), ("exp1", {"posetracks": None})]]
+    multi_records = [
+        [Record(id="exp0", posetracks=None), Record(id="exp1", posetracks=None)]
+    ]
     # dev_ratio=1.0 would leave no training data
     with pytest.raises(InvalidParameterError) as excinfo:
         split_multi_records(
@@ -177,7 +180,7 @@ def test_valid_two_way_split(large_dummy_dataset):
         Path to the large dummy dataset fixture.
     """
     # Create multi_records as a single dataset with 5 records
-    multi_records = [[(f"exp{i}", {"posetracks": None}) for i in range(5)]]
+    multi_records = [[Record(id=f"exp{i}", posetracks=None) for i in range(5)]]
     # Use dev_ratio=0.2 (should give 4 train, 1 dev)
     train_rec, dev_rec = split_multi_records(
         multi_records=multi_records,
@@ -192,8 +195,8 @@ def test_valid_two_way_split(large_dummy_dataset):
     assert len(train_rec["cfc"]) == 4
     assert len(dev_rec["cfc"]) == 1
     # All record IDs should be unique across splits
-    train_ids = set(rec[0] for rec in train_rec["cfc"])
-    dev_ids = set(rec[0] for rec in dev_rec["cfc"])
+    train_ids = set(rec.id for rec in train_rec["cfc"])
+    dev_ids = set(rec.id for rec in dev_rec["cfc"])
     assert train_ids.isdisjoint(dev_ids)
     assert len(train_ids | dev_ids) == 5
 
