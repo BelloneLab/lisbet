@@ -26,7 +26,7 @@ from lightning.fabric import Fabric
 from lightning.fabric.loggers import CSVLogger
 from torch.profiler import ProfilerActivity, profile, schedule
 from torchinfo import summary
-from tqdm.auto import tqdm
+from tqdm.auto import trange
 
 from lisbet import modeling
 
@@ -200,39 +200,56 @@ def _train_one_epoch(
     """Internal helper. Runs one training epoch."""
     model.train()
 
+    # NOTE: This is a temporary workaround, waiting for the input_pipeline refactor
+    dataloaders_iter = [iter(dataloader) for dataloader in dataloaders]
+    n_batches = min(len(dataloader) for dataloader in dataloaders)
+
     # Iterate over all batches
-    for batch_data in tqdm(zip(*dataloaders)):
-        optimizer.zero_grad()
-        batch_losses = []
+    for _ in trange(n_batches, desc="Training batches", leave=False):
+        optimizer.zero_grad(set_to_none=True)
 
         # Iterate over all tasks
-        for task, (data, target) in zip(tasks, batch_data):
+        for task, dataloader in zip(tasks, dataloaders_iter):
+            data, target = next(dataloader)
+
+            # Forward pass
             output = model(data, task.task_id)
             loss = task.loss_function(output, target)
 
-            if prof is not None:
-                prof.step()
-
-            batch_losses.append(loss)
+            # Backward pass
+            fabric.backward(loss)
 
             # Store loss value and metrics for stats
             task.train_loss.update(loss)
             task.train_score.update(output, target)
 
-        total_loss = sum(batch_losses)
-        fabric.backward(total_loss)
+            # Step profiler
+            if prof is not None:
+                prof.step()
+
+        # Step optimizer
         optimizer.step()
+
+    # Step scheduler
+    scheduler.step()
 
 
 def _evaluate(model, dataloaders, tasks):
     """Internal helper. Evaluates model on a group."""
     model.eval()
 
+    # NOTE: This is a temporary workaround, waiting for the input_pipeline refactor
+    dataloaders_iter = [iter(dataloader) for dataloader in dataloaders]
+    n_batches = min(len(dataloader) for dataloader in dataloaders)
+
     with torch.no_grad():
         # Iterate over all batches
-        for batch_data in tqdm(zip(*dataloaders)):
+        for _ in trange(n_batches, desc="Evaluation batches", leave=False):
             # Iterate over all tasks
-            for task, (data, target) in zip(tasks, batch_data):
+            for task, dataloader in zip(tasks, dataloaders_iter):
+                data, target = next(dataloader)
+
+                # Forward pass
                 output = model(data, task.task_id)
                 loss = task.loss_function(output, target)
 
