@@ -61,7 +61,7 @@ def _configure_classification_task(
     np.testing.assert_array_equal(classes, np.array(range(num_classes)))
 
     # Create classification head
-    head = modeling.ClassificationHead(
+    head = modeling.FrameClassificationHead(
         output_token_idx=-(window_offset + 1),
         emb_dim=emb_dim,
         out_dim=num_classes,
@@ -132,11 +132,8 @@ def _configure_selfsupervised_task(
 ):
     """Internal helper. Configures a self-supervised task."""
     # Create classification head
-    head = modeling.ClassificationHead(
-        output_token_idx=None,
-        emb_dim=emb_dim,
-        out_dim=1,
-        hidden_dim=hidden_dim,
+    head = modeling.WindowClassificationHead(
+        emb_dim=emb_dim, out_dim=1, hidden_dim=hidden_dim
     )
 
     # Create data transformers
