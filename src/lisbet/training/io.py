@@ -64,7 +64,7 @@ def dump_profiling_results(output_path, run_id, prof):
     prof.export_memory_timeline(str(profiling_path / "memory_trace.html"))
     prof.export_stacks(str(profiling_path / "cpu_stacks.txt"), "self_cpu_time_total")
     prof.export_stacks(str(profiling_path / "cuda_stacks.txt"), "self_cuda_time_total")
-    with open(profiling_path / "profilig_summary.txt", "w", encoding="utf-8") as f:
+    with open(profiling_path / "profiling_summary.txt", "w", encoding="utf-8") as f:
         f.write("CPU Profiling Summary:\n")
         f.write(prof.key_averages().table(sort_by="self_cpu_time_total", row_limit=10))
         f.write("\n\nCUDA Profiling Summary:\n")
