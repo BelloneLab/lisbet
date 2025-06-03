@@ -103,7 +103,7 @@ def _configure_classification_task(
     )
 
     # Update dev attributes if dev records are provided
-    if dev_rec is not None:
+    if dev_rec["cfc"]:
         dev_transform = transforms.Compose([torch.Tensor])
         task.dev_dataset = input_pipeline.FrameClassificationDataset(
             records=dev_rec["cfc"],
@@ -173,7 +173,7 @@ def _configure_selfsupervised_task(
     )
 
     # Update dev attributes if dev records are provided
-    if dev_rec is not None:
+    if dev_rec[task_id]:
         dev_transform = transforms.Compose([torch.Tensor])
         task.dev_dataset = task_map[task_id](
             records=dev_rec[task_id],
