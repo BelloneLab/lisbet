@@ -59,9 +59,9 @@ def split_multi_records(
             )
 
         logging.info("Final training set size = %d", len(train_rec[task_id]))
-        logging.debug([key for key, _ in train_rec[task_id]])
+        logging.debug([rec.id for rec in train_rec[task_id]])
 
         logging.info("Final dev set size = %d", len(dev_rec[task_id]))
-        logging.debug([key for key, _ in dev_rec[task_id]])
+        logging.debug([rec.id for rec in dev_rec[task_id]])
 
     return train_rec, dev_rec

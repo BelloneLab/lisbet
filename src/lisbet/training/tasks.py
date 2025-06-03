@@ -46,14 +46,14 @@ def _configure_classification_task(
     data_format,
 ):
     """Internal helper. Configures the classification task."""
-    if "annotations" not in train_rec["cfc"][0][1]:
+    if train_rec["cfc"][0].annotations is None:
         raise RuntimeError("The provided dataset does not contain annotations.")
 
     # Find number of behaviors in the training set
     labels = np.concatenate(
         [
-            data["annotations"].target_cls.argmax("behaviors").squeeze().values
-            for _, data in train_rec["cfc"]
+            rec.annotations.target_cls.argmax("behaviors").squeeze().values
+            for rec in train_rec["cfc"]
         ]
     )
     classes = np.unique(labels)

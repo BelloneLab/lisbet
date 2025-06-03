@@ -111,8 +111,7 @@ def load_multi_records(
     #               only need to check the first record of each dataset against the
     #               others.
     main_features = [
-        recs[0][1]["posetracks"].coords["features"].values.tolist()
-        for recs in multi_records
+        recs[0].posetracks.coords["features"].values.tolist() for recs in multi_records
     ]
     ref_features = main_features[0]
     for i, features in enumerate(main_features):

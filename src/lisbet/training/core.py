@@ -428,13 +428,11 @@ def train(
     )
 
     # Determine data shape from first record
-    bp_dim = train_rec[task_ids_list[0]][0][1]["posetracks"].sizes["features"]
+    bp_dim = train_rec[task_ids_list[0]][0].posetracks.sizes["features"]
 
     # Determine input_features list for config consistency
     input_features = (
-        train_rec[task_ids_list[0]][0][1]["posetracks"]
-        .coords["features"]
-        .values.tolist()
+        train_rec[task_ids_list[0]][0].posetracks.coords["features"].values.tolist()
     )
 
     if load_backbone_weights is not None:

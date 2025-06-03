@@ -2,8 +2,10 @@
 
 import logging
 import re
+from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
+from typing import Optional
 
 import pooch
 import xarray as xr
@@ -13,6 +15,26 @@ from movement.transforms import scale
 from tqdm.auto import tqdm
 
 from . import calms21, mabe22
+
+
+@dataclass
+class Record:
+    """
+    Data structure representing a single pose-tracking record.
+
+    Parameters
+    ----------
+    id : str
+        Unique identifier for the record, typically derived from the relative path.
+    posetracks : xarray.Dataset
+        Pose-tracking data for the record.
+    annotations : xarray.Dataset or None, optional
+        Annotations associated with the record, if available.
+    """
+
+    id: str
+    posetracks: xr.Dataset
+    annotations: Optional[xr.Dataset] = None
 
 
 def _load_posetracks(seq_path, data_format, data_scale, select_coords, rename_coords):
@@ -258,9 +280,9 @@ def load_records(
 
     Returns
     -------
-    list[tuple[str, dict[str, xarray.Dataset]]]
-        A list of (record_id, data_dict) pairs; every data_dict contains at least
-        'posetracks' (xarray.Dataset), and optionally 'annotations'.
+    list[Record]
+        A list of Record objects, each containing id, posetracks, and optionally
+        annotations.
 
     Raises
     ------
@@ -279,10 +301,12 @@ def load_records(
     ... )
     >>> print(len(records))
     42
-    >>> print(records[0][0])
+    >>> print(records[0].id)
     'session1/seq001'
-    >>> print(records[0][1].keys())
-    dict_keys(['posetracks', 'annotations'])
+    >>> print(records[0].posetracks)
+    <xarray.Dataset ...>
+    >>> print(records[0].annotations)
+    <xarray.Dataset ...> or None
 
     """
     # Find all potential record paths
@@ -305,34 +329,33 @@ def load_records(
     records = []
     for seq_path in tqdm(seq_paths, desc="Loading dataset"):
         # Load pose-tracking data
-        ds = _load_posetracks(
+        posetracks = _load_posetracks(
             seq_path, data_format, data_scale, select_coords, rename_coords
         )
-        if ds is not None:
-            rec_data = {"posetracks": ds}
-        else:
+        if posetracks is None:
             logging.debug("Skipping %s, no tracking data found", str(seq_path))
             continue
 
         # Load annotations
-        if (annotations := _load_annotations(seq_path)) is not None:
-            rec_data["annotations"] = annotations
+        annotations = _load_annotations(seq_path)
 
         # Create record id
         rec_id = str(seq_path.relative_to(data_path))
 
-        # Add record to the list
-        records.append((rec_id, rec_data))
+        # Add Record object to the list
+        records.append(
+            Record(id=rec_id, posetracks=posetracks, annotations=annotations)
+        )
 
     # Sanity check: All posetracks must have the same 'features' coordinate (summary of
     #               individuals/keypoints/space)
     if records:
-        ref_features = records[0][1]["posetracks"].coords["features"].values.tolist()
-        for rec_id, rec_data in records:
-            ds_features = rec_data["posetracks"].coords["features"].values.tolist()
+        ref_features = records[0].posetracks.coords["features"].values.tolist()
+        for rec in records:
+            ds_features = rec.posetracks.coords["features"].values.tolist()
             if ds_features != ref_features:
                 raise ValueError(
-                    f"Inconsistent posetracks coordinates in record '{rec_id}':\n"
+                    f"Inconsistent posetracks coordinates in record '{rec.id}':\n"
                     f"Reference features:\n{ref_features}\n"
                     f"Record features:\n{ds_features}"
                 )
@@ -351,20 +374,20 @@ def dump_records(data_path, records):
     data_path : str or Path
         Directory where the records will be saved.
 
-    records : list of tuples
-        List of records to be saved. Each record is a tuple containing
+    records : list of Record
+        List of Record objects to be saved.
 
     """
-    for key, data in tqdm(records, desc="Dumping records to disk"):
-        rec_path = Path(data_path) / key
+    for rec in tqdm(records, desc="Dumping records to disk"):
+        rec_path = Path(data_path) / rec.id
         rec_path.mkdir(parents=True, exist_ok=True)
 
         # Save posetracks
-        data["posetracks"].to_netcdf(rec_path / "tracking.nc", engine="scipy")
+        rec.posetracks.to_netcdf(rec_path / "tracking.nc", engine="scipy")
 
         # Save annotations
-        if "annotations" in data:
-            data["annotations"].to_netcdf(rec_path / "annotations.nc", engine="scipy")
+        if rec.annotations is not None:
+            rec.annotations.to_netcdf(rec_path / "annotations.nc", engine="scipy")
 
 
 def fetch_dataset(dataset_id, download_path):

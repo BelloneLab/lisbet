@@ -180,7 +180,7 @@ def _process_inference_dataset(
 
     # Input features compatibility check
     model_features = [tuple(x) for x in config.get("input_features")]
-    dataset_features = records[0][1]["posetracks"].coords["features"].values.tolist()
+    dataset_features = records[0].posetracks.coords["features"].values.tolist()
     if dataset_features != model_features:
         # Make table for better visualization
         console = Console()
@@ -214,7 +214,7 @@ def _process_inference_dataset(
     seen_keys = set()
     for seq in tqdm(records, desc=f"Analyzing {data_format} dataset"):
         # Extract sequence ID
-        key = seq[0]
+        key = seq.id
 
         # Check for duplicated keys
         if key in seen_keys:

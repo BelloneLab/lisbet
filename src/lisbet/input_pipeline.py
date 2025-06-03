@@ -2,7 +2,6 @@
 
 import logging
 from abc import ABC
-from itertools import product
 
 import numpy as np
 from scipy.interpolate import interp1d
@@ -12,11 +11,11 @@ from torch.utils.data import Dataset
 class BaseDataset(Dataset, ABC):
     def __init__(self, records, window_size, window_offset, fps_scaling, transform):
         # Store raw data
-        self.records = dict(records)
+        self.records = records
+        self.n_records = len(records)
 
         # Extract individuals and their feature indices from the first record
-        first_key = next(iter(self.records))
-        features = self.records[first_key]["posetracks"].coords["features"].to_index()
+        features = self.records[0].posetracks.coords["features"].to_index()
         self.individuals = features.get_level_values("individuals").unique().tolist()
         self.individual_feature_indices = {
             ind: np.where(features.get_level_values("individuals") == ind)[0]
@@ -29,16 +28,24 @@ class BaseDataset(Dataset, ABC):
         self.fps_scaling = fps_scaling
         self.transform = transform
 
-        # Create a catalog of all possible windows
-        # NOTE: This is needed to allow shuffling
-        self.window_catalog = [
-            idx
-            for key, data in records
-            for idx in product([key], range(data["posetracks"].sizes["time"]))
-        ]
+        # Compute cumulative lengths of the records and total number of frames
+        lengths = np.array([rec.posetracks.sizes["time"] for rec in records], dtype=int)
+        self.cumlens = lengths.cumsum()
+        self.n_frames = self.cumlens[-1]
 
     def __len__(self):
-        return len(self.window_catalog)
+        return self.n_frames
+
+    def _global_to_local(self, global_idx):
+        """
+        Map a global frame index (0 ≤ global_idx < total_n_frames) to (record_index,
+        local_frame_index).
+        """
+        rec_idx = np.searchsorted(self.cumlens, global_idx, "right")
+        prev_sum = 0 if rec_idx == 0 else self.cumlens[rec_idx - 1]
+        local_idx = global_idx - prev_sum
+
+        return rec_idx, local_idx
 
     def _select_and_pad(self, curr_key, curr_loc, window_size=None):
         """Select a window from the catalog, applying padding if needed.
@@ -51,7 +58,7 @@ class BaseDataset(Dataset, ABC):
         if window_size is None:
             window_size = self.window_size
 
-        x_data = self.records[curr_key]["posetracks"]
+        x_data = self.records[curr_key].posetracks
         seq_len = x_data.sizes["time"]
 
         # Compute actual window size
@@ -136,7 +143,7 @@ class FrameClassificationDataset(BaseDataset):
 
     def __getitem__(self, idx):
         # Select keypoints data
-        curr_key, curr_loc = self.window_catalog[idx]
+        curr_key, curr_loc = self._global_to_local(idx)
         x_data = self._select_and_pad(curr_key, curr_loc)
 
         if self.transform:
@@ -145,8 +152,8 @@ class FrameClassificationDataset(BaseDataset):
         # Select annotation data, if requested, return x_data only otherwise
         if self.num_classes is not None:
             y_data = (
-                self.records[curr_key]["annotations"]
-                .target_cls.isel(time=curr_loc)
+                self.records[curr_key]
+                .annotations.target_cls.isel(time=curr_loc)
                 .argmax("behaviors")
                 .squeeze()
                 .values
@@ -213,13 +220,13 @@ class SwapMousePredictionDataset(BaseDataset):
         for curr_idx in self.main_indices:
             if self.rng.random() < 0.5:
                 # Select keypoints data
-                curr_key, _ = self.window_catalog[curr_idx]
+                curr_key, _ = self._global_to_local(curr_idx)
 
                 # Swap intruder mouse, retry if a window from the same sequence was
                 # chosen
                 while True:
                     swap_idx = self.rng.integers(len(self))
-                    swap_key, _ = self.window_catalog[swap_idx]
+                    swap_key, _ = self._global_to_local(swap_idx)
 
                     if swap_key != curr_key:
                         break
@@ -243,14 +250,14 @@ class SwapMousePredictionDataset(BaseDataset):
         curr_idx = self.main_indices[idx]
 
         # Select keypoints data
-        curr_key, curr_loc = self.window_catalog[curr_idx]
+        curr_key, curr_loc = self._global_to_local(curr_idx)
         curr_data = self._select_and_pad(curr_key, curr_loc)
 
         # Select positive or negative sample for the swap
         swap_idx = self.extras[idx]
 
         # Select keypoints data for swapping
-        swap_key, swap_loc = self.window_catalog[swap_idx]
+        swap_key, swap_loc = self._global_to_local(swap_idx)
         swap_data = self._select_and_pad(swap_key, swap_loc)
 
         # Apply swapping: always swap the second individual's features
@@ -332,19 +339,19 @@ class NextWindowPredictionDataset(BaseDataset):
         logging.info("Resampling twin windows for NWP")
         for curr_idx in self.main_indices:
             # Select keypoints data
-            curr_key, curr_loc = self.window_catalog[curr_idx]
+            curr_key, curr_loc = self._global_to_local(curr_idx)
 
             if self.rng.random() < 0.5:
                 # Select a valid next window from same sequence (past current idx)
-                curr_len = self.records[curr_key]["posetracks"].sizes["time"]
+                curr_len = self.records[curr_key].posetracks.sizes["time"]
                 next_idx = curr_idx + self.rng.integers(curr_len - curr_loc)
 
                 # OBS: In order to generate a valid next window for every frame,
                 #      including the last one of the sequence, we have to allow
                 #      zero-distance windows
                 assert (
-                    self.window_catalog[next_idx][0] == curr_key
-                    and self.window_catalog[next_idx][1] >= curr_loc
+                    self._global_to_local(next_idx)[0] == curr_key
+                    and self._global_to_local(next_idx)[1] >= curr_loc
                 )
 
                 # Valid next window
@@ -354,7 +361,7 @@ class NextWindowPredictionDataset(BaseDataset):
                 # Select a random window, retry if a true next window was chosen
                 while True:
                     next_idx = self.rng.integers(len(self))
-                    next_key, next_loc = self.window_catalog[next_idx]
+                    next_key, next_loc = self._global_to_local(next_idx)
 
                     if next_key != curr_key or next_loc < curr_loc:
                         break
@@ -373,14 +380,14 @@ class NextWindowPredictionDataset(BaseDataset):
         curr_idx = self.main_indices[idx]
 
         # Select keypoints data
-        curr_key, curr_loc = self.window_catalog[curr_idx]
+        curr_key, curr_loc = self._global_to_local(curr_idx)
         curr_data = self._select_and_pad(curr_key, curr_loc, self.window_size // 2)
 
         # Select positive or negative sample
         next_idx = self.extras[idx]
 
         # Select next window
-        next_key, next_loc = self.window_catalog[next_idx]
+        next_key, next_loc = self._global_to_local(next_idx)
         next_data = self._select_and_pad(next_key, next_loc, self.window_size // 2)
 
         # Concatenate windows
@@ -466,8 +473,8 @@ class DelayMousePredictionDataset(BaseDataset):
         logging.info("Resampling twin windows for DMP")
         for curr_idx in self.main_indices:
             # Select keypoints data
-            curr_key, curr_loc = self.window_catalog[curr_idx]
-            curr_len = self.records[curr_key]["posetracks"].sizes["time"]
+            curr_key, curr_loc = self._global_to_local(curr_idx)
+            curr_len = self.records[curr_key].posetracks.sizes["time"]
 
             # Compute shift bounds
             lower_bound = max(curr_loc + self.min_delay, 0)
@@ -498,7 +505,7 @@ class DelayMousePredictionDataset(BaseDataset):
         curr_idx = self.main_indices[idx]
 
         # Select keypoints data
-        curr_key, curr_loc = self.window_catalog[curr_idx]
+        curr_key, curr_loc = self._global_to_local(curr_idx)
         curr_data = self._select_and_pad(curr_key, curr_loc)
 
         # Select positive or negative sample for the shift
@@ -602,7 +609,7 @@ class VideoSpeedPredictionDataset(BaseDataset):
         curr_idx = self.main_indices[idx]
 
         # Select keypoints data
-        curr_key, curr_loc = self.window_catalog[curr_idx]
+        curr_key, curr_loc = self._global_to_local(curr_idx)
 
         # Get actual window size
         act_window_size = self.extras[idx]
