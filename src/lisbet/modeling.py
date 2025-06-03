@@ -95,15 +95,12 @@ class Backbone(nn.Module):
         return x
 
 
-class ClassificationHead(nn.Module):
-    """Classifier."""
+class FrameClassificationHead(nn.Module):
+    """Frame classifier."""
 
     def __init__(self, output_token_idx, emb_dim, out_dim, hidden_dim):
         super().__init__()
-        # Select all tokens or a single one (in a list to keep dimensions consistent)
-        self.output_token_idx = (
-            slice(None) if output_token_idx is None else [output_token_idx]
-        )
+        self.output_token_idx = output_token_idx
         self.logits = (
             nn.Linear(emb_dim, out_dim)
             if hidden_dim is None
@@ -112,6 +109,22 @@ class ClassificationHead(nn.Module):
 
     def forward(self, x):
         x = x[:, self.output_token_idx]
+        x = self.logits(x)
+        return x
+
+
+class WindowClassificationHead(nn.Module):
+    """Window classifier."""
+
+    def __init__(self, emb_dim, out_dim, hidden_dim):
+        super().__init__()
+        self.logits = (
+            nn.Linear(emb_dim, out_dim)
+            if hidden_dim is None
+            else MLP(emb_dim, out_dim, hidden_dim)
+        )
+
+    def forward(self, x):
         x, _ = torch.max(x, dim=1)
         x = self.logits(x)
         return x
@@ -186,7 +199,7 @@ def load_model(config_path, weights_path):
         model = MultiTaskModel(
             backbone,
             {
-                task_id: ClassificationHead(
+                task_id: FrameClassificationHead(
                     output_token_idx=model_config["output_token_idx"],
                     emb_dim=model_config["emb_dim"],
                     out_dim=out_dim,

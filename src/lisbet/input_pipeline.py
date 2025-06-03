@@ -225,11 +225,11 @@ class SwapMousePredictionDataset(BaseDataset):
                         break
 
                 # Swap mice
-                labels.append(1)
+                labels.append(np.array(1, ndmin=1, dtype=np.float32))
                 extras.append(swap_idx)
             else:
                 # Don't swap
-                labels.append(0)
+                labels.append(np.array(0, ndmin=1, dtype=np.float32))
                 extras.append(curr_idx)
 
         self.labels = labels
@@ -348,7 +348,7 @@ class NextWindowPredictionDataset(BaseDataset):
                 )
 
                 # Valid next window
-                labels.append(1)
+                labels.append(np.array(1, ndmin=1, dtype=np.float32))
                 extras.append(next_idx)
             else:
                 # Select a random window, retry if a true next window was chosen
@@ -360,7 +360,7 @@ class NextWindowPredictionDataset(BaseDataset):
                         break
 
                 # Random next window
-                labels.append(0)
+                labels.append(np.array(0, ndmin=1, dtype=np.float32))
                 extras.append(next_idx)
 
         self.labels = labels
@@ -484,7 +484,7 @@ class DelayMousePredictionDataset(BaseDataset):
                 # Set rescaled shift distance as label
                 label = (delta_sft - self.min_delay) / (self.max_delay - self.min_delay)
             else:
-                label = int(delta_sft > 0)
+                label = np.array(delta_sft > 0, ndmin=1, dtype=np.float32)
 
             labels.append(label)
 
@@ -589,7 +589,7 @@ class VideoSpeedPredictionDataset(BaseDataset):
         labels = (
             (speeds - self.min_speed) / (self.max_speed - self.min_speed)
             if self.regression
-            else np.array(speeds > 1).astype(int)
+            else np.array(speeds > 1).astype(np.float32)
         )
 
         self.labels = labels
@@ -597,7 +597,7 @@ class VideoSpeedPredictionDataset(BaseDataset):
 
     def __getitem__(self, idx):
         # Select label
-        label = self.labels[idx]
+        label = np.array(self.labels[idx], ndmin=1, dtype=np.float32)
 
         curr_idx = self.main_indices[idx]
 
