@@ -205,7 +205,7 @@ def _train_one_epoch(
     n_batches = min(len(dataloader) for dataloader in dataloaders)
 
     # Iterate over all batches
-    for _ in trange(n_batches, desc="Training batches", leave=False):
+    for batch_idx in trange(n_batches, desc="Training batches", leave=False):
         optimizer.zero_grad(set_to_none=True)
 
         # Iterate over all tasks
@@ -220,8 +220,9 @@ def _train_one_epoch(
             fabric.backward(loss)
 
             # Store loss value and metrics for stats
-            task.train_loss.update(loss)
-            task.train_score.update(output, target)
+            if batch_idx % 10 == 0:
+                task.train_loss.update(loss)
+                task.train_score.update(output, target)
 
             # Step profiler
             if prof is not None:
@@ -244,7 +245,7 @@ def _evaluate(model, dataloaders, tasks):
 
     with torch.no_grad():
         # Iterate over all batches
-        for _ in trange(n_batches, desc="Evaluation batches", leave=False):
+        for batch_idx in trange(n_batches, desc="Evaluation batches", leave=False):
             # Iterate over all tasks
             for task, dataloader in zip(tasks, dataloaders_iter):
                 data, target = next(dataloader)
@@ -254,8 +255,9 @@ def _evaluate(model, dataloaders, tasks):
                 loss = task.loss_function(output, target)
 
                 # Store loss value and metrics for stats
-                task.dev_loss.update(loss)
-                task.dev_score.update(output, target)
+                if batch_idx % 10 == 0:
+                    task.dev_loss.update(loss)
+                    task.dev_score.update(output, target)
 
 
 def _compute_epoch_logs(group_id, tasks):
