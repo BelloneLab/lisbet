@@ -19,9 +19,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-import numpy as np
 import torch
-import yaml
 from lightning.fabric import Fabric
 from lightning.fabric.loggers import CSVLogger
 from torch.profiler import ProfilerActivity, profile, schedule
@@ -30,8 +28,15 @@ from tqdm.auto import trange
 
 from lisbet import modeling
 
-from .preprocessing import load_multi_records, split_multi_records
+from .io import (
+    dump_model_config,
+    dump_profiling_results,
+    dump_weights,
+    load_multi_records,
+)
+from .preprocessing import split_multi_records
 from .tasks import configure_tasks
+from .utils import generate_seeds
 
 
 def _configure_profiler(steps_multiplier):
@@ -61,26 +66,6 @@ def _configure_profiler(steps_multiplier):
         profiler = nullcontext()
 
     return profiler
-
-
-def _generate_seeds(seed, task_ids):
-    """Internal helper. Generates multiple seeds from the base one."""
-    rng = np.random.default_rng(seed)
-    seed_keys = (
-        ["torch", "dev_split", "test_split"]
-        + [
-            f"{group}_shuffle_{task_id}"
-            for task_id in task_ids
-            for group in ("train", "dev", "test")
-        ]
-        + [f"transform_{task_id}" for task_id in task_ids]
-        + [f"dataset_{task_id}" for task_id in task_ids if task_id != "cfc"]
-    )
-    run_seeds = {sk: rng.integers(low=0, high=2**32) for sk in seed_keys}
-
-    logging.debug("Generated seeds: %s", run_seeds)
-
-    return run_seeds
 
 
 def _build_model(
@@ -277,67 +262,6 @@ def _compute_epoch_logs(group_id, tasks):
     return epoch_log
 
 
-def _save_weights(model, output_path, run_id, filename):
-    """Internal helper. Saves model weights."""
-    weights_path = Path(output_path) / "models" / run_id / "weights" / filename
-    weights_path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save(model.state_dict(), weights_path)
-
-
-def _save_model_config(
-    output_path,
-    run_id,
-    window_size,
-    window_offset,
-    output_token_idx,
-    bp_dim,
-    emb_dim,
-    hidden_dim,
-    num_heads,
-    num_layers,
-    max_len,
-    tasks,
-    input_features,
-):
-    """Internal helper. Saves model config."""
-    model_config = {
-        "model_id": run_id,
-        "window_size": window_size,
-        "window_offset": window_offset,
-        "output_token_idx": output_token_idx,
-        "bp_dim": bp_dim,
-        "emb_dim": emb_dim,
-        "hidden_dim": hidden_dim,
-        "num_heads": num_heads,
-        "num_layers": num_layers,
-        "max_len": max_len,
-        "out_dim": {task.task_id: task.out_dim for task in tasks},
-        "input_features": input_features,
-    }
-    model_path = Path(output_path) / "models" / run_id / "model_config.yml"
-    model_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(model_path, "w", encoding="utf-8") as f_yaml:
-        yaml.safe_dump(model_config, f_yaml)
-
-
-def _save_profiling_results(output_path, run_id, prof):
-    """Internal helper. Saves profiling results."""
-    # Create profiling directory
-    profiling_path = Path(output_path) / "models" / run_id / "profiler"
-    profiling_path.mkdir(parents=True, exist_ok=True)
-
-    # Save profiling results
-    prof.export_chrome_trace(str(profiling_path / "chrome_trace.json.gz"))
-    prof.export_memory_timeline(str(profiling_path / "memory_trace.html"))
-    prof.export_stacks(str(profiling_path / "cpu_stacks.txt"), "self_cpu_time_total")
-    prof.export_stacks(str(profiling_path / "cuda_stacks.txt"), "self_cuda_time_total")
-    with open(profiling_path / "profilig_summary.txt", "w", encoding="utf-8") as f:
-        f.write("CPU Profiling Summary:\n")
-        f.write(prof.key_averages().table(sort_by="self_cpu_time_total", row_limit=10))
-        f.write("\n\nCUDA Profiling Summary:\n")
-        f.write(prof.key_averages().table(sort_by="self_cuda_time_total", row_limit=10))
-
-
 def train(
     # Data parameters
     data_format: str = "CalMS21_Task1",
@@ -481,7 +405,7 @@ def train(
     logging.info("Using %s for training model %s.", fabric.device.type, run_id)
 
     # Configure RNGs
-    run_seeds = _generate_seeds(seed, task_ids_list)
+    run_seeds = generate_seeds(seed, task_ids_list)
     torch.manual_seed(run_seeds["torch"])
 
     # Load records
@@ -571,7 +495,7 @@ def train(
     optimizer, scheduler = _configure_optimizer_and_scheduler(model, learning_rate)
 
     # Save model config
-    _save_model_config(
+    dump_model_config(
         output_path,
         run_id,
         window_size,
@@ -621,7 +545,7 @@ def train(
 
             # Save weights, if requested
             if save_weights == "all":
-                _save_weights(model, output_path, run_id, f"weights_epoch{epoch}.pt")
+                dump_weights(model, output_path, run_id, f"weights_epoch{epoch}.pt")
 
             if dev_ratio is not None:
                 # Get dataloaders
@@ -645,10 +569,10 @@ def train(
 
     # Save profiling results, if requested
     if prof is not None:
-        _save_profiling_results(output_path, run_id, prof)
+        dump_profiling_results(output_path, run_id, prof)
 
     # Save final weights, if requested
     if save_weights == "last":
-        _save_weights(model, output_path, run_id, "weights_last.pt")
+        dump_weights(model, output_path, run_id, "weights_last.pt")
 
     return model

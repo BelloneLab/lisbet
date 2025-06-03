@@ -1,68 +1,10 @@
-"""Preprocessing module for loading and splitting records for multiple tasks."""
+"""Preprocessing functions for model training."""
 
 import logging
 import re
 from collections import defaultdict
-from itertools import repeat
 
 from sklearn.model_selection import train_test_split
-
-from lisbet.datasets import load_records
-
-
-def load_multi_records(
-    data_format,
-    data_path,
-    data_scale,
-    data_filter,
-    select_coords,
-    rename_coords,
-):
-    """Internal helper. Loads and splits records for all tasks."""
-    datasets = data_format.split(",")
-    datapaths = data_path.split(",")
-    if len(datasets) == len(datapaths):
-        datasources = list(zip(datasets, datapaths))
-    elif len(datapaths) == 1:
-        datasources = list(zip(datasets, repeat(datapaths[0])))
-    else:
-        raise ValueError(
-            "Input arguments datasets and datapaths must have the same length, or"
-            " datapath must be a single element."
-        )
-    logging.debug(datasources)
-
-    # Load records
-    multi_records = [
-        load_records(
-            dataset,
-            datapath,
-            data_scale=data_scale,
-            data_filter=data_filter,
-            select_coords=select_coords,
-            rename_coords=rename_coords,
-        )
-        for dataset, datapath in datasources
-    ]
-
-    # Sanity check: All posetracks must have the same 'features' coordinate across
-    #               datasets. As consistency within a dataset is already checked, we
-    #               only need to check the first record of each dataset against the
-    #               others.
-    main_features = [
-        recs[0][1]["posetracks"].coords["features"].values.tolist()
-        for recs in multi_records
-    ]
-    ref_features = main_features[0]
-    for i, features in enumerate(main_features):
-        if features != ref_features:
-            raise ValueError(
-                f"Inconsistent posetracks coordinates in loaded records, dataset {i}:\n"
-                f"Reference features:\n{ref_features}\n"
-                f"Record features:\n{features}"
-            )
-
-    return multi_records
 
 
 def split_multi_records(
