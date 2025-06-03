@@ -53,7 +53,7 @@ betman = "lisbet.cli:main"
 
 [tool.pytest.ini_options]
 addopts = ["--import-mode=importlib"]
-markers = ["integration: mark a test as a integration."]
+markers = ["integration: mark a test as an integration."]
 
 [tool.setuptools_scm]
 write_to = "src/lisbet/_version.py"
