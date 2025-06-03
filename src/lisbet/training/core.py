@@ -504,12 +504,9 @@ def train(
         )
 
     # Determine max sequence length
-    # TODO: Find a better way to compute max_len or fix in the embedder exporter
-    max_len = (
-        2 * window_size
-        if "nwp" in task_ids_list or load_backbone_weights
-        else window_size
-    )
+    # NOTE: We keep the max_len parameter as we may want to use it in the future to
+    #       support variable-length sequences.
+    max_len = window_size
 
     # Compute backbone output token idx
     output_token_idx = -(window_offset + 1)
