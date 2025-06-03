@@ -1,22 +1,22 @@
 import pytest
 
-import lisbet.datasets.core as datasets_core
-import lisbet.training as training
+from lisbet.datasets.core import fetch_dataset
+from lisbet.training import train
 
 
 @pytest.mark.integration
 def test_train_integration(tmp_path):
     # Download a small sample dataset using the LISBET API
-    datasets_core.fetch_dataset("SampleData", download_path=tmp_path)
+    fetch_dataset("SampleData", download_path=tmp_path)
     data_path = tmp_path / "datasets" / "sample_keypoints"
     # Run a minimal training (1 epoch, small batch, minimal model)
-    model = training.train(
+    model = train(
         data_format="DLC",
         data_path=str(data_path),
         window_size=4,
         window_offset=0,
         epochs=1,
-        batch_size=2,
+        batch_size=32,
         task_ids="smp",
         emb_dim=4,
         num_layers=1,
@@ -30,7 +30,6 @@ def test_train_integration(tmp_path):
         data_augmentation=False,
         train_sample=None,
         dev_sample=None,
-        compile_model=False,
         mixed_precision=False,
         run_id="pytest_run",
         select_coords=None,
@@ -40,5 +39,12 @@ def test_train_integration(tmp_path):
     assert hasattr(model, "state_dict")
     weights_path = tmp_path / "models" / "pytest_run" / "weights" / "weights_last.pt"
     assert weights_path.exists()
-    hist_path = tmp_path / "models" / "pytest_run" / "training_history.log"
+    hist_path = (
+        tmp_path
+        / "models"
+        / "pytest_run"
+        / "training_history"
+        / "version_0"
+        / "metrics.csv"
+    )
     assert hist_path.exists()
