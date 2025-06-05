@@ -37,15 +37,15 @@ class NWPDataset(IterableDataset):
         self.fps_scaling = fps_scaling
         self.transform = transform
 
+        self.base_seed = (
+            base_seed if base_seed is not None else torch.randint(0, 2**32 - 1)
+        )
+
         self.lengths = np.array(
             [rec.posetracks.sizes["time"] for rec in self.records], dtype=int
         )
         self.cumlens = self.lengths.cumsum()
         self.n_frames = self.cumlens[-1]
-
-        self.base_seed = (
-            base_seed if base_seed is not None else torch.randint(0, 2**32 - 1)
-        )
 
         self._epoch = 0
 
