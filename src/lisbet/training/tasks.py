@@ -151,7 +151,7 @@ def _configure_selfsupervised_task(
     # Create dataloaders
     task_map = {
         "nwp": input_pipeline.NWPDataset,
-        "smp": input_pipeline.SwapMousePredictionDataset,
+        "smp": input_pipeline.SMPDataset,
         "vsp": input_pipeline.VideoSpeedPredictionDataset,
         "dmp": input_pipeline.DelayMousePredictionDataset,
     }

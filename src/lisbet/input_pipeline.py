@@ -166,8 +166,72 @@ class CFCDataset(WindowDataset):
                 yield x
 
 
-class SMPDataset(IterableDataset):
-    pass
+class SMPDataset(WindowDataset):
+    def __init__(
+        self,
+        records,
+        window_size,
+        window_offset=0,
+        fps_scaling=1.0,
+        transform=None,
+        base_seed=None,
+    ):
+        super().__init__(
+            records, window_size, window_offset, fps_scaling, transform, base_seed
+        )
+
+        # Extract individuals and their feature indices from the first record
+        features = self.records[0].posetracks.coords["features"].to_index()
+        self.individuals = features.get_level_values("individuals").unique().tolist()
+        self.individual_feature_indices = {
+            ind: np.where(features.get_level_values("individuals") == ind)[0]
+            for ind in self.individuals
+        }
+
+    def __iter__(self):
+        while True:
+            # Select a random window (global frame index)
+            global_idx = torch.randint(0, self.n_frames, (1,), generator=self.g).item()
+
+            # Map global index to (record_index, frame_index)
+            rec_idx, frame_idx = self._global_to_local(global_idx)
+
+            # Extract corresponding window
+            x = self._select_and_pad(rec_idx, frame_idx, window_size=self.window_size)
+
+            if torch.rand((1,), generator=self.g).item() < 0.5:
+                # Swap intruder mouse, retry if a window from the same sequence was
+                # chosen
+                while True:
+                    global_idx_swap = torch.randint(
+                        0, self.n_frames, (1,), generator=self.g
+                    ).item()
+                    rec_idx_swap, frame_idx_swap = self._global_to_local(
+                        global_idx_swap
+                    )
+
+                    if rec_idx_swap != rec_idx:
+                        break
+
+                # Extract swap window
+                x_swap = self._select_and_pad(
+                    rec_idx_swap, frame_idx_swap, window_size=self.window_size
+                )
+
+                # Swap mice: always swap the second individual's features
+                feature_idx = self.individual_feature_indices[self.individuals[1]]
+                x[..., feature_idx] = x_swap[..., feature_idx]
+
+                y = np.array(1, ndmin=1, dtype=np.float32)
+
+            else:
+                # Don't swap
+                y = np.array(0, ndmin=1, dtype=np.float32)
+
+            if self.transform:
+                x = self.transform(x)
+
+            yield x, y
 
 
 class NWPDataset(WindowDataset):
