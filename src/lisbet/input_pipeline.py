@@ -371,8 +371,62 @@ class DMPDataset(WindowDataset):
             yield x, y
 
 
-class VSPDataset(IterableDataset):
-    pass
+class VSPDataset(WindowDataset):
+    def __init__(
+        self,
+        records,
+        window_size,
+        window_offset=0,
+        fps_scaling=1.0,
+        min_speed=0.5,
+        max_speed=1.5,
+        regression=False,
+        transform=None,
+        base_seed=None,
+    ):
+        super().__init__(
+            records, window_size, window_offset, fps_scaling, transform, base_seed
+        )
+
+        self.min_speed = min_speed
+        self.max_speed = max_speed
+        self.regression = regression
+
+    def __iter__(self):
+        while True:
+            # Select a random window (global frame index)
+            global_idx = torch.randint(0, self.n_frames, (1,), generator=self.g).item()
+
+            # Map global index to (record_index, frame_index)
+            rec_idx, frame_idx = self._global_to_local(global_idx)
+
+            # Draw playback speed at random
+            rel_speed = torch.rand((1,), generator=self.g).item()
+            speed = rel_speed * (self.max_speed - self.min_speed) + self.min_speed
+
+            # Compute actual window size (i.e. the actual frames required to generate
+            # the window)
+            window_size_act = np.round(speed * self.window_size).astype(int)
+
+            # Extract corresponding window
+            x_act = self._select_and_pad(rec_idx, frame_idx, window_size_act)
+
+            # Interpolate frames to get exactly window_size frames
+            f1d = interp1d(np.linspace(0, 1, window_size_act), x_act, axis=0)
+            x = f1d(np.linspace(0, 1, self.window_size))
+
+            if self.regression:
+                # Set relative speed as label
+                y = np.array(rel_speed, ndmin=1, dtype=np.float32)
+            else:
+                # Set speed threshold as label
+                speed_threshold = (self.min_speed + self.max_speed) / 2.0
+                y = np.array(speed > speed_threshold, ndmin=1, dtype=np.float32)
+
+            if self.transform:
+                x = self.transform(x)
+
+            yield x, y
 
 
 class BaseDataset(Dataset, ABC):

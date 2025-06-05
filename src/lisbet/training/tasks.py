@@ -153,7 +153,7 @@ def _configure_selfsupervised_task(
         "nwp": input_pipeline.NWPDataset,
         "smp": input_pipeline.SMPDataset,
         "dmp": input_pipeline.DMPDataset,
-        "vsp": input_pipeline.VideoSpeedPredictionDataset,
+        "vsp": input_pipeline.VSPDataset,
     }
     train_dataset = task_map[task_id](
         records=train_rec[task_id],
