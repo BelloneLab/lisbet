@@ -299,8 +299,76 @@ class NWPDataset(WindowDataset):
             yield x, y
 
 
-class DMPDataset(IterableDataset):
-    pass
+class DMPDataset(WindowDataset):
+    def __init__(
+        self,
+        records,
+        window_size,
+        window_offset=0,
+        fps_scaling=1.0,
+        min_delay=-60,
+        max_delay=60,
+        regression=False,
+        transform=None,
+        base_seed=None,
+    ):
+        super().__init__(
+            records, window_size, window_offset, fps_scaling, transform, base_seed
+        )
+
+        # Extract individuals and their feature indices from the first record
+        features = self.records[0].posetracks.coords["features"].to_index()
+        self.individuals = features.get_level_values("individuals").unique().tolist()
+        self.individual_feature_indices = {
+            ind: np.where(features.get_level_values("individuals") == ind)[0]
+            for ind in self.individuals
+        }
+
+        self.min_delay = min_delay
+        self.max_delay = max_delay
+        self.regression = regression
+
+    def __iter__(self):
+        while True:
+            # Select a random window (global frame index)
+            global_idx = torch.randint(0, self.n_frames, (1,), generator=self.g).item()
+
+            # Map global index to (record_index, frame_index)
+            rec_idx, frame_idx = self._global_to_local(global_idx)
+
+            # Extract corresponding window
+            x = self._select_and_pad(rec_idx, frame_idx)
+
+            # Compute shift bounds
+            lower_bound = max(frame_idx + self.min_delay, 0)
+            upper_bound = min(frame_idx + self.max_delay, self.lengths[rec_idx])
+
+            # Select random window from same sequence for the shift
+            frame_idx_delay = torch.randint(
+                lower_bound, upper_bound, (1,), generator=self.g
+            ).item()
+
+            # Get shift data
+            x_delay = self._select_and_pad(rec_idx, frame_idx_delay)
+
+            # Apply shifting: only shift the second individual's features
+            feature_idx = self.individual_feature_indices[self.individuals[1]]
+            x[..., feature_idx] = x_delay[..., feature_idx]
+
+            # Compute label
+            delta_delay = frame_idx_delay - frame_idx
+
+            if self.regression:
+                # Set rescaled shift distance as label
+                y = (delta_delay - self.min_delay) / (self.max_delay - self.min_delay)
+                y = np.array(y, ndmin=1, dtype=np.float32)
+            else:
+                y = np.array(delta_delay > 0, ndmin=1, dtype=np.float32)
+
+            if self.transform:
+                x = self.transform(x)
+
+            yield x, y
 
 
 class VSPDataset(IterableDataset):
