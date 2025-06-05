@@ -1,7 +1,7 @@
 """Input data management."""
 
 import logging
-from abc import ABC
+from abc import ABC, abstractmethod
 
 import numpy as np
 import torch
@@ -9,7 +9,7 @@ from scipy.interpolate import interp1d
 from torch.utils.data import Dataset, IterableDataset
 
 
-class WindowDataset(IterableDataset):
+class WindowDataset(IterableDataset, ABC):
     def __init__(
         self,
         records,
@@ -104,6 +104,10 @@ class WindowDataset(IterableDataset):
         x_data = f1d(np.linspace(0, 1, window_size))
 
         return x_data
+
+    @abstractmethod
+    def __iter__(self):
+        pass
 
 
 class CFCDataset(WindowDataset):
