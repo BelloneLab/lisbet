@@ -81,7 +81,7 @@ def _configure_classification_task(
     )
 
     # Create dataloaders
-    train_dataset = data_pipeline.CFCDataset(
+    train_dataset = data_pipeline.RandomWindowDataset(
         records=train_rec["cfc"],
         window_size=window_size,
         window_offset=window_offset,
@@ -104,7 +104,7 @@ def _configure_classification_task(
     # Update dev attributes if dev records are provided
     if dev_rec["cfc"]:
         dev_transform = transforms.Compose([torch.Tensor])
-        task.dev_dataset = data_pipeline.CFCDataset(
+        task.dev_dataset = data_pipeline.RandomWindowDataset(
             records=dev_rec["cfc"],
             window_size=window_size,
             window_offset=window_offset,

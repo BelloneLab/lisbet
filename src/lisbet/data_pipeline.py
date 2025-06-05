@@ -143,14 +143,8 @@ class WindowDataset(IterableDataset):
         return x_data
 
 
-class CFCDataset(WindowDataset):
-    """
-    Dataset generator for the multi-class frame classification task.
-
-    In the frame classification task, each frame is assumed to belong to exactly one of
-    n classes (behaviors) and the classifier has access to a window of frames in the
-    past, future or both, depending on the window_offset parameter.
-    """
+class RandomWindowDataset(WindowDataset):
+    """Base class for datasets that generate random windows of frames from records."""
 
     def __init__(
         self,
@@ -224,7 +218,7 @@ class CFCDataset(WindowDataset):
             yield x, y
 
 
-class SMPDataset(WindowDataset):
+class SMPDataset(RandomWindowDataset):
     """
     Dataset generator for the swap mouse prediction task.
 
@@ -275,17 +269,6 @@ class SMPDataset(WindowDataset):
             The windows dataset from the provided records.
         """
         super().__init__(records, window_size, window_offset, fps_scaling, transform)
-
-        self.base_seed = (
-            base_seed
-            if base_seed is not None
-            else torch.randint(0, 2**31 - 1, (1,)).item()
-        )
-
-        # Set random generator for reproducibility
-        # NOTE: This could be overridden by the worker_init_fn to ensure each worker
-        #       has a different seed for data shuffling.
-        self.g = torch.Generator().manual_seed(self.base_seed)
 
         # Extract individuals and their feature indices from the first record
         features = self.records[0].posetracks.coords["features"].to_index()
@@ -339,7 +322,7 @@ class SMPDataset(WindowDataset):
             yield x, y
 
 
-class NWPDataset(WindowDataset):
+class NWPDataset(RandomWindowDataset):
     """
     Dataset generator for the next window prediction task.
 
@@ -365,52 +348,6 @@ class NWPDataset(WindowDataset):
        them by running backbone model twice and concatenating x embeddings before the
        classifier.
     """
-
-    def __init__(
-        self,
-        records,
-        window_size,
-        window_offset=0,
-        fps_scaling=1.0,
-        transform=None,
-        base_seed=None,
-    ):
-        """
-        Initialize the dataset.
-
-        Parameters
-        ----------
-        records : list
-            List of records containing the data.
-        window_size : int
-            Size of the window in frames.
-        window_offset : int, optional
-            Offset for the window in frames (default is 0).
-        fps_scaling : float, optional
-            Scaling factor for the frames per second (default is 1.0).
-        transform : callable, optional
-            A function/transform to apply to the data (default is None).
-        base_seed : int, optional
-            Base seed for random number generation (default is None, which generates a
-            random seed).
-
-        Returns
-        -------
-        torch.utils.data.IterableDataset
-            The windows dataset from the provided records.
-        """
-        super().__init__(records, window_size, window_offset, fps_scaling, transform)
-
-        self.base_seed = (
-            base_seed
-            if base_seed is not None
-            else torch.randint(0, 2**31 - 1, (1,)).item()
-        )
-
-        # Set random generator for reproducibility
-        # NOTE: This could be overridden by the worker_init_fn to ensure each worker
-        #       has a different seed for data shuffling.
-        self.g = torch.Generator().manual_seed(self.base_seed)
 
     def __iter__(self):
         while True:
@@ -472,7 +409,7 @@ class NWPDataset(WindowDataset):
             yield x, y
 
 
-class DMPDataset(WindowDataset):
+class DMPDataset(RandomWindowDataset):
     """
     Dataset generator for the delay mouse prediction task.
 
@@ -530,17 +467,6 @@ class DMPDataset(WindowDataset):
 
         super().__init__(records, window_size, window_offset, fps_scaling, transform)
 
-        self.base_seed = (
-            base_seed
-            if base_seed is not None
-            else torch.randint(0, 2**31 - 1, (1,)).item()
-        )
-
-        # Set random generator for reproducibility
-        # NOTE: This could be overridden by the worker_init_fn to ensure each worker
-        #       has a different seed for data shuffling.
-        self.g = torch.Generator().manual_seed(self.base_seed)
-
         # Extract individuals and their feature indices from the first record
         features = self.records[0].posetracks.coords["features"].to_index()
         self.individuals = features.get_level_values("individuals").unique().tolist()
@@ -596,7 +522,7 @@ class DMPDataset(WindowDataset):
             yield x, y
 
 
-class VSPDataset(WindowDataset):
+class VSPDataset(RandomWindowDataset):
     """
     Dataset generator for the variable speed prediction task.
 
@@ -652,17 +578,6 @@ class VSPDataset(WindowDataset):
             The windows dataset from the provided records.
         """
         super().__init__(records, window_size, window_offset, fps_scaling, transform)
-
-        self.base_seed = (
-            base_seed
-            if base_seed is not None
-            else torch.randint(0, 2**31 - 1, (1,)).item()
-        )
-
-        # Set random generator for reproducibility
-        # NOTE: This could be overridden by the worker_init_fn to ensure each worker
-        #       has a different seed for data shuffling.
-        self.g = torch.Generator().manual_seed(self.base_seed)
 
         self.min_speed = min_speed
         self.max_speed = max_speed
