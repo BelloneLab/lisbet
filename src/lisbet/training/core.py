@@ -468,7 +468,6 @@ def train(
         data_augmentation,
         run_seeds,
         fabric.device,
-        data_format,
     )
     n_tasks = len(tasks)
 

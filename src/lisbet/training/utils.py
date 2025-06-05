@@ -21,7 +21,7 @@ def generate_seeds(seed, task_ids):
             for group in ("train", "dev", "test")
         ]
         + [f"transform_{task_id}" for task_id in task_ids]
-        + [f"dataset_{task_id}" for task_id in task_ids if task_id != "cfc"]
+        + [f"dataset_{task_id}" for task_id in task_ids]
     )
     run_seeds = {sk: rng.integers(low=0, high=2**32 - 1) for sk in seed_keys}
 

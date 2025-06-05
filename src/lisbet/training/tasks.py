@@ -43,7 +43,6 @@ def _configure_classification_task(
     data_augmentation,
     run_seeds,
     device,
-    data_format,
 ):
     """Internal helper. Configures the classification task."""
     if train_rec["cfc"][0].annotations is None:
@@ -82,12 +81,14 @@ def _configure_classification_task(
     )
 
     # Create dataloaders
-    train_dataset = input_pipeline.FrameClassificationDataset(
+    train_dataset = input_pipeline.CFCDataset(
         records=train_rec["cfc"],
         window_size=window_size,
         window_offset=window_offset,
-        transform=train_transform,
         num_classes=num_classes,
+        shuffle=True,
+        transform=train_transform,
+        base_seed=run_seeds["dataset_cfc"],
     )
 
     # Create task as dataclass with default dev attributes
@@ -105,12 +106,14 @@ def _configure_classification_task(
     # Update dev attributes if dev records are provided
     if dev_rec["cfc"]:
         dev_transform = transforms.Compose([torch.Tensor])
-        task.dev_dataset = input_pipeline.FrameClassificationDataset(
+        task.dev_dataset = input_pipeline.CFCDataset(
             records=dev_rec["cfc"],
             window_size=window_size,
             window_offset=window_offset,
-            transform=dev_transform,
             num_classes=num_classes,
+            shuffle=False,
+            transform=dev_transform,
+            base_seed=run_seeds["dataset_cfc"],
         )
         task.dev_loss = MeanMetric().to(device)
         task.dev_score = MulticlassF1Score(num_classes, average="macro").to(device)
@@ -199,7 +202,6 @@ def configure_tasks(
     data_augmentation,
     run_seeds,
     device,
-    data_format,
 ):
     """Internal helper. Configures all tasks."""
     tasks = []
@@ -216,7 +218,6 @@ def configure_tasks(
                     data_augmentation,
                     run_seeds,
                     device,
-                    data_format,
                 )
             )
         elif task_id == "lfc":
