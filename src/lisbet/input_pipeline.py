@@ -9,15 +9,13 @@ from scipy.interpolate import interp1d
 from torch.utils.data import Dataset, IterableDataset
 
 
-class CFCDataset(IterableDataset):
+class WindowDataset(IterableDataset):
     def __init__(
         self,
         records,
         window_size,
         window_offset=0,
         fps_scaling=1.0,
-        num_classes=None,
-        shuffle=False,
         transform=None,
         base_seed=None,
     ):
@@ -29,8 +27,6 @@ class CFCDataset(IterableDataset):
         self.window_size = window_size
         self.window_offset = window_offset
         self.fps_scaling = fps_scaling
-        self.num_classes = num_classes
-        self.shuffle = shuffle
         self.transform = transform
 
         self.base_seed = (
@@ -42,44 +38,6 @@ class CFCDataset(IterableDataset):
         )
         self.cumlens = self.lengths.cumsum()
         self.n_frames = self.cumlens[-1]
-
-        self._epoch = 0
-
-    def __iter__(self):
-        it_idx = -1
-        while True:
-            if self.shuffle:
-                # Select a random window (global frame index)
-                global_idx = torch.randint(
-                    0, self.n_frames, (1,), generator=self.g
-                ).item()
-            else:
-                # Select the next window
-                it_idx = it_idx + 1
-                global_idx = it_idx
-
-            # Map global index to (record_index, frame_index)
-            rec_idx, frame_idx = self._global_to_local(global_idx)
-
-            # Extract corresponding window
-            x = self._select_and_pad(rec_idx, frame_idx, window_size=self.window_size)
-
-            if self.transform:
-                x = self.transform(x)
-
-            # Select annotation data, if requested, return x only otherwise
-            if self.num_classes is not None:
-                y = (
-                    self.records[rec_idx]
-                    .annotations.target_cls.isel(time=frame_idx)
-                    .argmax("behaviors")
-                    .squeeze()
-                    .values
-                )
-                yield x, y
-            else:
-                # No annotations, return only x
-                yield x
 
     def _global_to_local(self, global_idx):
         """
@@ -148,42 +106,67 @@ class CFCDataset(IterableDataset):
         return x_data
 
 
-class SMPDataset(IterableDataset):
-    pass
-
-
-class NWPDataset(IterableDataset):
+class CFCDataset(WindowDataset):
     def __init__(
         self,
         records,
         window_size,
         window_offset=0,
         fps_scaling=1.0,
+        num_classes=None,
+        shuffle=False,
         transform=None,
         base_seed=None,
     ):
-        super().__init__()
-
-        self.records = records
-        self.n_records = len(records)
-
-        self.window_size = window_size
-        self.window_offset = window_offset
-        self.fps_scaling = fps_scaling
-        self.transform = transform
-
-        self.base_seed = (
-            base_seed if base_seed is not None else torch.randint(0, 2**32 - 1)
+        super().__init__(
+            records, window_size, window_offset, fps_scaling, transform, base_seed
         )
 
-        self.lengths = np.array(
-            [rec.posetracks.sizes["time"] for rec in self.records], dtype=int
-        )
-        self.cumlens = self.lengths.cumsum()
-        self.n_frames = self.cumlens[-1]
+        self.num_classes = num_classes
+        self.shuffle = shuffle
 
-        self._epoch = 0
+    def __iter__(self):
+        it_idx = -1
+        while True:
+            if self.shuffle:
+                # Select a random window (global frame index)
+                global_idx = torch.randint(
+                    0, self.n_frames, (1,), generator=self.g
+                ).item()
+            else:
+                # Select the next window
+                it_idx = it_idx + 1
+                global_idx = it_idx
 
+            # Map global index to (record_index, frame_index)
+            rec_idx, frame_idx = self._global_to_local(global_idx)
+
+            # Extract corresponding window
+            x = self._select_and_pad(rec_idx, frame_idx, window_size=self.window_size)
+
+            if self.transform:
+                x = self.transform(x)
+
+            # Select annotation data, if requested, return x only otherwise
+            if self.num_classes is not None:
+                y = (
+                    self.records[rec_idx]
+                    .annotations.target_cls.isel(time=frame_idx)
+                    .argmax("behaviors")
+                    .squeeze()
+                    .values
+                )
+                yield x, y
+            else:
+                # No annotations, return only x
+                yield x
+
+
+class SMPDataset(IterableDataset):
+    pass
+
+
+class NWPDataset(WindowDataset):
     def __iter__(self):
         while True:
             # Select a random window (global frame index)
@@ -246,72 +229,6 @@ class NWPDataset(IterableDataset):
                 x = self.transform(x)
 
             yield x, y
-
-    def _global_to_local(self, global_idx):
-        """
-        Map a global frame index (0 ≤ global_idx < total_n_frames) to a local pair
-        (record_index, local_frame_index).
-        """
-        rec_idx = np.searchsorted(self.cumlens, global_idx, "right")
-        prev_sum = 0 if rec_idx == 0 else self.cumlens[rec_idx - 1]
-        local_idx = global_idx - prev_sum
-
-        return rec_idx, local_idx
-
-    def _select_and_pad(self, curr_key, curr_loc, window_size=None):
-        """Select a window from the catalog, applying padding if needed.
-
-        The selected window is returned as a new numpy array to avoid unintentional
-        changes to the records in the window dictionary (i.e. by the swap mouse
-        prediction task).
-
-        """
-        if window_size is None:
-            window_size = self.window_size
-
-        x_data = self.records[curr_key].posetracks
-        seq_len = x_data.sizes["time"]
-
-        # Compute actual window size
-        act_window_size = int(np.rint(self.fps_scaling * window_size))
-        act_window_offset = int(np.rint(self.fps_scaling * self.window_offset))
-        # logging.debug(
-        #     "Actual window size and offset: (%d, %d)",
-        #     act_window_size,
-        #     act_window_offset,
-        # )
-
-        # Calculate padding
-        past_n = max(act_window_size - curr_loc - act_window_offset - 1, 0)
-        future_n = max(curr_loc + act_window_offset + 1 - seq_len, 0)
-        # logging.debug("Window padding: (%d, %d)", past_n, future_n)
-
-        # Calculate data bounds
-        start_idx = max(curr_loc - act_window_size + act_window_offset + 1, 0)
-        stop_idx = min(curr_loc + act_window_offset + 1, seq_len)
-        # logging.debug("Data bounds: (%d, %d, %d)", start_idx, curr_loc, stop_idx)
-
-        # Pad data with zeros
-        past_pad = np.zeros((past_n, x_data.sizes["features"]))
-        future_pad = np.zeros((future_n, x_data.sizes["features"]))
-        x_data = np.concatenate(
-            [
-                past_pad,
-                x_data["position"].isel(time=slice(start_idx, stop_idx)),
-                future_pad,
-            ],
-            axis=0,
-        )
-
-        # assert (
-        #     x_data.shape[0] == window_size
-        # ), f"{seq_len}, {start_idx}, {curr_loc}, {stop_idx}, {past_n}, {future_n}"
-
-        # Interpolate frames to get exactly window_size frames
-        f1d = interp1d(np.linspace(0, 1, act_window_size), x_data, axis=0)
-        x_data = f1d(np.linspace(0, 1, window_size))
-
-        return x_data
 
 
 class DMPDataset(IterableDataset):
