@@ -10,6 +10,8 @@ from torch.utils.data import Dataset, IterableDataset
 
 
 class WindowDataset(IterableDataset, ABC):
+    """Base class for datasets that generate windows of frames from records."""
+
     def __init__(
         self,
         records,
@@ -19,6 +21,30 @@ class WindowDataset(IterableDataset, ABC):
         transform=None,
         base_seed=None,
     ):
+        """
+        Initialize the window dataset.
+
+        Parameters
+        ----------
+        records : list
+            List of records containing the data.
+        window_size : int
+            Size of the window in frames.
+        window_offset : int, optional
+            Offset for the window in frames (default is 0).
+        fps_scaling : float, optional
+            Scaling factor for the frames per second (default is 1.0).
+        transform : callable, optional
+            A function/transform to apply to the data (default is None).
+        base_seed : int, optional
+            Base seed for random number generation (default is None, which generates a
+            random seed).
+
+        Returns
+        -------
+        torch.utils.data.IterableDataset
+            The windows dataset from the provided records.
+        """
         super().__init__()
 
         self.records = records
@@ -56,7 +82,6 @@ class WindowDataset(IterableDataset, ABC):
         The selected window is returned as a new numpy array to avoid unintentional
         changes to the records in the window dictionary (i.e. by the swap mouse
         prediction task).
-
         """
         if window_size is None:
             window_size = self.window_size
@@ -111,6 +136,14 @@ class WindowDataset(IterableDataset, ABC):
 
 
 class CFCDataset(WindowDataset):
+    """
+    Dataset generator for the multi-class frame classification task.
+
+    In the frame classification task, each frame is assumed to belong to exactly one of
+    n classes (behaviors) and the classifier has access to a window of frames in the
+    past, future or both, depending on the window_offset parameter.
+    """
+
     def __init__(
         self,
         records,
@@ -122,6 +155,35 @@ class CFCDataset(WindowDataset):
         transform=None,
         base_seed=None,
     ):
+        """
+        Initialize the dataset.
+
+        Parameters
+        ----------
+        records : list
+            List of records containing the data.
+        window_size : int
+            Size of the window in frames.
+        window_offset : int, optional
+            Offset for the window in frames (default is 0).
+        fps_scaling : float, optional
+            Scaling factor for the frames per second (default is 1.0).
+        num_classes : int, optional
+            Number of classes for classification. If specified, records must be
+            annotated.
+        shuffle : bool, optional
+            Whether to shuffle the windows during iteration (default is False).
+        transform : callable, optional
+            A function/transform to apply to the data (default is None).
+        base_seed : int, optional
+            Base seed for random number generation (default is None, which generates a
+            random seed).
+
+        Returns
+        -------
+        torch.utils.data.IterableDataset
+            The windows dataset from the provided records.
+        """
         super().__init__(
             records, window_size, window_offset, fps_scaling, transform, base_seed
         )
@@ -167,6 +229,22 @@ class CFCDataset(WindowDataset):
 
 
 class SMPDataset(WindowDataset):
+    """
+    Dataset generator for the swap mouse prediction task.
+
+    In the swap mouse prediction task, the tracking data of the second animal might be
+    replaced with those from another record (i.e. swapping the mouse). The classifier
+    has to predict whether the swap happened or not. To solve the task, the classifier
+    has access to a window of frames in the past, future or both, depending on the
+    window_offset parameter.
+
+    Notes
+    -----
+    1. Padding is not necessarily consistent for swapped windows. However, considering
+       the small number of padded windows compared to the total number of windows, we
+       decided to leave this edge case unmanaged for the time being.
+    """
+
     def __init__(
         self,
         records,
@@ -176,6 +254,30 @@ class SMPDataset(WindowDataset):
         transform=None,
         base_seed=None,
     ):
+        """
+        Initialize the dataset.
+
+        Parameters
+        ----------
+        records : list
+            List of records containing the data.
+        window_size : int
+            Size of the window in frames.
+        window_offset : int, optional
+            Offset for the window in frames (default is 0).
+        fps_scaling : float, optional
+            Scaling factor for the frames per second (default is 1.0).
+        transform : callable, optional
+            A function/transform to apply to the data (default is None).
+        base_seed : int, optional
+            Base seed for random number generation (default is None, which generates a
+            random seed).
+
+        Returns
+        -------
+        torch.utils.data.IterableDataset
+            The windows dataset from the provided records.
+        """
         super().__init__(
             records, window_size, window_offset, fps_scaling, transform, base_seed
         )
@@ -235,6 +337,32 @@ class SMPDataset(WindowDataset):
 
 
 class NWPDataset(WindowDataset):
+    """
+    Dataset generator for the next window prediction task.
+
+    In the next window prediction task, two windows are presented to the classifier. The
+    goal of the task is to identify whether the second window comes from the same record
+    of the first one or not. In the former case, the second window is randomly chosen to
+    follow the first with a random delay (i.e. the first window "causes" the second). To
+    solve the task, the classifier has access to a window of frames in the past, future
+    or both, depending on the window_offset parameter.
+
+    Notes
+    -----
+    1. Padding is not necessarily consistent for pre and post windows. However,
+       considering the small number of padded windows compared to the total number of
+       windows, we decided to leave this edge case unmanaged for the time being.
+    2. The last window_size windows of each record will have overlapping post windows in
+       the "same record" case. We could have skipped these windows, but we decided to
+       allow them as they are not many, compared to the total number of windows, and
+       they could even be beneficial to learn cause-effect relationships.
+    3. For simplicity we concatenate the current and next window. This choice helps
+       managing multiple tasks during training, but it leads to learning a joint
+       positional and sequence embedding. In the future we might decide to decouple
+       them by running backbone model twice and concatenating x embeddings before the
+       classifier.
+    """
+
     def __iter__(self):
         while True:
             # Select a random window (global frame index)
@@ -300,6 +428,17 @@ class NWPDataset(WindowDataset):
 
 
 class DMPDataset(WindowDataset):
+    """
+    Dataset generator for the delay mouse prediction task.
+
+    In the delay mouse prediction/regression task, the intruder mouse trajectory is
+    shifted in time by a random delay in the interval (-60, +60) frames. The goal of the
+    prediction task is to assess whether the delay was negative or positive, while the
+    goal of the regression task is to estimate by how many frames the trajectory was
+    shifted. To solve the task, the classifier has access to a window of frames in the
+    past, future or both, depending on the window_offset parameter.
+    """
+
     def __init__(
         self,
         records,
@@ -312,6 +451,38 @@ class DMPDataset(WindowDataset):
         transform=None,
         base_seed=None,
     ):
+        """
+        Initialize the dataset.
+
+        Parameters
+        ----------
+        records : list
+            List of records containing the data.
+        window_size : int
+            Size of the window in frames.
+        window_offset : int, optional
+            Offset for the window in frames (default is 0).
+        fps_scaling : float, optional
+            Scaling factor for the frames per second (default is 1.0).
+        min_delay : int, optional
+            Minimum delay in frames (default is -60).
+        max_delay : int, optional
+            Maximum delay in frames (default is 60).
+        regression : bool, optional
+            Whether to perform regression (default is False, which performs binary
+            classification).
+        transform : callable, optional
+            A function/transform to apply to the data (default is None).
+        base_seed : int, optional
+            Base seed for random number generation (default is None, which generates a
+            random seed).
+
+        Returns
+        -------
+        torch.utils.data.IterableDataset
+            The windows dataset from the provided records.
+        """
+
         super().__init__(
             records, window_size, window_offset, fps_scaling, transform, base_seed
         )
@@ -372,6 +543,17 @@ class DMPDataset(WindowDataset):
 
 
 class VSPDataset(WindowDataset):
+    """
+    Dataset generator for the variable speed prediction task.
+
+    In the video speed prediction/regression task, the pace of the window is multiplied
+    by a random factor in the interval (0.5, 1.5). The goal of the prediction task is to
+    assess whether the video speed was reduced or increased , while the  goal of the
+    regression task is to estimate the pace factor. To solve the task, the classifier
+    has access to a window of frames in the past, future or both, depending on the
+    window_offset parameter.
+    """
+
     def __init__(
         self,
         records,
@@ -384,6 +566,37 @@ class VSPDataset(WindowDataset):
         transform=None,
         base_seed=None,
     ):
+        """
+        Initialize the dataset.
+
+        Parameters
+        ----------
+        records : list
+            List of records containing the data.
+        window_size : int
+            Size of the window in frames.
+        window_offset : int, optional
+            Offset for the window in frames (default is 0).
+        fps_scaling : float, optional
+            Scaling factor for the frames per second (default is 1.0).
+        min_speed : float, optional
+            Minimum playback speed (default is 0.5).
+        max_speed : float, optional
+            Maximum playback speed (default is 1.5).
+        regression : bool, optional
+            Whether to perform regression (default is False, which performs binary
+            classification).
+        transform : callable, optional
+            A function/transform to apply to the data (default is None).
+        base_seed : int, optional
+            Base seed for random number generation (default is None, which generates a
+            random seed).
+
+        Returns
+        -------
+        torch.utils.data.IterableDataset
+            The windows dataset from the provided records.
+        """
         super().__init__(
             records, window_size, window_offset, fps_scaling, transform, base_seed
         )
