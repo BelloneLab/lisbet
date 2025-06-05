@@ -19,8 +19,8 @@ from torchvision import transforms
 from tqdm.auto import tqdm
 
 from . import modeling
+from .data_pipeline import WindowDataset
 from .datasets import load_records
-from .input_pipeline import FrameClassificationDataset
 
 
 def run_inference_for_sequence(
@@ -67,7 +67,7 @@ def run_inference_for_sequence(
     """
     model.eval()
 
-    dataset = FrameClassificationDataset(
+    dataset = WindowDataset(
         records=[sequence],
         window_size=window_size,
         window_offset=window_offset,
@@ -79,7 +79,7 @@ def run_inference_for_sequence(
     predictions = []
 
     with torch.no_grad():
-        for data in dataloader:
+        for data, _ in dataloader:
             data = data.to(device)
             pred = forward_fn(model, data)
             predictions.append(pred.cpu().numpy())
