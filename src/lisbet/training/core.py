@@ -19,10 +19,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+import numpy as np
 import torch
 from lightning.fabric import Fabric
 from lightning.fabric.loggers import CSVLogger
 from torch.profiler import ProfilerActivity, profile, schedule
+from torch.utils.data import DataLoader
 from torchinfo import summary
 from tqdm.auto import trange
 
@@ -36,7 +38,7 @@ from .io import (
 )
 from .preprocessing import split_multi_records
 from .tasks import configure_tasks
-from .utils import generate_seeds
+from .utils import generate_seeds, worker_init_fn
 
 
 def _configure_profiler(steps_multiplier):
@@ -143,39 +145,39 @@ def _configure_optimizer_and_scheduler(model, learning_rate):
     return optimizer, scheduler
 
 
-def _configure_dataloaders(tasks, group, batch_size, group_sample, pin_memory):
+def _configure_dataloaders(tasks, group, batch_size, sample_ratio, pin_memory):
     """Internal helper. Configures dataloaders for a group."""
     # Estimate number of samples
-    num_samples = min(len(getattr(task, f"{group}_dataset")) for task in tasks)
-    if group_sample is not None:
-        num_samples = int(num_samples * group_sample)
-    logging.info("Using %d samples from the %s group", num_samples, group)
+    n_batches = np.ceil(
+        min(getattr(task, f"{group}_dataset").n_frames for task in tasks) / batch_size
+    )
+    if sample_ratio is not None:
+        n_batches = int(n_batches * sample_ratio)
+    logging.info("Using %d samples from the %s group", n_batches * batch_size, group)
 
     # Create a dataloader for each task
     dataloaders = []
     for task in tasks:
         dataset = getattr(task, f"{group}_dataset")
-        # Create new sample, if requested
-        # NOTE: This has a regularization effect in self-supervised training
-        if task.resample:
-            dataset.resample_dataset()
 
-        sampler = torch.utils.data.RandomSampler(dataset, num_samples=num_samples)
-        dataloader = torch.utils.data.DataLoader(
+        dataloader = DataLoader(
             dataset,
             batch_size=batch_size,
-            sampler=sampler,
             num_workers=1,
+            persistent_workers=True,
             pin_memory=pin_memory,
+            worker_init_fn=worker_init_fn,
         )
+
         dataloaders.append(dataloader)
 
-    return dataloaders
+    return dataloaders, n_batches
 
 
 def _train_one_epoch(
     model,
     dataloaders,
+    n_batches,
     optimizer,
     scheduler,
     tasks,
@@ -185,16 +187,14 @@ def _train_one_epoch(
     """Internal helper. Runs one training epoch."""
     model.train()
 
-    # NOTE: This is a temporary workaround, waiting for the input_pipeline refactor
-    dataloaders_iter = [iter(dataloader) for dataloader in dataloaders]
-    n_batches = min(len(dataloader) for dataloader in dataloaders)
+    dl_iter = [iter(dl) for dl in dataloaders]
 
     # Iterate over all batches
     for batch_idx in trange(n_batches, desc="Training batches", leave=False):
         optimizer.zero_grad(set_to_none=True)
 
         # Iterate over all tasks
-        for task, dataloader in zip(tasks, dataloaders_iter):
+        for task, dataloader in zip(tasks, dl_iter):
             data, target = next(dataloader)
 
             # Forward pass
@@ -220,19 +220,17 @@ def _train_one_epoch(
     scheduler.step()
 
 
-def _evaluate(model, dataloaders, tasks):
+def _evaluate(model, dataloaders, n_batches, tasks):
     """Internal helper. Evaluates model on a group."""
     model.eval()
 
-    # NOTE: This is a temporary workaround, waiting for the input_pipeline refactor
-    dataloaders_iter = [iter(dataloader) for dataloader in dataloaders]
-    n_batches = min(len(dataloader) for dataloader in dataloaders)
+    dl_iter = [iter(dl) for dl in dataloaders]
 
     with torch.no_grad():
         # Iterate over all batches
         for batch_idx in trange(n_batches, desc="Evaluation batches", leave=False):
             # Iterate over all tasks
-            for task, dataloader in zip(tasks, dataloaders_iter):
+            for task, dataloader in zip(tasks, dl_iter):
                 data, target = next(dataloader)
 
                 # Forward pass
@@ -509,8 +507,28 @@ def train(
         input_features,
     )
 
+    # Configure dataloaders
+    train_dataloaders, train_n_batches = _configure_dataloaders(
+        tasks,
+        "train",
+        batch_size,
+        train_sample,
+        fabric.device.type == "cuda",
+    )
+    if dev_ratio is not None:
+        dev_dataloaders, dev_n_batches = _configure_dataloaders(
+            tasks,
+            "dev",
+            batch_size,
+            dev_sample,
+            fabric.device.type == "cuda",
+        )
+
     # Configure Fabric
     model, optimizer = fabric.setup(model, optimizer)
+    train_dataloaders = [fabric.setup_dataloaders(dl) for dl in train_dataloaders]
+    if dev_ratio is not None:
+        dev_dataloaders = [fabric.setup_dataloaders(dl) for dl in dev_dataloaders]
 
     # Training loop
     with _configure_profiler(steps_multiplier=n_tasks) as prof:
@@ -519,18 +537,11 @@ def train(
             print(f"Epoch {epoch}")
             logging.info("Current LR = %f", scheduler.get_last_lr()[0])
 
-            # Get dataloaders
-            train_dataloaders = _configure_dataloaders(
-                tasks, "train", batch_size, train_sample, pin_memory=False
-            )
-            train_dataloaders = [
-                fabric.setup_dataloaders(dataloader) for dataloader in train_dataloaders
-            ]
-
             # Run training epoch
             _train_one_epoch(
                 model,
                 train_dataloaders,
+                train_n_batches,
                 optimizer,
                 scheduler,
                 tasks,
@@ -546,17 +557,8 @@ def train(
                 dump_weights(model, output_path, run_id, f"weights_epoch{epoch}.pt")
 
             if dev_ratio is not None:
-                # Get dataloaders
-                dev_dataloaders = _configure_dataloaders(
-                    tasks, "dev", batch_size, dev_sample, pin_memory=False
-                )
-                dev_dataloaders = [
-                    fabric.setup_dataloaders(dataloader)
-                    for dataloader in dev_dataloaders
-                ]
-
                 # Run dev epoch
-                _evaluate(model, dev_dataloaders, tasks)
+                _evaluate(model, dev_dataloaders, dev_n_batches, tasks)
 
                 # Update history entry for current epoch
                 history_entry.update(_compute_epoch_logs("dev", tasks))

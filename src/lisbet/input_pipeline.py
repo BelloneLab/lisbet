@@ -4,8 +4,187 @@ import logging
 from abc import ABC
 
 import numpy as np
+import torch
 from scipy.interpolate import interp1d
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, IterableDataset
+
+
+class CFCDatates(Dataset):
+    pass
+
+
+class SMPDataset(IterableDataset):
+    pass
+
+
+class NWPDataset(IterableDataset):
+    def __init__(
+        self,
+        records,
+        window_size,
+        window_offset=0,
+        fps_scaling=1.0,
+        transform=None,
+        base_seed=None,
+    ):
+        super().__init__()
+
+        self.records = records
+        self.n_records = len(records)
+
+        self.window_size = window_size
+        self.window_offset = window_offset
+        self.fps_scaling = fps_scaling
+        self.transform = transform
+
+        self.lengths = np.array(
+            [rec.posetracks.sizes["time"] for rec in self.records], dtype=int
+        )
+        self.cumlens = self.lengths.cumsum()
+        self.n_frames = self.cumlens[-1]
+
+        self.base_seed = (
+            base_seed if base_seed is not None else torch.randint(0, 2**32 - 1)
+        )
+
+        self._epoch = 0
+
+    def __iter__(self):
+        while True:
+            # Select a random window (global frame index)
+            global_idx_pre = torch.randint(
+                0, self.n_frames, (1,), generator=self.g
+            ).item()
+
+            # Map global index to (record_index, frame_index)
+            rec_idx_pre, frame_idx_pre = self._global_to_local(global_idx_pre)
+
+            if torch.rand((1,), generator=self.g).item() < 0.5:
+                # Select a valid next window from same sequence (past current idx)
+                # OBS: In order to generate a valid next window for every frame,
+                #      including the last one of the sequence, we have to allow
+                #      zero-distance windows
+                global_idx_post = torch.randint(
+                    frame_idx_pre, self.lengths[rec_idx_pre], (1,), generator=self.g
+                ).item()
+
+                # Map global index to (record_index, frame_index)
+                rec_idx_post, frame_idx_post = self._global_to_local(global_idx_post)
+
+                y = np.array(1, ndmin=1, dtype=np.float32)
+
+            else:
+                # Select a random window, retry if a true next window was chosen
+                while True:
+                    global_idx_post = torch.randint(
+                        0, self.n_frames, (1,), generator=self.g
+                    ).item()
+                    rec_idx_post, frame_idx_post = self._global_to_local(
+                        global_idx_post
+                    )
+
+                    if rec_idx_post != rec_idx_pre or frame_idx_post < frame_idx_pre:
+                        # Found a valid next window (not from the same sequence or
+                        # preceding the current one)
+                        break
+
+                y = np.array(0, ndmin=1, dtype=np.float32)
+
+            # Extract corresponding window
+            x_pre = self._select_and_pad(
+                rec_idx_pre,
+                frame_idx_pre,
+                window_size=np.ceil(self.window_size / 2).astype(int),
+            )
+
+            # Extract next window
+            x_post = self._select_and_pad(
+                rec_idx_post,
+                frame_idx_post,
+                window_size=np.floor(self.window_size / 2).astype(int),
+            )
+
+            # Concatenate windows
+            x = np.vstack((x_pre, x_post))
+
+            if self.transform:
+                x = self.transform(x)
+
+            yield x, y
+
+    def _global_to_local(self, global_idx):
+        """
+        Map a global frame index (0 ≤ global_idx < total_n_frames) to a local pair
+        (record_index, local_frame_index).
+        """
+        rec_idx = np.searchsorted(self.cumlens, global_idx, "right")
+        prev_sum = 0 if rec_idx == 0 else self.cumlens[rec_idx - 1]
+        local_idx = global_idx - prev_sum
+
+        return rec_idx, local_idx
+
+    def _select_and_pad(self, curr_key, curr_loc, window_size=None):
+        """Select a window from the catalog, applying padding if needed.
+
+        The selected window is returned as a new numpy array to avoid unintentional
+        changes to the records in the window dictionary (i.e. by the swap mouse
+        prediction task).
+
+        """
+        if window_size is None:
+            window_size = self.window_size
+
+        x_data = self.records[curr_key].posetracks
+        seq_len = x_data.sizes["time"]
+
+        # Compute actual window size
+        act_window_size = int(np.rint(self.fps_scaling * window_size))
+        act_window_offset = int(np.rint(self.fps_scaling * self.window_offset))
+        # logging.debug(
+        #     "Actual window size and offset: (%d, %d)",
+        #     act_window_size,
+        #     act_window_offset,
+        # )
+
+        # Calculate padding
+        past_n = max(act_window_size - curr_loc - act_window_offset - 1, 0)
+        future_n = max(curr_loc + act_window_offset + 1 - seq_len, 0)
+        # logging.debug("Window padding: (%d, %d)", past_n, future_n)
+
+        # Calculate data bounds
+        start_idx = max(curr_loc - act_window_size + act_window_offset + 1, 0)
+        stop_idx = min(curr_loc + act_window_offset + 1, seq_len)
+        # logging.debug("Data bounds: (%d, %d, %d)", start_idx, curr_loc, stop_idx)
+
+        # Pad data with zeros
+        past_pad = np.zeros((past_n, x_data.sizes["features"]))
+        future_pad = np.zeros((future_n, x_data.sizes["features"]))
+        x_data = np.concatenate(
+            [
+                past_pad,
+                x_data["position"].isel(time=slice(start_idx, stop_idx)),
+                future_pad,
+            ],
+            axis=0,
+        )
+
+        # assert (
+        #     x_data.shape[0] == window_size
+        # ), f"{seq_len}, {start_idx}, {curr_loc}, {stop_idx}, {past_n}, {future_n}"
+
+        # Interpolate frames to get exactly window_size frames
+        f1d = interp1d(np.linspace(0, 1, act_window_size), x_data, axis=0)
+        x_data = f1d(np.linspace(0, 1, window_size))
+
+        return x_data
+
+
+class DMPDataset(IterableDataset):
+    pass
+
+
+class VSPDataset(IterableDataset):
+    pass
 
 
 class BaseDataset(Dataset, ABC):

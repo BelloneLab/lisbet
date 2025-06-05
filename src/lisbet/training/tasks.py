@@ -147,7 +147,7 @@ def _configure_selfsupervised_task(
 
     # Create dataloaders
     task_map = {
-        "nwp": input_pipeline.NextWindowPredictionDataset,
+        "nwp": input_pipeline.NWPDataset,
         "smp": input_pipeline.SwapMousePredictionDataset,
         "vsp": input_pipeline.VideoSpeedPredictionDataset,
         "dmp": input_pipeline.DelayMousePredictionDataset,
@@ -157,7 +157,7 @@ def _configure_selfsupervised_task(
         window_size=window_size,
         window_offset=window_offset,
         transform=train_transform,
-        seed=run_seeds[f"dataset_{task_id}"],
+        base_seed=run_seeds[f"dataset_{task_id}"],
     )
 
     # Create task as dataclass with default dev attributes
@@ -180,7 +180,7 @@ def _configure_selfsupervised_task(
             window_size=window_size,
             window_offset=window_offset,
             transform=dev_transform,
-            seed=run_seeds[f"dataset_{task_id}"],
+            base_seed=run_seeds[f"dataset_{task_id}"],
         )
         task.dev_loss = MeanMetric().to(device)
         task.dev_score = BinaryAccuracy().to(device)
