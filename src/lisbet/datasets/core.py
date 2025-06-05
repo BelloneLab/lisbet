@@ -359,6 +359,13 @@ def load_records(
                     f"Reference features:\n{ref_features}\n"
                     f"Record features:\n{ds_features}"
                 )
+    else:
+        raise ValueError(
+            "No valid records found in the specified directory. Please check the data "
+            "path, format and filters to ensure they match the dataset structure.\n"
+            f"Current values are: \n data_path = {data_path}\n "
+            f"data_format = {data_format}\n data_filter = {data_filter}\n"
+        )
 
     return records
 
