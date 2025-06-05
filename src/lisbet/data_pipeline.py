@@ -188,8 +188,15 @@ class CFCDataset(WindowDataset):
         super().__init__(records, window_size, window_offset, fps_scaling, transform)
 
         self.base_seed = (
-            base_seed if base_seed is not None else torch.randint(0, 2**32 - 1)
+            base_seed
+            if base_seed is not None
+            else torch.randint(0, 2**31 - 1, (1,)).item()
         )
+
+        # Set random generator for reproducibility
+        # NOTE: This could be overridden by the worker_init_fn to ensure each worker
+        #       has a different seed for data shuffling.
+        self.g = torch.Generator().manual_seed(self.base_seed)
 
     def __iter__(self):
         while True:
@@ -270,8 +277,15 @@ class SMPDataset(WindowDataset):
         super().__init__(records, window_size, window_offset, fps_scaling, transform)
 
         self.base_seed = (
-            base_seed if base_seed is not None else torch.randint(0, 2**32 - 1)
+            base_seed
+            if base_seed is not None
+            else torch.randint(0, 2**31 - 1, (1,)).item()
         )
+
+        # Set random generator for reproducibility
+        # NOTE: This could be overridden by the worker_init_fn to ensure each worker
+        #       has a different seed for data shuffling.
+        self.g = torch.Generator().manual_seed(self.base_seed)
 
         # Extract individuals and their feature indices from the first record
         features = self.records[0].posetracks.coords["features"].to_index()
@@ -388,8 +402,15 @@ class NWPDataset(WindowDataset):
         super().__init__(records, window_size, window_offset, fps_scaling, transform)
 
         self.base_seed = (
-            base_seed if base_seed is not None else torch.randint(0, 2**32 - 1)
+            base_seed
+            if base_seed is not None
+            else torch.randint(0, 2**31 - 1, (1,)).item()
         )
+
+        # Set random generator for reproducibility
+        # NOTE: This could be overridden by the worker_init_fn to ensure each worker
+        #       has a different seed for data shuffling.
+        self.g = torch.Generator().manual_seed(self.base_seed)
 
     def __iter__(self):
         while True:
@@ -510,8 +531,15 @@ class DMPDataset(WindowDataset):
         super().__init__(records, window_size, window_offset, fps_scaling, transform)
 
         self.base_seed = (
-            base_seed if base_seed is not None else torch.randint(0, 2**32 - 1)
+            base_seed
+            if base_seed is not None
+            else torch.randint(0, 2**31 - 1, (1,)).item()
         )
+
+        # Set random generator for reproducibility
+        # NOTE: This could be overridden by the worker_init_fn to ensure each worker
+        #       has a different seed for data shuffling.
+        self.g = torch.Generator().manual_seed(self.base_seed)
 
         # Extract individuals and their feature indices from the first record
         features = self.records[0].posetracks.coords["features"].to_index()
@@ -626,8 +654,15 @@ class VSPDataset(WindowDataset):
         super().__init__(records, window_size, window_offset, fps_scaling, transform)
 
         self.base_seed = (
-            base_seed if base_seed is not None else torch.randint(0, 2**32 - 1)
+            base_seed
+            if base_seed is not None
+            else torch.randint(0, 2**31 - 1, (1,)).item()
         )
+
+        # Set random generator for reproducibility
+        # NOTE: This could be overridden by the worker_init_fn to ensure each worker
+        #       has a different seed for data shuffling.
+        self.g = torch.Generator().manual_seed(self.base_seed)
 
         self.min_speed = min_speed
         self.max_speed = max_speed

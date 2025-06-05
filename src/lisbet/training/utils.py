@@ -23,7 +23,7 @@ def generate_seeds(seed, task_ids):
         + [f"transform_{task_id}" for task_id in task_ids]
         + [f"dataset_{task_id}" for task_id in task_ids]
     )
-    run_seeds = {sk: rng.integers(low=0, high=2**32 - 1) for sk in seed_keys}
+    run_seeds = {sk: rng.integers(low=0, high=2**31 - 1, dtype=int) for sk in seed_keys}
 
     logging.debug("Generated seeds: %s", run_seeds)
 
@@ -54,3 +54,12 @@ def worker_init_fn(worker_id: int):
     seed = int.from_bytes(hashlib.blake2b(payload, digest_size=8).digest(), "big")
 
     ds.g = torch.Generator().manual_seed(seed)
+
+    if rank == 0:
+        logging.debug(
+            "Worker %d initialized with seed %d (base seed: %d, rank: %d)",
+            worker_id,
+            seed,
+            ds.base_seed,
+            rank,
+        )
