@@ -349,6 +349,54 @@ class NWPDataset(RandomWindowDataset):
        classifier.
     """
 
+    def __init__(
+        self,
+        records,
+        window_size,
+        window_offset=0,
+        fps_scaling=1.0,
+        method="strict",
+        transform=None,
+        base_seed=None,
+    ):
+        """
+        Initialize the dataset.
+
+        Parameters
+        ----------
+        records : list
+            List of records containing the data.
+        window_size : int
+            Size of the window in frames.
+        window_offset : int, optional
+            Offset for the window in frames (default is 0).
+        fps_scaling : float, optional
+            Scaling factor for the frames per second (default is 1.0).
+        method : str, optional
+            Selection method for examples of the negative class. Options are 'simple'
+            (default) to allow negative examples to be selected from any sequence in
+            the dataset, and 'strict' to force data from the same sequence.
+        transform : callable, optional
+            A function/transform to apply to the data (default is None).
+        base_seed : int, optional
+            Base seed for random number generation (default is None, which generates a
+            random seed).
+
+        Returns
+        -------
+        torch.utils.data.IterableDataset
+            The windows dataset from the provided records.
+        """
+        super().__init__(
+            records, window_size, window_offset, fps_scaling, transform, base_seed
+        )
+
+        if method not in ("simple", "strict"):
+            raise ValueError(
+                f"Invalid method '{method}'. Choose either 'simple' or 'strict'."
+            )
+        self.method = method
+
     def __iter__(self):
         while True:
             # Select a random window (global frame index)
@@ -374,19 +422,36 @@ class NWPDataset(RandomWindowDataset):
                 y = np.array(1, ndmin=1, dtype=np.float32)
 
             else:
-                # Select a random window, retry if a true next window was chosen
-                while True:
-                    global_idx_post = torch.randint(
-                        0, self.n_frames, (1,), generator=self.g
-                    ).item()
-                    rec_idx_post, frame_idx_post = self._global_to_local(
-                        global_idx_post
-                    )
+                if self.method == "simple":
+                    # Select a random window, retry if a true next window was chosen
+                    while True:
+                        global_idx_post = torch.randint(
+                            0, self.n_frames, (1,), generator=self.g
+                        ).item()
+                        rec_idx_post, frame_idx_post = self._global_to_local(
+                            global_idx_post
+                        )
 
-                    if rec_idx_post != rec_idx_pre or frame_idx_post < frame_idx_pre:
-                        # Found a valid next window (not from the same sequence or
-                        # preceding the current one)
-                        break
+                        if (
+                            rec_idx_post != rec_idx_pre
+                            or frame_idx_post < frame_idx_pre
+                        ):
+                            # Found a valid next window (not from the same sequence or
+                            # preceding the current one)
+                            break
+
+                elif self.method == "strict":
+                    # Select the next window from the same sequence (past current idx)
+                    rec_idx_post = rec_idx_pre
+                    frame_idx_post = torch.randint(
+                        0, frame_idx_pre + 1, (1,), generator=self.g
+                    ).item()
+
+                else:
+                    raise ValueError(
+                        f"Invalid method '{self.method}'. Choose either 'simple' or "
+                        "'strict'."
+                    )
 
                 y = np.array(0, ndmin=1, dtype=np.float32)
 
