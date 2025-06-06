@@ -347,6 +347,12 @@ class NWPDataset(RandomWindowDataset):
        positional and sequence embedding. In the future we might decide to decouple
        them by running backbone model twice and concatenating x embeddings before the
        classifier.
+    4. In the current implementation, perfectly overlapping pre and post windows could
+       be labeled as both positive and negative examples, depending on the random seed.
+       While this ambiguity is not ideal, it is not expected to significantly affect the
+       model performance, as the number of such cases is very small compared to the
+       total. Furthermore, it simplifies the implementation by allowing us to handle the
+       first and last windows of each record without special cases.
     """
 
     def __init__(
