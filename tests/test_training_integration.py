@@ -1,6 +1,6 @@
 import pytest
 
-from lisbet.datasets.core import fetch_dataset
+from lisbet.hub import fetch_dataset
 from lisbet.training import train
 
 
