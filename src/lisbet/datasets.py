@@ -60,7 +60,7 @@ class WindowDataset(IterableDataset):
             rec_idx, frame_idx = self._global_to_local(global_idx)
 
             # Extract corresponding window
-            x = self._select_and_pad(rec_idx, frame_idx, window_size=self.window_size)
+            x = self._select_and_pad(rec_idx, frame_idx)
 
             if self.transform:
                 x = self.transform(x)
@@ -71,7 +71,7 @@ class WindowDataset(IterableDataset):
                 .argmax("behaviors")
                 .squeeze()
                 .values
-                if hasattr(self.records[rec_idx], "annotations")
+                if self.records[rec_idx].annotations is not None
                 else torch.nan
             )
 
