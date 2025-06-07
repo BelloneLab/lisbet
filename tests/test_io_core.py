@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from lisbet.datasets.core import load_records
+from lisbet.io import load_records
 
 
 @pytest.fixture
