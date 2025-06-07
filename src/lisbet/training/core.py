@@ -425,12 +425,15 @@ def train(
     )
 
     # Determine data shape from first record
-    bp_dim = train_rec[task_ids_list[0]][0].posetracks.sizes["features"]
+    cdim = train_rec[task_ids_list[0]][0].posetracks.coords.sizes
+    bp_dim = cdim["individuals"] * cdim["keypoints"] * cdim["space"]
 
     # Determine input_features list for config consistency
-    input_features = (
-        train_rec[task_ids_list[0]][0].posetracks.coords["features"].values.tolist()
-    )
+    first_record = train_rec[task_ids_list[0]][0]
+    input_features = {
+        dim: first_record.posetracks.coords[dim].values.tolist()
+        for dim in ("individuals", "keypoints", "space")
+    }
 
     if load_backbone_weights is not None:
         logging.warning(

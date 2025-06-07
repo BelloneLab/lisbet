@@ -2,7 +2,7 @@
 
 import numpy as np
 import torch
-from scipy.interpolate import interp1d
+import xarray as xr
 from torch.utils.data import IterableDataset
 
 
@@ -105,49 +105,31 @@ class WindowDataset(IterableDataset):
         if window_size is None:
             window_size = self.window_size
 
-        x_data = self.records[curr_key].posetracks
-        seq_len = x_data.sizes["time"]
+        x = self.records[curr_key].posetracks
 
-        # Compute actual window size
-        act_window_size = int(np.rint(self.fps_scaling * window_size))
-        act_window_offset = int(np.rint(self.fps_scaling * self.window_offset))
-        # logging.debug(
-        #     "Actual window size and offset: (%d, %d)",
-        #     act_window_size,
-        #     act_window_offset,
-        # )
-
-        # Calculate padding
-        past_n = max(act_window_size - curr_loc - act_window_offset - 1, 0)
-        future_n = max(curr_loc + act_window_offset + 1 - seq_len, 0)
-        # logging.debug("Window padding: (%d, %d)", past_n, future_n)
-
-        # Calculate data bounds
-        start_idx = max(curr_loc - act_window_size + act_window_offset + 1, 0)
-        stop_idx = min(curr_loc + act_window_offset + 1, seq_len)
-        # logging.debug("Data bounds: (%d, %d, %d)", start_idx, curr_loc, stop_idx)
-
-        # Pad data with zeros
-        past_pad = np.zeros((past_n, x_data.sizes["features"]))
-        future_pad = np.zeros((future_n, x_data.sizes["features"]))
-        x_data = np.concatenate(
-            [
-                past_pad,
-                x_data["position"].isel(time=slice(start_idx, stop_idx)),
-                future_pad,
-            ],
-            axis=0,
+        # Compute scaled time coordinates
+        scaled_window_size = int(np.rint(self.fps_scaling * window_size))
+        scaled_window_offset = int(np.rint(self.fps_scaling * self.window_offset))
+        scaled_start_idx = curr_loc - scaled_window_size + scaled_window_offset + 1
+        scaled_stop_idx = curr_loc + scaled_window_offset
+        scaled_time_coords = np.linspace(
+            scaled_start_idx, scaled_stop_idx, scaled_window_size, dtype=int
         )
 
-        # assert (
-        #     x_data.shape[0] == window_size
-        # ), f"{seq_len}, {start_idx}, {curr_loc}, {stop_idx}, {past_n}, {future_n}"
+        # Compute interpolation time coordinates
+        interp_time_coords = np.linspace(scaled_start_idx, scaled_stop_idx, window_size)
 
-        # Interpolate frames to get exactly window_size frames
-        f1d = interp1d(np.linspace(0, 1, act_window_size), x_data, axis=0)
-        x_data = f1d(np.linspace(0, 1, window_size))
+        # Compute relative time coordinates
+        rel_time_coords = np.linspace(0, window_size - 1, window_size, dtype=int)
 
-        return x_data
+        # Select, pad (reindex) and interpolate data
+        x = (
+            x.reindex(time=scaled_time_coords, fill_value=0)
+            .interp(time=interp_time_coords)
+            .assign_coords(time=rel_time_coords)
+        )
+
+        return x
 
 
 class RandomWindowDataset(WindowDataset):
@@ -242,49 +224,6 @@ class SMPDataset(RandomWindowDataset):
        decided to leave this edge case unmanaged for the time being.
     """
 
-    def __init__(
-        self,
-        records,
-        window_size,
-        window_offset=0,
-        fps_scaling=1.0,
-        transform=None,
-        base_seed=None,
-    ):
-        """
-        Initialize the dataset.
-
-        Parameters
-        ----------
-        records : list
-            List of records containing the data.
-        window_size : int
-            Size of the window in frames.
-        window_offset : int, optional
-            Offset for the window in frames (default is 0).
-        fps_scaling : float, optional
-            Scaling factor for the frames per second (default is 1.0).
-        transform : callable, optional
-            A function/transform to apply to the data (default is None).
-        base_seed : int, optional
-            Base seed for random number generation (default is None, which generates a
-            random seed).
-
-        Returns
-        -------
-        torch.utils.data.IterableDataset
-            The windows dataset from the provided records.
-        """
-        super().__init__(records, window_size, window_offset, fps_scaling, transform)
-
-        # Extract individuals and their feature indices from the first record
-        features = self.records[0].posetracks.coords["features"].to_index()
-        self.individuals = features.get_level_values("individuals").unique().tolist()
-        self.individual_feature_indices = {
-            ind: np.where(features.get_level_values("individuals") == ind)[0]
-            for ind in self.individuals
-        }
-
     def __iter__(self):
         while True:
             # Select a random window (global frame index)
@@ -294,7 +233,7 @@ class SMPDataset(RandomWindowDataset):
             rec_idx, frame_idx = self._global_to_local(global_idx)
 
             # Extract corresponding window
-            x = self._select_and_pad(rec_idx, frame_idx)
+            x_orig = self._select_and_pad(rec_idx, frame_idx)
 
             if torch.rand((1,), generator=self.g).item() < 0.5:
                 # Swap intruder mouse, retry if a window from the same sequence was
@@ -313,14 +252,23 @@ class SMPDataset(RandomWindowDataset):
                 # Extract swap window
                 x_swap = self._select_and_pad(rec_idx_swap, frame_idx_swap)
 
-                # Swap mice: always swap the second individual's features
-                feature_idx = self.individual_feature_indices[self.individuals[1]]
-                x[..., feature_idx] = x_swap[..., feature_idx]
+                # Swap individuals splitting the group at a random index
+                split_idx = torch.randint(
+                    1, x_orig.coords["individuals"].size, (1,), generator=self.g
+                ).item()
+                x = xr.concat(
+                    [
+                        x_orig.isel(individuals=slice(0, split_idx)),
+                        x_swap.isel(individuals=slice(split_idx, None)),
+                    ],
+                    dim="individuals",
+                )
 
                 y = np.array(1, ndmin=1, dtype=np.float32)
 
             else:
                 # Don't swap
+                x = x_orig
                 y = np.array(0, ndmin=1, dtype=np.float32)
 
             if self.transform:
@@ -469,17 +417,20 @@ class NWPDataset(RandomWindowDataset):
                 y = np.array(0, ndmin=1, dtype=np.float32)
 
             # Extract corresponding window
-            x_pre = self._select_and_pad(
-                rec_idx_pre, frame_idx_pre, np.ceil(self.window_size / 2).astype(int)
-            )
+            x_pre = self._select_and_pad(rec_idx_pre, frame_idx_pre)
 
             # Extract next window
-            x_post = self._select_and_pad(
-                rec_idx_post, frame_idx_post, np.floor(self.window_size / 2).astype(int)
-            )
+            x_post = self._select_and_pad(rec_idx_post, frame_idx_post)
 
-            # Concatenate windows
-            x = np.vstack((x_pre, x_post))
+            # Concatenate pre and post half-windows
+            split_idx = np.ceil(self.window_size / 2).astype(int)
+            x = xr.concat(
+                [
+                    x_pre.isel(time=slice(0, split_idx)),
+                    x_post.isel(time=slice(split_idx, None)),
+                ],
+                dim="time",
+            )
 
             if self.transform:
                 x = self.transform(x)
@@ -545,14 +496,6 @@ class DMPDataset(RandomWindowDataset):
 
         super().__init__(records, window_size, window_offset, fps_scaling, transform)
 
-        # Extract individuals and their feature indices from the first record
-        features = self.records[0].posetracks.coords["features"].to_index()
-        self.individuals = features.get_level_values("individuals").unique().tolist()
-        self.individual_feature_indices = {
-            ind: np.where(features.get_level_values("individuals") == ind)[0]
-            for ind in self.individuals
-        }
-
         self.min_delay = min_delay
         self.max_delay = max_delay
         self.regression = regression
@@ -566,7 +509,7 @@ class DMPDataset(RandomWindowDataset):
             rec_idx, frame_idx = self._global_to_local(global_idx)
 
             # Extract corresponding window
-            x = self._select_and_pad(rec_idx, frame_idx)
+            x_orig = self._select_and_pad(rec_idx, frame_idx)
 
             # Compute shift bounds
             lower_bound = max(frame_idx + self.min_delay, 0)
@@ -578,11 +521,19 @@ class DMPDataset(RandomWindowDataset):
             ).item()
 
             # Get shift data
-            x_delay = self._select_and_pad(rec_idx, frame_idx_delay)
+            x_shft = self._select_and_pad(rec_idx, frame_idx_delay)
 
-            # Apply shifting: only shift the second individual's features
-            feature_idx = self.individual_feature_indices[self.individuals[1]]
-            x[..., feature_idx] = x_delay[..., feature_idx]
+            # Apply shifting by swapping individuals in the group at a random index
+            split_idx = torch.randint(
+                1, x_orig.coords["individuals"].size, (1,), generator=self.g
+            ).item()
+            x = xr.concat(
+                [
+                    x_orig.isel(individuals=slice(0, split_idx)),
+                    x_shft.isel(individuals=slice(split_idx, None)),
+                ],
+                dim="individuals",
+            )
 
             # Compute label
             delta_delay = frame_idx_delay - frame_idx
@@ -591,6 +542,7 @@ class DMPDataset(RandomWindowDataset):
                 # Set rescaled shift distance as label
                 y = (delta_delay - self.min_delay) / (self.max_delay - self.min_delay)
                 y = np.array(y, ndmin=1, dtype=np.float32)
+
             else:
                 y = np.array(delta_delay > 0, ndmin=1, dtype=np.float32)
 
@@ -678,15 +630,21 @@ class VSPDataset(RandomWindowDataset):
             window_size_act = np.round(speed * self.window_size).astype(int)
 
             # Extract corresponding window
-            x_act = self._select_and_pad(rec_idx, frame_idx, window_size_act)
+            x = self._select_and_pad(rec_idx, frame_idx, window_size_act)
 
-            # Interpolate frames to get exactly window_size frames
-            f1d = interp1d(np.linspace(0, 1, window_size_act), x_act, axis=0)
-            x = f1d(np.linspace(0, 1, self.window_size))
+            # Compute interpolation and relative time coordinates
+            interp_time_coords = np.linspace(0, window_size_act - 1, self.window_size)
+            rel_time_coords = np.linspace(
+                0, self.window_size - 1, self.window_size, dtype=int
+            )
+
+            # Interpolate data
+            x = x.interp(time=interp_time_coords).assign_coords(time=rel_time_coords)
 
             if self.regression:
                 # Set relative speed as label
                 y = np.array(rel_speed, ndmin=1, dtype=np.float32)
+
             else:
                 # Set speed threshold as label
                 speed_threshold = (self.min_speed + self.max_speed) / 2.0

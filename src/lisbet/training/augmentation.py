@@ -25,4 +25,6 @@ class Record2Tensor:
 
     def __call__(self, sample):
         """Extract the position variable from a record."""
-        return torch.Tensor(sample["position"].values)
+        return torch.Tensor(
+            sample.stack(features=("individuals", "keypoints", "space")).position.values
+        )

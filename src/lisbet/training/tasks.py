@@ -14,7 +14,7 @@ from torchmetrics.classification import BinaryAccuracy, MulticlassF1Score
 from torchvision import transforms
 
 from lisbet import datasets, modeling
-from lisbet.training.augmentation import RandomXYSwap
+from lisbet.training.augmentation import RandomXYSwap, Record2Tensor
 
 
 @dataclass
@@ -74,9 +74,9 @@ def _configure_classification_task(
 
     # Create data transformers
     train_transform = (
-        transforms.Compose([RandomXYSwap(run_seeds["transform_cfc"]), torch.Tensor])
+        transforms.Compose([RandomXYSwap(run_seeds["transform_cfc"]), Record2Tensor()])
         if data_augmentation
-        else transforms.Compose([torch.Tensor])
+        else transforms.Compose([Record2Tensor()])
     )
 
     # Create dataloaders
@@ -102,7 +102,7 @@ def _configure_classification_task(
 
     # Update dev attributes if dev records are provided
     if dev_rec["cfc"]:
-        dev_transform = transforms.Compose([torch.Tensor])
+        dev_transform = transforms.Compose([Record2Tensor()])
         task.dev_dataset = datasets.RandomWindowDataset(
             records=dev_rec["cfc"],
             window_size=window_size,
@@ -137,10 +137,10 @@ def _configure_selfsupervised_task(
     # Create data transformers
     train_transform = (
         transforms.Compose(
-            [RandomXYSwap(run_seeds[f"transform_{task_id}"]), torch.Tensor]
+            [RandomXYSwap(run_seeds[f"transform_{task_id}"]), Record2Tensor()]
         )
         if data_augmentation
-        else transforms.Compose([torch.Tensor])
+        else transforms.Compose([Record2Tensor()])
     )
 
     # Create dataloaders
@@ -172,7 +172,7 @@ def _configure_selfsupervised_task(
 
     # Update dev attributes if dev records are provided
     if dev_rec[task_id]:
-        dev_transform = transforms.Compose([torch.Tensor])
+        dev_transform = transforms.Compose([Record2Tensor()])
         task.dev_dataset = task_map[task_id](
             records=dev_rec[task_id],
             window_size=window_size,

@@ -200,11 +200,6 @@ def _load_posetracks(seq_path, data_format, data_scale, select_coords, rename_co
             "(data_scale=None) for normalization."
         )
 
-    # Stack variables into a single dimension
-    # NOTE: This is done already here for performance reasons, as stacking in the
-    #       `input_pipeline._select_and_pad` is very inefficient.
-    ds = ds.stack(features=("individuals", "keypoints", "space"))
-
     # NOTE: We keep the whole Dataset object, rather than selecting the "position"
     #       variable, to allow for future extensions (e.g., adding more variables) and
     #       to keep the FPS information.
@@ -349,15 +344,19 @@ def load_records(
     # Sanity check: All posetracks must have the same 'features' coordinate (summary of
     #               individuals/keypoints/space)
     if records:
-        ref_features = records[0].posetracks.coords["features"].values.tolist()
+        ref_coords = {
+            dim: records[0].posetracks.coords[dim].values.tolist()
+            for dim in ("individuals", "keypoints", "space")
+        }
         for rec in records:
-            ds_features = rec.posetracks.coords["features"].values.tolist()
-            if ds_features != ref_features:
-                raise ValueError(
-                    f"Inconsistent posetracks coordinates in record '{rec.id}':\n"
-                    f"Reference features:\n{ref_features}\n"
-                    f"Record features:\n{ds_features}"
-                )
+            for dim in ("individuals", "keypoints", "space"):
+                ds_coords = rec.posetracks.coords[dim].values.tolist()
+                if ds_coords != ref_coords[dim]:
+                    raise ValueError(
+                        f"Inconsistent posetracks coordinates in record '{rec.id}':\n"
+                        f"Reference {dim}:\n{ref_coords[dim]}\n"
+                        f"Record {dim}:\n{ds_coords}"
+                    )
     else:
         raise ValueError(
             "No valid records found in the specified directory. Please check the data "
@@ -404,21 +403,27 @@ def load_multi_records(
         for dataset, datapath in datasources
     ]
 
-    # Sanity check: All posetracks must have the same 'features' coordinate across
-    #               datasets. As consistency within a dataset is already checked, we
-    #               only need to check the first record of each dataset against the
-    #               others.
-    main_features = [
-        recs[0].posetracks.coords["features"].values.tolist() for recs in multi_records
+    # Sanity check: All posetracks must have the same 'individuals', 'keypoints', and
+    #               'space' coordinates across datasets. As consistency within a dataset
+    #               is already checked, we only need to check the first record of each
+    #               dataset against the others.
+    main_coords = [
+        {
+            dim: recs[0].posetracks.coords[dim].values.tolist()
+            for dim in ("individuals", "keypoints", "space")
+        }
+        for recs in multi_records
     ]
-    ref_features = main_features[0]
-    for i, features in enumerate(main_features):
-        if features != ref_features:
-            raise ValueError(
-                f"Inconsistent posetracks coordinates in loaded records, dataset {i}:\n"
-                f"Reference features:\n{ref_features}\n"
-                f"Record features:\n{features}"
-            )
+    ref_coords = main_coords[0]
+    for i, coords in enumerate(main_coords):
+        for dim in ("individuals", "keypoints", "space"):
+            if coords[dim] != ref_coords[dim]:
+                raise ValueError(
+                    "Inconsistent posetracks coordinates in loaded records, dataset "
+                    f"{i}:\n"
+                    f"Reference {dim}:\n{ref_coords[dim]}\n"
+                    f"Record {dim}:\n{coords[dim]}"
+                )
 
     return multi_records
 
