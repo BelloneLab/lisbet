@@ -11,7 +11,7 @@ import yaml
 from sklearn.metrics import classification_report
 
 from . import inference
-from .datasets import load_records
+from .io import load_records
 
 
 def evaluate_model(

@@ -29,13 +29,13 @@ from torchinfo import summary
 from tqdm.auto import trange
 
 from lisbet import modeling
-
-from .io import (
+from lisbet.io import (
     dump_model_config,
     dump_profiling_results,
     dump_weights,
     load_multi_records,
 )
+
 from .preprocessing import split_multi_records
 from .tasks import configure_tasks
 from .utils import generate_seeds, worker_init_fn

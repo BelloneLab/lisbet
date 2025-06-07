@@ -3,7 +3,8 @@ from pathlib import Path
 import pooch
 from huggingface_hub import snapshot_download
 
-from lisbet.datasets import calms21, dump_records, mabe22
+from lisbet.io import dump_records
+from lisbet.io.ext_sources import calms21, mabe22
 
 
 def fetch_dataset(dataset_id, download_path):

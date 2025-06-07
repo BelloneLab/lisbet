@@ -19,8 +19,8 @@ from torchvision import transforms
 from tqdm.auto import tqdm
 
 from . import modeling
-from .data_pipeline import WindowDataset
-from .datasets import load_records
+from .datasets import WindowDataset
+from .io import load_records
 
 
 def run_inference_for_sequence(
