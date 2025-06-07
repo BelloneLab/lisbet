@@ -548,13 +548,13 @@ def main() -> None:
         },
         "fetch_dataset": {
             "description": "Download public dataset from the internet",
-            "module": ".datasets",
+            "module": ".hub",
             "function": "fetch_dataset",
             "configure": configure_fetch_dataset_parser,
         },
         "fetch_model": {
             "description": "Download public model from the internet",
-            "module": ".modeling",
+            "module": ".hub",
             "function": "fetch_model",
             "configure": configure_fetch_model_parser,
         },
