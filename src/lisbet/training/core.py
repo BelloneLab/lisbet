@@ -35,10 +35,9 @@ from lisbet.io import (
     dump_weights,
     load_multi_records,
 )
-
-from .preprocessing import split_multi_records
-from .tasks import configure_tasks
-from .utils import generate_seeds, worker_init_fn
+from lisbet.training.preprocessing import split_multi_records
+from lisbet.training.tasks import configure_tasks
+from lisbet.training.utils import generate_seeds, worker_init_fn
 
 
 def _configure_profiler(steps_multiplier):

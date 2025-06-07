@@ -18,9 +18,9 @@ from rich.table import Table
 from torchvision import transforms
 from tqdm.auto import tqdm
 
-from . import modeling
-from .datasets import WindowDataset
-from .io import load_records
+from lisbet import modeling
+from lisbet.datasets import WindowDataset
+from lisbet.io import load_records
 
 
 def run_inference_for_sequence(

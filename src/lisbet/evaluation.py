@@ -10,8 +10,8 @@ import numpy as np
 import yaml
 from sklearn.metrics import classification_report
 
-from . import inference
-from .io import load_records
+from lisbet import inference
+from lisbet.io import load_records
 
 
 def evaluate_model(

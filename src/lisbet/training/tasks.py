@@ -14,8 +14,7 @@ from torchmetrics.classification import BinaryAccuracy, MulticlassF1Score
 from torchvision import transforms
 
 from lisbet import datasets, modeling
-
-from .augmentation import RandomXYSwap
+from lisbet.training.augmentation import RandomXYSwap
 
 
 @dataclass

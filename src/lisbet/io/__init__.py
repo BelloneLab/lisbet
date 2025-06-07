@@ -1,4 +1,5 @@
-from .core import (
+from lisbet.io.core import (
+    Record,
     dump_model_config,
     dump_profiling_results,
     dump_records,
@@ -8,6 +9,7 @@ from .core import (
 )
 
 __all__ = [
+    "Record",
     "dump_model_config",
     "dump_profiling_results",
     "dump_records",

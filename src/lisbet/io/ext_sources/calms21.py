@@ -10,7 +10,7 @@ import xarray as xr
 from movement.io import load_poses
 from tqdm.auto import trange
 
-from .core import Record
+from lisbet.io import Record
 
 
 def _preprocess_calms21(raw_data):

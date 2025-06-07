@@ -27,7 +27,7 @@ import xarray as xr
 from movement.io import load_poses
 from tqdm.auto import tqdm
 
-from .core import Record
+from lisbet.io import Record
 
 
 def _preprocess_mabe22_sequence(raw_positions):

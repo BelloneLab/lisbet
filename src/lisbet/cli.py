@@ -176,6 +176,9 @@ def lazy_load_handler(
     module_path: str, function_name: str, args: dict[str, Any]
 ) -> None:
     """Dynamically import and call a command handler."""
+    # Always use absolute imports from the lisbet root package
+    if not module_path.startswith("lisbet"):
+        module_path = f"lisbet{module_path}"
     module = importlib.import_module(module_path)
     handler = getattr(module, function_name)
 
@@ -598,7 +601,7 @@ def main() -> None:
     # Get command configuration
     cmd_config = commands[args.command]
 
-    # Execute command with lazy loading
+    # Execute command with lazy loading (always absolute import from lisbet root)
     lazy_load_handler(
         module_path=f"lisbet{cmd_config['module']}",
         function_name=cmd_config["function"],
