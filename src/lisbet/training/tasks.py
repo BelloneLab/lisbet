@@ -13,7 +13,7 @@ from torchmetrics.aggregation import MeanMetric
 from torchmetrics.classification import BinaryAccuracy, MulticlassF1Score
 from torchvision import transforms
 
-from lisbet import data_pipeline, modeling
+from lisbet import datasets, modeling
 
 from .augmentation import RandomXYSwap
 
@@ -81,7 +81,7 @@ def _configure_classification_task(
     )
 
     # Create dataloaders
-    train_dataset = data_pipeline.RandomWindowDataset(
+    train_dataset = datasets.RandomWindowDataset(
         records=train_rec["cfc"],
         window_size=window_size,
         window_offset=window_offset,
@@ -104,7 +104,7 @@ def _configure_classification_task(
     # Update dev attributes if dev records are provided
     if dev_rec["cfc"]:
         dev_transform = transforms.Compose([torch.Tensor])
-        task.dev_dataset = data_pipeline.RandomWindowDataset(
+        task.dev_dataset = datasets.RandomWindowDataset(
             records=dev_rec["cfc"],
             window_size=window_size,
             window_offset=window_offset,
@@ -146,10 +146,10 @@ def _configure_selfsupervised_task(
 
     # Create dataloaders
     task_map = {
-        "nwp": data_pipeline.NWPDataset,
-        "smp": data_pipeline.SMPDataset,
-        "dmp": data_pipeline.DMPDataset,
-        "vsp": data_pipeline.VSPDataset,
+        "nwp": datasets.NWPDataset,
+        "smp": datasets.SMPDataset,
+        "dmp": datasets.DMPDataset,
+        "vsp": datasets.VSPDataset,
     }
     train_dataset = task_map[task_id](
         records=train_rec[task_id],
