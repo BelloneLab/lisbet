@@ -4,7 +4,7 @@ import yaml
 from sklearn.metrics import classification_report
 
 import lisbet.evaluation as evaluation
-from lisbet.datasets.core import Record
+from lisbet.io import Record
 
 
 @pytest.fixture
