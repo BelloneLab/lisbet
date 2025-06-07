@@ -26,7 +26,6 @@ class Task:
     train_dataset: Dataset
     train_loss: Metric
     train_score: Metric
-    resample: bool
     dev_dataset: Optional[Dataset] = None
     dev_loss: Optional[Metric] = None
     dev_score: Optional[Metric] = None
@@ -97,7 +96,6 @@ def _configure_classification_task(
         train_dataset=train_dataset,
         train_loss=MeanMetric().to(device),
         train_score=MulticlassF1Score(num_classes, average="macro").to(device),
-        resample=False,
     )
 
     # Update dev attributes if dev records are provided
@@ -167,7 +165,6 @@ def _configure_selfsupervised_task(
         train_dataset=train_dataset,
         train_loss=MeanMetric().to(device),
         train_score=BinaryAccuracy().to(device),
-        resample=True,
     )
 
     # Update dev attributes if dev records are provided

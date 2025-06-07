@@ -7,9 +7,8 @@ import xarray as xr
 import yaml
 from sklearn.utils._param_validation import InvalidParameterError
 
-from lisbet.datasets.core import Record
+from lisbet.io import Record, dump_model_config, dump_weights, load_multi_records
 from lisbet.training.core import _compute_epoch_logs, _configure_dataloaders
-from lisbet.training.io import dump_model_config, dump_weights, load_multi_records
 from lisbet.training.preprocessing import split_multi_records
 from lisbet.training.tasks import Task
 from lisbet.training.utils import generate_seeds
@@ -211,14 +210,14 @@ def test_generate_seeds_deterministic_and_override():
 def test_configure_dataloaders_min_samples(monkeypatch):
     # Mock a minimal dataset and dataloader
     class DummyDataset:
+        def __init__(self):
+            self.n_frames = 10  # Add n_frames attribute
+
         def __len__(self):
             return 10
 
-        def resample_dataset(self):
-            self.resampled = True
-
     class DummyDataLoader:
-        def __init__(self, dataset, batch_size, sampler, num_workers, pin_memory):
+        def __init__(self, dataset, batch_size, *args, **kwargs):
             self.dataset = dataset
             self.batch_size = batch_size
 
@@ -229,7 +228,7 @@ def test_configure_dataloaders_min_samples(monkeypatch):
             self.num_samples = num_samples
 
     monkeypatch.setattr("torch.utils.data.RandomSampler", DummySampler)
-    monkeypatch.setattr("torch.utils.data.DataLoader", DummyDataLoader)
+    monkeypatch.setattr("lisbet.training.core.DataLoader", DummyDataLoader)
 
     # Use Task dataclass with train_dataset attribute
     task1 = Task(
@@ -240,7 +239,6 @@ def test_configure_dataloaders_min_samples(monkeypatch):
         train_dataset=DummyDataset(),
         train_loss=None,
         train_score=None,
-        resample=False,
     )
     task2 = Task(
         task_id="dummy2",
@@ -250,15 +248,13 @@ def test_configure_dataloaders_min_samples(monkeypatch):
         train_dataset=DummyDataset(),
         train_loss=None,
         train_score=None,
-        resample=True,
     )
     tasks = [task1, task2]
-    dataloaders = _configure_dataloaders(
-        tasks, "train", batch_size=4, group_sample=None, pin_memory=False
+    dataloaders, n_batches = _configure_dataloaders(
+        tasks, "train", batch_size=4, sample_ratio=None, pin_memory=False
     )
     assert len(dataloaders) == 2
     assert isinstance(dataloaders[0], DummyDataLoader)
-    assert hasattr(tasks[1].train_dataset, "resampled")
 
 
 def test_compute_epoch_logs_basic():
@@ -284,7 +280,6 @@ def test_compute_epoch_logs_basic():
         train_dataset=None,
         train_loss=DummyMetric(),
         train_score=DummyMetric(),
-        resample=False,
     )
     task2 = Task(
         task_id="nwp",
@@ -294,7 +289,6 @@ def test_compute_epoch_logs_basic():
         train_dataset=None,
         train_loss=DummyMetric(),
         train_score=DummyMetric(),
-        resample=False,
     )
     tasks = [task1, task2]
     logs = _compute_epoch_logs("train", tasks)
@@ -331,7 +325,6 @@ def test_save_model_config(tmp_path):
         train_dataset=None,
         train_loss=None,
         train_score=None,
-        resample=False,
     )
     task2 = Task(
         task_id="nwp",
@@ -341,7 +334,6 @@ def test_save_model_config(tmp_path):
         train_dataset=None,
         train_loss=None,
         train_score=None,
-        resample=False,
     )
     tasks = [task1, task2]
     input_features = [["mouse", "nose", "x"], ["mouse", "nose", "y"]]
