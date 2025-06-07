@@ -105,7 +105,7 @@ class WindowDataset(IterableDataset):
         if window_size is None:
             window_size = self.window_size
 
-        x_data = self.records[curr_key]["posetracks"]
+        x_data = self.records[curr_key].posetracks
         seq_len = x_data.sizes["time"]
 
         # Compute actual window size
