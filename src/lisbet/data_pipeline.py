@@ -94,12 +94,19 @@ class WindowDataset(IterableDataset):
         The selected window is returned as a new numpy array to avoid unintentional
         changes to the records in the window dictionary (i.e. by the swap mouse
         prediction task).
+
+        Notes
+        -----
+        1. The interpolation is done here, and not directly on the records, to avoid
+           resampling at the original fps before retuning the output during inference.
+           Furthermore, even during training, it is useful to only consider the original
+           frames, rather than artificially inflating or deflating the dataset.
         """
         if window_size is None:
             window_size = self.window_size
 
-        x_data = self.records[curr_key].posetracks
-        seq_len = x_data.sizes["time"]
+        x = self.records[curr_key].posetracks
+        seq_len = x.sizes["time"]
 
         # Compute actual window size
         act_window_size = int(np.rint(self.fps_scaling * window_size))
@@ -121,14 +128,10 @@ class WindowDataset(IterableDataset):
         # logging.debug("Data bounds: (%d, %d, %d)", start_idx, curr_loc, stop_idx)
 
         # Pad data with zeros
-        past_pad = np.zeros((past_n, x_data.sizes["features"]))
-        future_pad = np.zeros((future_n, x_data.sizes["features"]))
-        x_data = np.concatenate(
-            [
-                past_pad,
-                x_data["position"].isel(time=slice(start_idx, stop_idx)),
-                future_pad,
-            ],
+        past_pad = np.zeros((past_n, x.sizes["features"]))
+        future_pad = np.zeros((future_n, x.sizes["features"]))
+        x = np.concatenate(
+            [past_pad, x["position"].isel(time=slice(start_idx, stop_idx)), future_pad],
             axis=0,
         )
 
@@ -137,10 +140,10 @@ class WindowDataset(IterableDataset):
         # ), f"{seq_len}, {start_idx}, {curr_loc}, {stop_idx}, {past_n}, {future_n}"
 
         # Interpolate frames to get exactly window_size frames
-        f1d = interp1d(np.linspace(0, 1, act_window_size), x_data, axis=0)
-        x_data = f1d(np.linspace(0, 1, window_size))
+        f1d = interp1d(np.linspace(0, 1, act_window_size), x, axis=0)
+        x = f1d(np.linspace(0, 1, window_size))
 
-        return x_data
+        return x
 
 
 class RandomWindowDataset(WindowDataset):
