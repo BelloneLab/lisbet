@@ -1,6 +1,7 @@
 """Augmentation module for transforming samples in a dataset."""
 
 import numpy as np
+import torch
 
 
 class RandomXYSwap:
@@ -17,3 +18,11 @@ class RandomXYSwap:
             else sample
         )
         return transformed_sample
+
+
+class Record2Tensor:
+    """Extract the position variable from a record"""
+
+    def __call__(self, sample):
+        """Extract the position variable from a record."""
+        return torch.Tensor(sample["position"].values)
