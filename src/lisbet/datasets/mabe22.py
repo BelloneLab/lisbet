@@ -65,9 +65,10 @@ def _preprocess_mabe22_sequence(raw_positions):
             "tail_middle",
             "tail_tip",
         ],
-        fps=30,
+        fps=None,  # Force movement to load time coordinate in frame numbers
         source_software="HRnetKumarLab",
     )
+    posetracks.attrs["fps"] = 30  # Useful for interpolation and visualization
     posetracks.attrs["image_size_px"] = [850, 850]
 
     return posetracks

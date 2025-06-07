@@ -37,9 +37,10 @@ def _preprocess_calms21(raw_data):
                 "right_hip",
                 "tail",
             ],
-            fps=30,
+            fps=None,  # Force movement to load time coordinate in frame numbers
             source_software="MARS",
         )
+        posetracks.attrs["fps"] = 30  # Useful for interpolation and visualization
         posetracks.attrs["image_size_px"] = [1024, 570]
 
         # Create record data structure
