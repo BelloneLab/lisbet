@@ -90,8 +90,15 @@ def _load_posetracks(seq_path, data_format, data_scale, select_coords, rename_co
     # NOTE: There should be only one dataset per sequence, but we keep this for
     #       compatibility with multiple single-individual datasets
     ds = xr.concat(dss, dim="individuals")
-
     logging.debug("Individuals: %s", ds["individuals"].values)
+
+    # Replace nan values with 0.0 in the 'position' variable
+    # NOTE: This is a workaround for the issue with NaN values in the 'position' during
+    #       training, which can cause issues with the model. In the future, we could try
+    #       to handle NaN values more gracefully, e.g., by interpolating them or using a
+    #       more sophisticated imputation method in movement.
+    ds["position"] = ds["position"].fillna(0.0)
+    logging.debug("Replaced NaN values in 'position' with 0.0")
 
     # Drop confidence variable, if present
     # NOTE: This variable is currently not needed in LISBET, but it may become useful in
