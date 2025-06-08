@@ -40,6 +40,13 @@ class WindowDataset(IterableDataset):
         """
         super().__init__()
 
+        if not records:
+            raise ValueError("No records provided to the dataset.")
+        if window_size <= 1:
+            raise ValueError(
+                "window_size must be greater than 1 to avoid degenerate interpolation."
+            )
+
         self.records = records
         self.n_records = len(records)
 
@@ -104,6 +111,10 @@ class WindowDataset(IterableDataset):
         """
         if window_size is None:
             window_size = self.window_size
+        if window_size <= 1:
+            raise ValueError(
+                "window_size must be greater than 1 to avoid degenerate interpolation."
+            )
 
         x = self.records[curr_key].posetracks
 
@@ -170,6 +181,9 @@ class RandomWindowDataset(WindowDataset):
         """
         super().__init__(records, window_size, window_offset, fps_scaling, transform)
 
+        if self.n_frames < 1:
+            raise ValueError("No frames available for sampling in the dataset.")
+
         self.base_seed = (
             base_seed
             if base_seed is not None
@@ -225,6 +239,10 @@ class SMPDataset(RandomWindowDataset):
     """
 
     def __iter__(self):
+        if self.records[0].posetracks["individuals"].size < 2:
+            raise ValueError(
+                "SMPDataset requires at least 2 individuals in each record."
+            )
         while True:
             # Select a random window (global frame index)
             global_idx = torch.randint(0, self.n_frames, (1,), generator=self.g).item()
@@ -501,6 +519,10 @@ class DMPDataset(RandomWindowDataset):
         self.regression = regression
 
     def __iter__(self):
+        if self.records[0].posetracks["individuals"].size < 2:
+            raise ValueError(
+                "DMPDataset requires at least 2 individuals in each record."
+            )
         while True:
             # Select a random window (global frame index)
             global_idx = torch.randint(0, self.n_frames, (1,), generator=self.g).item()
