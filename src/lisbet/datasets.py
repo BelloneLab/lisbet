@@ -79,7 +79,7 @@ class WindowDataset(IterableDataset):
                 .squeeze()
                 .values
                 if self.records[rec_idx].annotations is not None
-                else torch.nan
+                else torch.nan  # Should it be None instead?
             )
 
             yield x, y
