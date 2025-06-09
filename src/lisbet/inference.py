@@ -21,7 +21,7 @@ from tqdm.auto import tqdm
 from lisbet import modeling
 from lisbet.datasets import WindowDataset
 from lisbet.io import load_records
-from lisbet.transforms_extra import Record2Tensor
+from lisbet.transforms_extra import PoseToTensor
 
 
 def run_inference_for_sequence(
@@ -73,7 +73,7 @@ def run_inference_for_sequence(
         window_size=window_size,
         window_offset=window_offset,
         fps_scaling=fps_scaling,
-        transform=transforms.Compose([Record2Tensor()]),
+        transform=transforms.Compose([PoseToTensor()]),
     )
 
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size)

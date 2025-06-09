@@ -20,7 +20,7 @@ class RandomXYSwap:
         return transformed_sample
 
 
-class Record2Tensor:
+class PoseToTensor:
     """Extract the position variable from a record"""
 
     def __call__(self, sample):
