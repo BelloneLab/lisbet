@@ -19,7 +19,12 @@ from lisbet.datasets import (
 
 @pytest.fixture
 def dummy_record(request):
-    """Create a dummy record with a variable number of individuals."""
+    """
+    Create a dummy record with a variable number of individuals.
+
+    The number of individuals can be set via request.param (default: 1).
+    This makes the fixture robust for tests requiring arbitrary numbers of individuals.
+    """
     n_individuals = getattr(request, "param", 1)
     arr = (
         np.arange(10 * n_individuals * 2 * 2)
@@ -62,7 +67,9 @@ def dummy_records(dummy_record):
     for i in range(3):
         rec = copy.deepcopy(dummy_record)
         rec.id = f"exp{i}"
-        rec.posetracks["position"].values += i * 100
+        rec.posetracks["position"].values += (
+            i * 100 * dummy_record.posetracks.sizes["individuals"]
+        )
         rec.annotations.target_cls.values[:] = 0
         rec.annotations.target_cls.values[:, i % 2, 0] = 1
         recs.append(rec)
@@ -241,7 +248,7 @@ def test_randomwindowdataset_all_windows_sampled(dummy_records):
 def test_smpdataset_labels_and_swap(dummy_records):
     """
     Test SMPDataset: raises ValueError for 1 individual, otherwise yields correct swap
-    labels.
+    labels and verifies that swapped windows contain individuals from different records.
     """
     n_inds = dummy_records[0].posetracks["individuals"].size
     if n_inds < 2:
@@ -250,12 +257,54 @@ def test_smpdataset_labels_and_swap(dummy_records):
             next(iter(ds))
     else:
         ds = SMPDataset(dummy_records, window_size=3, base_seed=123)
-        for _ in range(10):
+        # Gather all original individual data for comparison
+        orig_individuals = [rec.posetracks["position"].values for rec in dummy_records]
+        for _ in range(20):
             x, y = next(iter(ds))
             assert y in (0, 1)
-            # If swapped, individuals should be from different records
+            # If swapped, check split logic: all individuals before split from one
+            # record, all after from another
             if y == 1:
-                pass
+                # Shape: (window_size, n_individuals, ...)
+                window_data = x["position"].values
+                n_inds = window_data.shape[1]
+                # For each individual, find which record it matches
+                matches = []
+                for ind in range(n_inds):
+                    win = window_data[:, ind]
+                    match_idx = None
+                    for rec_idx, orig in enumerate(orig_individuals):
+                        orig_ind_data = orig[:, ind]
+                        for start in range(orig_ind_data.shape[0] - win.shape[0] + 1):
+                            if np.allclose(
+                                win, orig_ind_data[start : start + win.shape[0]]
+                            ):
+                                match_idx = rec_idx
+                                break
+                        if match_idx is not None:
+                            break
+                    matches.append(match_idx)
+                # Now, matches should look like: [A, A, ..., B, B, ...] with A != B
+                # Find the split index
+                first = matches[0]
+                split_idx = 0
+                for i, m in enumerate(matches):
+                    if m != first:
+                        split_idx = i
+                        break
+                else:
+                    # All from same record (should not happen for y==1)
+                    split_idx = n_inds
+                base = matches[:split_idx]
+                swap = matches[split_idx:]
+                assert len(base) > 0 and len(swap) > 0, "Swap did not occur"
+                assert all(b == base[0] for b in base), (
+                    "Base individuals not from same record"
+                )
+                assert all(s == swap[0] for s in swap), (
+                    "Swapped individuals not from same record"
+                )
+                assert base[0] != swap[0], "Base and swap records are the same"
 
 
 @pytest.mark.parametrize("dummy_record", [1, 2, 3], indirect=True)
