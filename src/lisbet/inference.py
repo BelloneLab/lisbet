@@ -285,7 +285,7 @@ def _classification_forward(model: torch.nn.Module, data: torch.Tensor) -> torch
     torch.Tensor
         One-hot encoded class predictions.
     """
-    output = model(data, "cfc")
+    output = model(data, "multiclass")
     return torch.nn.functional.one_hot(
         torch.argmax(output, dim=1), num_classes=output.shape[1]
     )

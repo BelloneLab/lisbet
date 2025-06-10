@@ -286,7 +286,7 @@ def train(
     run_id: Optional[str] = None,
     data_augmentation: bool = False,
     # Task parameters
-    task_ids: str = "cfc",
+    task_ids: str = "multiclass",
     task_data: Optional[str] = None,
     # Model architecture
     num_layers: int = 4,
@@ -354,10 +354,10 @@ def train(
         ID of the run. If None, a timestamp is used.
     data_augmentation : bool, default=False
         Enable data augmentation.
-    task_ids : str, default="cfc"
+    task_ids : str, default="multiclass"
         Task ID or comma-separated list of task IDs.
     task_data : str or None, optional
-        Task-to-data mapping, e.g., "cfc:[0],nwp:[0,1]".
+        Task-to-data mapping, e.g., "multiclass:[0],order:[0,1]".
     num_layers : int, default=4
         Number of transformer layers.
     emb_dim : int, default=32

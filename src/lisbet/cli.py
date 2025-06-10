@@ -203,30 +203,30 @@ def configure_train_model_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--task_ids",
         type=str,
-        default="cfc",
+        default="multiclass",
         help=textwrap.dedent(
             """\
             Task ID or comma-separated list of task IDS.
 
             Valid (supervised) tasks are:
-              - cfc: multi-Class Frame Classification
-              - lfc: multi-Label Frame Classification
+              - multiclass: Multi-Class Frame Classification
+              - multilabel: Multi-Label Frame Classification
 
             Valid (self-supervised) tasks are:
-              - nwp: Next Window Prediction
-              - smp: Swap Mouse Prediction
-              - vsp: Video Speed Prediction
-              - dmp: Delay Mouse Prediction
+              - cons: Group Consistency Classification
+              - order: Temporal Order Classification
+              - shift: Temporal Shift Classification
+              - warp: Temporal Warp Classification
 
             Example:
-              nwp,smp
+              order,cons
             """
         ),
     )
     parser.add_argument(
         "--task_data",
         type=str,
-        help="i.e., cfc:[0],nwp:[0,1]",
+        help="i.e., multiclass:[0],order:[0,1]",
     )
     parser.add_argument("--seed", default=1991, type=int, help="Base RNG seed")
     parser.add_argument("--run_id", type=str, help="ID of the run")

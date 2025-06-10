@@ -162,7 +162,7 @@ def test_splits_raises(dummy_dataset):
             multi_records=multi_records,
             dev_ratio=1.0,
             dev_seed=42,
-            task_ids=["cfc"],
+            task_ids=["multiclass"],
             task_data=None,
         )
     assert "test_size" in str(excinfo.value)
@@ -185,24 +185,24 @@ def test_valid_two_way_split(large_dummy_dataset):
         multi_records=multi_records,
         dev_ratio=0.2,
         dev_seed=42,
-        task_ids=["cfc"],
+        task_ids=["multiclass"],
         task_data=None,
     )
-    # Should have 4 train, 1 dev for task 'cfc'
-    assert "cfc" in train_rec
-    assert "cfc" in dev_rec
-    assert len(train_rec["cfc"]) == 4
-    assert len(dev_rec["cfc"]) == 1
+    # Should have 4 train, 1 dev for task 'multiclass'
+    assert "multiclass" in train_rec
+    assert "multiclass" in dev_rec
+    assert len(train_rec["multiclass"]) == 4
+    assert len(dev_rec["multiclass"]) == 1
     # All record IDs should be unique across splits
-    train_ids = set(rec.id for rec in train_rec["cfc"])
-    dev_ids = set(rec.id for rec in dev_rec["cfc"])
+    train_ids = set(rec.id for rec in train_rec["multiclass"])
+    dev_ids = set(rec.id for rec in dev_rec["multiclass"])
     assert train_ids.isdisjoint(dev_ids)
     assert len(train_ids | dev_ids) == 5
 
 
 def test_generate_seeds_deterministic_and_override():
-    seeds1 = generate_seeds(123, ["cfc", "nwp"])
-    seeds2 = generate_seeds(123, ["cfc", "nwp"])
+    seeds1 = generate_seeds(123, ["multiclass", "order"])
+    seeds2 = generate_seeds(123, ["multiclass", "order"])
     assert seeds1 == seeds2
     assert "torch" in seeds1
 
@@ -273,7 +273,7 @@ def test_compute_epoch_logs_basic():
             pass
 
     task1 = Task(
-        task_id="cfc",
+        task_id="multiclass",
         head=None,
         out_dim=1,
         loss_function=None,
@@ -282,7 +282,7 @@ def test_compute_epoch_logs_basic():
         train_score=DummyMetric(),
     )
     task2 = Task(
-        task_id="nwp",
+        task_id="order",
         head=None,
         out_dim=1,
         loss_function=None,
@@ -292,13 +292,13 @@ def test_compute_epoch_logs_basic():
     )
     tasks = [task1, task2]
     logs = _compute_epoch_logs("train", tasks)
-    assert "cfc_train_score" in logs
-    assert "nwp_train_score" in logs
-    assert "cfc_train_loss" in logs
-    assert "nwp_train_loss" in logs
-    assert np.isclose(logs["cfc_train_loss"], 0.5)
-    assert np.isclose(logs["nwp_train_loss"], 0.5)
-    assert 0.0 <= logs["cfc_train_score"] <= 1.0
+    assert "multiclass_train_score" in logs
+    assert "order_train_score" in logs
+    assert "multiclass_train_loss" in logs
+    assert "order_train_loss" in logs
+    assert np.isclose(logs["multiclass_train_loss"], 0.5)
+    assert np.isclose(logs["order_train_loss"], 0.5)
+    assert 0.0 <= logs["multiclass_train_score"] <= 1.0
 
 
 def test_save_and_load_weights(tmp_path):
@@ -318,7 +318,7 @@ def test_save_model_config(tmp_path):
     run_id = "testrun"
     # Use Task dataclass for tasks
     task1 = Task(
-        task_id="cfc",
+        task_id="multiclass",
         head=None,
         out_dim=3,
         loss_function=None,
@@ -327,7 +327,7 @@ def test_save_model_config(tmp_path):
         train_score=None,
     )
     task2 = Task(
-        task_id="nwp",
+        task_id="order",
         head=None,
         out_dim=1,
         loss_function=None,

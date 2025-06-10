@@ -43,14 +43,14 @@ def _configure_classification_task(
     device,
 ):
     """Internal helper. Configures the classification task."""
-    if train_rec["cfc"][0].annotations is None:
+    if train_rec["multiclass"][0].annotations is None:
         raise RuntimeError("The provided dataset does not contain annotations.")
 
     # Find number of behaviors in the training set
     labels = np.concatenate(
         [
             rec.annotations.target_cls.argmax("behaviors").squeeze().values
-            for rec in train_rec["cfc"]
+            for rec in train_rec["multiclass"]
         ]
     )
     classes = np.unique(labels)
@@ -73,23 +73,25 @@ def _configure_classification_task(
 
     # Create data transformers
     train_transform = (
-        transforms.Compose([RandomXYSwap(run_seeds["transform_cfc"]), PoseToTensor()])
+        transforms.Compose(
+            [RandomXYSwap(run_seeds["transform_multiclass"]), PoseToTensor()]
+        )
         if data_augmentation
         else transforms.Compose([PoseToTensor()])
     )
 
     # Create dataloaders
     train_dataset = datasets.RandomWindowDataset(
-        records=train_rec["cfc"],
+        records=train_rec["multiclass"],
         window_size=window_size,
         window_offset=window_offset,
         transform=train_transform,
-        base_seed=run_seeds["dataset_cfc"],
+        base_seed=run_seeds["dataset_multiclass"],
     )
 
     # Create task as dataclass with default dev attributes
     task = Task(
-        task_id="cfc",
+        task_id="multiclass",
         head=head,
         out_dim=num_classes,
         loss_function=torch.nn.CrossEntropyLoss(weight=class_weight.to(device)),
@@ -99,14 +101,14 @@ def _configure_classification_task(
     )
 
     # Update dev attributes if dev records are provided
-    if dev_rec["cfc"]:
+    if dev_rec["multiclass"]:
         dev_transform = transforms.Compose([PoseToTensor()])
         task.dev_dataset = datasets.RandomWindowDataset(
-            records=dev_rec["cfc"],
+            records=dev_rec["multiclass"],
             window_size=window_size,
             window_offset=window_offset,
             transform=dev_transform,
-            base_seed=run_seeds["dataset_cfc"],
+            base_seed=run_seeds["dataset_multiclass"],
         )
         task.dev_loss = MeanMetric().to(device)
         task.dev_score = MulticlassF1Score(num_classes, average="macro").to(device)
@@ -143,10 +145,10 @@ def _configure_selfsupervised_task(
 
     # Create dataloaders
     task_map = {
-        "nwp": datasets.NWPDataset,
-        "smp": datasets.SMPDataset,
-        "dmp": datasets.DMPDataset,
-        "vsp": datasets.VSPDataset,
+        "cons": datasets.GroupConsistencyDataset,
+        "order": datasets.TemporalOrderDataset,
+        "shift": datasets.TemporalShiftDataset,
+        "warp": datasets.TemporalWarpDataset,
     }
     train_dataset = task_map[task_id](
         records=train_rec[task_id],
@@ -198,7 +200,7 @@ def configure_tasks(
     """Internal helper. Configures all tasks."""
     tasks = []
     for task_id in task_ids:
-        if task_id == "cfc":
+        if task_id == "multiclass":
             tasks.append(
                 _configure_classification_task(
                     train_rec,
@@ -212,11 +214,11 @@ def configure_tasks(
                     device,
                 )
             )
-        elif task_id == "lfc":
+        elif task_id == "multilabel":
             raise NotImplementedError(
                 "Multi-Label Frame Classification task is not implemented yet."
             )
-        elif task_id in ("nwp", "smp", "vsp", "dmp"):
+        elif task_id in ("cons", "order", "shift", "warp"):
             tasks.append(
                 _configure_selfsupervised_task(
                     task_id,

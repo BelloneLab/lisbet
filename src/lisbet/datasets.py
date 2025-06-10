@@ -221,27 +221,42 @@ class RandomWindowDataset(WindowDataset):
             yield x, y
 
 
-class SMPDataset(RandomWindowDataset):
+class GroupConsistencyDataset(RandomWindowDataset):
     """
-    Dataset generator for the swap mouse prediction task.
+    Dataset generator for the Group Consistency (consistency) self-supervised task.
 
-    In the swap mouse prediction task, the tracking data of the second animal might be
-    replaced with those from another record (i.e. swapping the mouse). The classifier
-    has to predict whether the swap happened or not. To solve the task, the classifier
-    has access to a window of frames in the past, future or both, depending on the
+    This dataset is designed to train models to determine whether a group of tracked
+    individuals in a window of frames originates from the same recording (i.e., is
+    "consistent") or is artificially constructed by combining individuals from
+    different records. For each sample, a window of frames is selected from a record.
+    With 50% probability, the group is left unchanged (label 0, "consistent"), and with
+    50% probability, the group is "remixed" by replacing the tracking data of one or
+    more individuals (randomly chosen split) with those from another record at a
+    randomly selected window (label 1, "inconsistent"). The classifier must predict
+    whether the group is consistent or not, based solely on the pose data in the
+    window.
+
+    The window can include frames from the past, future, or both, depending on the
     window_offset parameter.
 
     Notes
     -----
-    1. Padding is not necessarily consistent for swapped windows. However, considering
-       the small number of padded windows compared to the total number of windows, we
-       decided to leave this edge case unmanaged for the time being.
+    1. The swap is performed by splitting the group of individuals at a random index,
+       concatenating individuals from the original and swap windows. This allows for
+       arbitrary group sizes and compositions.
+    2. Padding may not be consistent for swapped windows, especially near the sequence
+       boundaries. However, since the number of padded windows is small compared to the
+       total, this edge case is not explicitly handled.
+    3. This dataset requires that each record contains at least two individuals.
+    4. The label is 0 for consistent (all individuals from the same record) and 1 for
+       inconsistent (group contains individuals from different records).
     """
 
     def __iter__(self):
         if self.records[0].posetracks["individuals"].size < 2:
             raise ValueError(
-                "SMPDataset requires at least 2 individuals in each record."
+                "GroupConsistencyDataset requires at least 2 individuals in each "
+                "record."
             )
         while True:
             # Select a random window (global frame index)
@@ -254,8 +269,7 @@ class SMPDataset(RandomWindowDataset):
             x_orig = self._select_and_pad(rec_idx, frame_idx)
 
             if torch.rand((1,), generator=self.g).item() < 0.5:
-                # Swap intruder mouse, retry if a window from the same sequence was
-                # chosen
+                # Swap group, retry if a window from the same sequence was chosen
                 while True:
                     global_idx_swap = torch.randint(
                         0, self.n_frames, (1,), generator=self.g
@@ -295,37 +309,45 @@ class SMPDataset(RandomWindowDataset):
             yield x, y
 
 
-class NWPDataset(RandomWindowDataset):
+class TemporalOrderDataset(RandomWindowDataset):
     """
-    Dataset generator for the next window prediction task.
+    Dataset generator for the temporal order prediction task.
 
-    In the next window prediction task, two windows are presented to the classifier. The
-    goal of the task is to identify whether the second window comes from the same record
-    of the first one or not. In the former case, the second window is randomly chosen to
-    follow the first with a random delay (i.e. the first window "causes" the second). To
-    solve the task, the classifier has access to a window of frames in the past, future
-    or both, depending on the window_offset parameter.
+    This dataset generates samples for a self-supervised temporal order prediction task.
+    Each sample consists of a window created by concatenating the first half of one
+    window ("pre") and the second half of another window ("post"). The classifier must
+    predict whether the "post" half-window comes after the "pre" half-window in the same
+    recording (label 1, "ordered") or not (label 0, "unordered"). In positive samples,
+    the "post" window is randomly chosen to follow the "pre" window within the same
+    record, possibly with a random delay (including zero). In negative samples, the
+    "post" window is either from a different record or, depending on the method, from an
+    earlier time in the same record.
+
+    The window_offset parameter determines whether the windows are centered, causal, or
+    anticausal with respect to the reference frame.
 
     Notes
     -----
-    1. Padding is not necessarily consistent for pre and post windows. However,
-       considering the small number of padded windows compared to the total number of
-       windows, we decided to leave this edge case unmanaged for the time being.
-    2. The last window_size windows of each record will have overlapping post windows in
-       the "same record" case. We could have skipped these windows, but we decided to
-       allow them as they are not many, compared to the total number of windows, and
-       they could even be beneficial to learn cause-effect relationships.
-    3. For simplicity we concatenate the current and next window. This choice helps
-       managing multiple tasks during training, but it leads to learning a joint
-       positional and sequence embedding. In the future we might decide to decouple
-       them by running backbone model twice and concatenating x embeddings before the
+    1. Padding may differ between pre and post windows, especially near sequence
+       boundaries. This is not explicitly handled, as the number of such cases is small
+       relative to the dataset size.
+    2. The last window_size frames of each record may produce overlapping pre and post
+       windows in the positive ("ordered") case. These are included for simplicity and
+       may help the model learn temporal relationships.
+    3. The concatenation of pre and post windows along the time dimension is used for
+       simplicity and compatibility with multi-task training. This approach encourages
+       the model to learn both positional and sequence embeddings jointly. In the
+       future, embeddings could be computed separately and concatenated before the
        classifier.
-    4. In the current implementation, perfectly overlapping pre and post windows could
-       be labeled as both positive and negative examples, depending on the random seed.
-       While this ambiguity is not ideal, it is not expected to significantly affect the
-       model performance, as the number of such cases is very small compared to the
-       total. Furthermore, it simplifies the implementation by allowing us to handle the
-       first and last windows of each record without special cases.
+    4. In rare cases, pre and post windows may overlap perfectly and be labeled as both
+       positive and negative, depending on random sampling. This ambiguity is tolerated
+       for simplicity, as it is infrequent and unlikely to significantly impact model
+       performance.
+    5. The 'method' parameter controls how negative samples are selected:
+       - 'simple': post windows can come from any record or from earlier times in the
+         same record.
+       - 'strict': post windows are always from the same record but must precede the
+         pre window in time.
     """
 
     def __init__(
@@ -352,9 +374,10 @@ class NWPDataset(RandomWindowDataset):
         fps_scaling : float, optional
             Scaling factor for the frames per second (default is 1.0).
         method : str, optional
-            Selection method for examples of the negative class. Options are 'simple'
-            (default) to allow negative examples to be selected from any sequence in
-            the dataset, and 'strict' to force data from the same sequence.
+            Selection method for negative class examples. Options are 'simple'
+            (post window can be from any record or earlier in the same record) and
+            'strict' (post window is always from the same record but must precede the
+            pre window).
         transform : callable, optional
             A function/transform to apply to the data (default is None).
         base_seed : int, optional
@@ -387,10 +410,8 @@ class NWPDataset(RandomWindowDataset):
             rec_idx_pre, frame_idx_pre = self._global_to_local(global_idx_pre)
 
             if torch.rand((1,), generator=self.g).item() < 0.5:
-                # Select a valid next window from same sequence (past current idx)
-                # OBS: In order to generate a valid next window for every frame,
-                #      including the last one of the sequence, we have to allow
-                #      zero-distance windows
+                # Positive sample: post window follows pre window in the same record
+                # Allow zero-distance windows for every frame, including the last
                 global_idx_post = torch.randint(
                     frame_idx_pre, self.lengths[rec_idx_pre], (1,), generator=self.g
                 ).item()
@@ -402,7 +423,8 @@ class NWPDataset(RandomWindowDataset):
 
             else:
                 if self.method == "simple":
-                    # Select a random window, retry if a true next window was chosen
+                    # Negative sample: post window from any record or earlier in same
+                    # record
                     while True:
                         global_idx_post = torch.randint(
                             0, self.n_frames, (1,), generator=self.g
@@ -415,12 +437,12 @@ class NWPDataset(RandomWindowDataset):
                             rec_idx_post != rec_idx_pre
                             or frame_idx_post < frame_idx_pre
                         ):
-                            # Found a valid next window (not from the same sequence or
-                            # preceding the current one)
+                            # Valid negative: different record or earlier in same record
                             break
 
                 elif self.method == "strict":
-                    # Select the next window from the same sequence (past current idx)
+                    # Negative sample: post window from same record, but before pre
+                    # window
                     rec_idx_post = rec_idx_pre
                     frame_idx_post = torch.randint(
                         0, frame_idx_pre + 1, (1,), generator=self.g
@@ -456,16 +478,44 @@ class NWPDataset(RandomWindowDataset):
             yield x, y
 
 
-class DMPDataset(RandomWindowDataset):
+class TemporalShiftDataset(RandomWindowDataset):
     """
-    Dataset generator for the delay mouse prediction task.
+    Dataset generator for the temporal shift prediction or regression task.
 
-    In the delay mouse prediction/regression task, the intruder mouse trajectory is
-    shifted in time by a random delay in the interval (-60, +60) frames. The goal of the
-    prediction task is to assess whether the delay was negative or positive, while the
-    goal of the regression task is to estimate by how many frames the trajectory was
-    shifted. To solve the task, the classifier has access to a window of frames in the
-    past, future or both, depending on the window_offset parameter.
+    This dataset creates samples in which the trajectory of the second individual in a
+    group is shifted in time by a random delay within a specified interval (default: -60
+    to +60 frames). For each sample, a window of frames is selected from a record.
+    The first individual's data is taken from this window, while the second individual's
+    data is taken from a window at the same location but shifted by a random delay
+    (positive or negative) within the allowed range. The two individuals' data are then
+    concatenated along the 'individuals' dimension, forming a group window where one
+    individual's trajectory is temporally shifted relative to the other.
+
+    The task can be formulated as either:
+        - Binary classification: predict whether the shift is positive (future) or
+          negative (past).
+        - Regression: estimate the normalized value of the temporal shift.
+
+    The classifier has access to a window of frames (past, future, or both) as
+    determined by the window_offset parameter.
+
+    Notes
+    -----
+    1. This dataset requires that each record contains at least two individuals.
+    2. The shift is always performed within the same record; the shifted window is
+       sampled such that it stays within the valid frame range.
+    3. The split between individuals is randomized for each sample, so the shifted
+       trajectory may correspond to any individual in the group except the first.
+    4. The label is either:
+        - For regression: the normalized shift value in [0, 1], where 0 corresponds to
+          min_delay and 1 to max_delay.
+        - For classification: 1 if the shift is positive (delta_delay > 0), 0
+          otherwise.
+    5. Padding may occur if the shifted window extends beyond the sequence boundaries,
+       but this is handled by the window extraction logic and is rare for typical
+       settings.
+    6. The window_offset parameter determines the temporal alignment of the window
+       relative to the reference frame.
     """
 
     def __init__(
@@ -521,7 +571,8 @@ class DMPDataset(RandomWindowDataset):
     def __iter__(self):
         if self.records[0].posetracks["individuals"].size < 2:
             raise ValueError(
-                "DMPDataset requires at least 2 individuals in each record."
+                "GroupConsistencyDataset requires at least 2 individuals in each "
+                "record."
             )
         while True:
             # Select a random window (global frame index)
@@ -574,16 +625,43 @@ class DMPDataset(RandomWindowDataset):
             yield x, y
 
 
-class VSPDataset(RandomWindowDataset):
+class TemporalWarpDataset(RandomWindowDataset):
     """
-    Dataset generator for the variable speed prediction task.
+    Dataset generator for the temporal warp prediction or regression task.
 
-    In the video speed prediction/regression task, the pace of the window is multiplied
-    by a random factor in the interval (0.5, 1.5). The goal of the prediction task is to
-    assess whether the video speed was reduced or increased , while the  goal of the
-    regression task is to estimate the pace factor. To solve the task, the classifier
-    has access to a window of frames in the past, future or both, depending on the
-    window_offset parameter.
+    This dataset generates windows in which the temporal pace (speed) of the window is
+    artificially warped by resampling the frames at a random speed factor within a
+    specified range (default: 0.5 to 1.5). For each sample, a window is extracted from
+    a random location in a record, and the time axis is rescaled by a randomly chosen
+    speed factor. The resulting window is then interpolated back to the original window
+    size, so the model always receives a fixed number of frames, but the underlying
+    motion is either sped up or slowed down.
+
+    The task can be formulated as either:
+        - Binary classification: predict whether the window was sped up (speed >
+          midpoint) or slowed down (speed < midpoint).
+        - Regression: estimate the normalized speed factor used to warp the window.
+
+    The classifier has access to a window of frames (past, future, or both) as
+    determined by the window_offset parameter.
+
+    Notes
+    -----
+    1. The speed factor is sampled uniformly at random from [min_speed, max_speed] for
+       each sample.
+    2. The actual window is extracted by resampling the original frames at the chosen
+       speed, then interpolated to the fixed window size.
+    3. For regression, the label is the normalized speed factor in [0, 1], where 0
+       corresponds to min_speed and 1 to max_speed.
+    4. For classification, the label is 1 if the speed is above the midpoint
+       ((min_speed + max_speed) / 2), and 0 otherwise.
+    5. Padding may occur if the resampled window extends beyond the sequence
+       boundaries, but this is handled by the window extraction logic and is rare for
+       typical settings.
+    6. The window_offset parameter determines the temporal alignment of the window
+       relative to the reference frame.
+    7. This task encourages the model to learn temporal dynamics and invariance to
+       speed changes in the input data.
     """
 
     def __init__(

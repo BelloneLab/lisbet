@@ -6,11 +6,11 @@ import torch
 import xarray as xr
 
 from lisbet.datasets import (
-    DMPDataset,
-    NWPDataset,
+    GroupConsistencyDataset,
     RandomWindowDataset,
-    SMPDataset,
-    VSPDataset,
+    TemporalOrderDataset,
+    TemporalShiftDataset,
+    TemporalWarpDataset,
     WindowDataset,
 )
 
@@ -241,22 +241,23 @@ def test_randomwindowdataset_all_windows_sampled(dummy_records):
     assert len(seen) >= 10
 
 
-# --- SMPDataset ---
+# --- GroupConsistencyDataset ---
 
 
 @pytest.mark.parametrize("dummy_record", [1, 2, 3], indirect=True)
-def test_smpdataset_labels_and_swap(dummy_records):
+def test_groupconsistencyswap_labels_and_swap(dummy_records):
     """
-    Test SMPDataset: raises ValueError for 1 individual, otherwise yields correct swap
-    labels and verifies that swapped windows contain individuals from different records.
+    Test GroupConsistencyDataset: raises ValueError for 1 individual, otherwise yields
+    correct swap labels and verifies that swapped windows contain individuals from
+    different records.
     """
     n_inds = dummy_records[0].posetracks["individuals"].size
     if n_inds < 2:
         with pytest.raises(ValueError):
-            ds = SMPDataset(dummy_records, window_size=3, base_seed=123)
+            ds = GroupConsistencyDataset(dummy_records, window_size=3, base_seed=123)
             next(iter(ds))
     else:
-        ds = SMPDataset(dummy_records, window_size=3, base_seed=123)
+        ds = GroupConsistencyDataset(dummy_records, window_size=3, base_seed=123)
         # Gather all original individual data for comparison
         orig_individuals = [rec.posetracks["position"].values for rec in dummy_records]
         for _ in range(20):
@@ -308,18 +309,18 @@ def test_smpdataset_labels_and_swap(dummy_records):
 
 
 @pytest.mark.parametrize("dummy_record", [1, 2, 3], indirect=True)
-def test_dmpdataset_immutability(dummy_records):
+def test_temporalshiftdataset_immutability(dummy_records):
     """
-    Test DMPDataset: raises ValueError for 1 individual, otherwise does not modify
-    original records.
+    Test TemporalShiftDataset: raises ValueError for 1 individual, otherwise does not
+    modify original records.
     """
     n_inds = dummy_records[0].posetracks["individuals"].size
     if n_inds < 2:
         with pytest.raises(ValueError):
-            ds = DMPDataset(dummy_records, window_size=3)
+            ds = TemporalShiftDataset(dummy_records, window_size=3)
             next(iter(ds))
     else:
-        ds = DMPDataset(dummy_records, window_size=3)
+        ds = TemporalShiftDataset(dummy_records, window_size=3)
         orig = copy.deepcopy(dummy_records[0].posetracks["position"].values)
         next(iter(ds))
         np.testing.assert_array_equal(
@@ -331,188 +332,201 @@ def test_dmpdataset_immutability(dummy_records):
 
 
 @pytest.mark.parametrize("dummy_record", [1, 2, 3], indirect=True)
-def test_smpdataset_fps_scaling(dummy_records):
+def test_groupconsistencyswap_fps_scaling(dummy_records):
     """
-    Test SMPDataset fps_scaling: raises ValueError for 1 individual, otherwise yields
-    correct window shape.
+    Test GroupConsistencyDataset fps_scaling: raises ValueError for 1 individual,
+    otherwise yields correct window shape.
     """
     n_inds = dummy_records[0].posetracks["individuals"].size
     if n_inds < 2:
         with pytest.raises(ValueError):
-            ds = SMPDataset(dummy_records, window_size=4, fps_scaling=0.5)
+            ds = GroupConsistencyDataset(dummy_records, window_size=4, fps_scaling=0.5)
             next(iter(ds))
     else:
-        ds = SMPDataset(dummy_records, window_size=4, fps_scaling=0.5)
+        ds = GroupConsistencyDataset(dummy_records, window_size=4, fps_scaling=0.5)
         x, y = next(iter(ds))
         assert x["position"].shape[0] == 4
 
 
 @pytest.mark.parametrize("dummy_record", [1, 2, 3], indirect=True)
-def test_smpdataset_no_swap_within_same_record(dummy_records):
+def test_groupconsistencyswap_no_swap_within_same_record(dummy_records):
     """
-    Test SMPDataset: raises ValueError for 1 individual, otherwise runs swap logic
-    without error.
+    Test GroupConsistencyDataset: raises ValueError for 1 individual, otherwise runs
+    swap logic without error.
     """
     n_inds = dummy_records[0].posetracks["individuals"].size
     if n_inds < 2:
         with pytest.raises(ValueError):
-            ds = SMPDataset(dummy_records, window_size=3, base_seed=42)
+            ds = GroupConsistencyDataset(dummy_records, window_size=3, base_seed=42)
             next(iter(ds))
     else:
-        ds = SMPDataset(dummy_records, window_size=3, base_seed=42)
+        ds = GroupConsistencyDataset(dummy_records, window_size=3, base_seed=42)
         for _ in range(20):
             x, y = next(iter(ds))
             # If swapped, ensure swap is not from same record
             # Not directly testable unless we expose more info, but at least run
 
 
-# --- NWPDataset ---
+# --- TemporalOrderDataset ---
 
 
-def test_nwpdataset_positive_and_negative(dummy_records):
+def test_temporalorderdataset_positive_and_negative(dummy_records):
     """
-    Test that NWPDataset yields both positive and negative samples and correct window
-    shape.
+    Test that TemporalOrderDataset yields both positive and negative samples and
+    correct window shape.
     """
-    ds = NWPDataset(dummy_records, window_size=4, method="simple", base_seed=42)
+    ds = TemporalOrderDataset(
+        dummy_records, window_size=4, method="simple", base_seed=42
+    )
     for _ in range(10):
         x, y = next(iter(ds))
         assert y in (0, 1)
         assert x["position"].shape[0] == 4
 
 
-def test_nwpdataset_strict_method(dummy_records):
+def test_temporalorderdataset_strict_method(dummy_records):
     """
-    Test that NWPDataset with 'strict' method yields valid samples and correct window
-    shape.
+    Test that TemporalOrderDataset with 'strict' method yields valid samples and
+    correct window shape.
     """
-    ds = NWPDataset(dummy_records, window_size=4, method="strict", base_seed=42)
+    ds = TemporalOrderDataset(
+        dummy_records, window_size=4, method="strict", base_seed=42
+    )
     for _ in range(10):
         x, y = next(iter(ds))
         assert y in (0, 1)
         assert x["position"].shape[0] == 4
 
 
-def test_nwpdataset_immutability(dummy_records):
-    """Test that NWPDataset does not modify the original records."""
-    ds = NWPDataset(dummy_records, window_size=3)
+def test_temporalorderdataset_immutability(dummy_records):
+    """Test that TemporalOrderDataset does not modify the original records."""
+    ds = TemporalOrderDataset(dummy_records, window_size=3)
     orig = copy.deepcopy(dummy_records[0].posetracks["position"].values)
     next(iter(ds))
     np.testing.assert_array_equal(dummy_records[0].posetracks["position"].values, orig)
 
 
-def test_nwpdataset_fps_scaling(dummy_records):
-    """Test that NWPDataset handles fps_scaling correctly."""
-    ds = NWPDataset(dummy_records, window_size=4, fps_scaling=0.5)
+def test_temporalorderdataset_fps_scaling(dummy_records):
+    """Test that TemporalOrderDataset handles fps_scaling correctly."""
+    ds = TemporalOrderDataset(dummy_records, window_size=4, fps_scaling=0.5)
     x, y = next(iter(ds))
     assert x["position"].shape[0] == 4
 
 
-def test_nwpdataset_concat_shape(dummy_records):
+def test_temporalorderdataset_concat_shape(dummy_records):
     """
-    Test that NWPDataset concatenates pre and post windows correctly for the given
-    window size.
+    Test that TemporalOrderDataset concatenates pre and post windows correctly for the
+    given window size.
     """
-    ds = NWPDataset(dummy_records, window_size=6, method="simple", base_seed=42)
+    ds = TemporalOrderDataset(
+        dummy_records, window_size=6, method="simple", base_seed=42
+    )
     x, y = next(iter(ds))
     assert x["position"].shape[0] == 6
 
 
-# --- DMPDataset ---
+# --- TemporalShiftDataset ---
 
 
 @pytest.mark.parametrize("dummy_record", [1, 2, 3], indirect=True)
-def test_dmpdataset_classification_and_regression(dummy_records):
+def test_temporalshiftdataset_classification_and_regression(dummy_records):
     """
-    Test DMPDataset: raises ValueError for 1 individual, otherwise yields correct
-    classification/regression labels.
+    Test TemporalShiftDataset: raises ValueError for 1 individual, otherwise yields
+    correct classification/regression labels.
     """
     n_inds = dummy_records[0].posetracks["individuals"].size
     if n_inds < 2:
         with pytest.raises(ValueError):
-            ds = DMPDataset(dummy_records, window_size=4, regression=False)
+            ds = TemporalShiftDataset(dummy_records, window_size=4, regression=False)
             next(iter(ds))
     else:
-        ds = DMPDataset(dummy_records, window_size=4, regression=False)
+        ds = TemporalShiftDataset(dummy_records, window_size=4, regression=False)
         for _ in range(5):
             x, y = next(iter(ds))
             assert y in (0, 1)
-        ds_reg = DMPDataset(dummy_records, window_size=4, regression=True)
+        ds_reg = TemporalShiftDataset(dummy_records, window_size=4, regression=True)
         for _ in range(5):
             x, y = next(iter(ds_reg))
             assert 0.0 <= y <= 1.0
 
 
 @pytest.mark.parametrize("dummy_record", [1, 2, 3], indirect=True)
-def test_dmpdataset_fps_scaling(dummy_records):
+def test_temporalshiftdataset_fps_scaling(dummy_records):
     """
-    Test DMPDataset fps_scaling: raises ValueError for 1 individual, otherwise yields
-    correct window shape.
+    Test TemporalShiftDataset fps_scaling: raises ValueError for 1 individual,
+    otherwise yields correct window shape.
     """
     n_inds = dummy_records[0].posetracks["individuals"].size
     if n_inds < 2:
         with pytest.raises(ValueError):
-            ds = DMPDataset(dummy_records, window_size=4, fps_scaling=0.5)
+            ds = TemporalShiftDataset(dummy_records, window_size=4, fps_scaling=0.5)
             next(iter(ds))
     else:
-        ds = DMPDataset(dummy_records, window_size=4, fps_scaling=0.5)
+        ds = TemporalShiftDataset(dummy_records, window_size=4, fps_scaling=0.5)
         x, y = next(iter(ds))
         assert x["position"].shape[0] == 4
 
 
 @pytest.mark.parametrize("dummy_record", [1, 2, 3], indirect=True)
-def test_dmpdataset_delay_edge_cases(dummy_records):
+def test_temporalshiftdataset_delay_edge_cases(dummy_records):
     """
-    Test DMPDataset delay edge cases: raises ValueError for 1 individual, otherwise
-    yields correct window shape.
+    Test TemporalShiftDataset delay edge cases: raises ValueError for 1 individual,
+    otherwise yields correct window shape.
     """
     n_inds = dummy_records[0].posetracks["individuals"].size
     if n_inds < 2:
         with pytest.raises(ValueError):
-            ds = DMPDataset(dummy_records, window_size=4, min_delay=-2, max_delay=2)
+            ds = TemporalShiftDataset(
+                dummy_records, window_size=4, min_delay=-2, max_delay=2
+            )
             next(iter(ds))
     else:
-        ds = DMPDataset(dummy_records, window_size=4, min_delay=-2, max_delay=2)
+        ds = TemporalShiftDataset(
+            dummy_records, window_size=4, min_delay=-2, max_delay=2
+        )
         for _ in range(5):
             x, y = next(iter(ds))
             assert x["position"].shape[0] == 4
 
 
-# --- VSPDataset ---
+# --- TemporalWarpDataset ---
 
 
-def test_vspdataset_classification_and_regression(dummy_records):
-    """Test that VSPDataset yields correct classification and regression labels."""
-    ds = VSPDataset(dummy_records, window_size=4, regression=False)
+def test_temporalwarpdataset_classification_and_regression(dummy_records):
+    """
+    Test that TemporalWarpDataset yields correct classification and regression labels.
+    """
+    ds = TemporalWarpDataset(dummy_records, window_size=4, regression=False)
     for _ in range(5):
         x, y = next(iter(ds))
         assert y in (0, 1)
-    ds_reg = VSPDataset(dummy_records, window_size=4, regression=True)
+    ds_reg = TemporalWarpDataset(dummy_records, window_size=4, regression=True)
     for _ in range(5):
         x, y = next(iter(ds_reg))
         assert 0.0 <= y <= 1.0
 
 
-def test_vspdataset_immutability(dummy_records):
-    """Test that VSPDataset does not modify the original records."""
-    ds = VSPDataset(dummy_records, window_size=3)
+def test_temporalwarpdataset_immutability(dummy_records):
+    """Test that TemporalWarpDataset does not modify the original records."""
+    ds = TemporalWarpDataset(dummy_records, window_size=3)
     orig = copy.deepcopy(dummy_records[0].posetracks["position"].values)
     next(iter(ds))
     np.testing.assert_array_equal(dummy_records[0].posetracks["position"].values, orig)
 
 
-def test_vspdataset_fps_scaling(dummy_records):
-    """Test that VSPDataset handles fps_scaling correctly."""
-    ds = VSPDataset(dummy_records, window_size=4, fps_scaling=0.5)
+def test_temporalwarpdataset_fps_scaling(dummy_records):
+    """Test that TemporalWarpDataset handles fps_scaling correctly."""
+    ds = TemporalWarpDataset(dummy_records, window_size=4, fps_scaling=0.5)
     x, y = next(iter(ds))
     assert x["position"].shape[0] == 4
 
 
-def test_vspdataset_speed_range(dummy_records):
+def test_temporalwarpdataset_speed_range(dummy_records):
     """
-    Test that VSPDataset handles different min_speed and max_speed values correctly.
+    Test that TemporalWarpDataset handles different min_speed and max_speed values
+    correctly.
     """
-    ds = VSPDataset(dummy_records, window_size=4, min_speed=0.7, max_speed=1.3)
+    ds = TemporalWarpDataset(dummy_records, window_size=4, min_speed=0.7, max_speed=1.3)
     for _ in range(5):
         x, y = next(iter(ds))
         assert x["position"].shape[0] == 4
@@ -614,29 +628,31 @@ def test_empty_records_randomwindow():
         next(iter(ds))
 
 
-def test_empty_records_smp():
-    """Test that SMPDataset raises ValueError if no records are provided."""
+def test_empty_records_groupconsistency():
+    """
+    Test that GroupConsistencyDataset raises ValueError if no records are provided.
+    """
     with pytest.raises(ValueError):
-        ds = SMPDataset([], window_size=3)
+        ds = GroupConsistencyDataset([], window_size=3)
         next(iter(ds))
 
 
-def test_empty_records_nwp():
-    """Test that NWPDataset raises ValueError if no records are provided."""
+def test_empty_records_temporalorder():
+    """Test that TemporalOrderDataset raises ValueError if no records are provided."""
     with pytest.raises(ValueError):
-        ds = NWPDataset([], window_size=3)
+        ds = TemporalOrderDataset([], window_size=3)
         next(iter(ds))
 
 
-def test_empty_records_dmp():
-    """Test that DMPDataset raises ValueError if no records are provided."""
+def test_empty_records_temporalshift():
+    """Test that TemporalShiftDataset raises ValueError if no records are provided."""
     with pytest.raises(ValueError):
-        ds = DMPDataset([], window_size=3)
+        ds = TemporalShiftDataset([], window_size=3)
         next(iter(ds))
 
 
-def test_empty_records_vsp():
-    """Test that VSPDataset raises ValueError if no records are provided."""
+def test_empty_records_temporalwarp():
+    """Test that TemporalWarpDataset raises ValueError if no records are provided."""
     with pytest.raises(ValueError):
-        ds = VSPDataset([], window_size=3)
+        ds = TemporalWarpDataset([], window_size=3)
         next(iter(ds))
