@@ -156,4 +156,72 @@ class PoseToVideo:
 
 
 class VideoToTensor:
-    pass
+    """
+    Transform a video (NumPy RGB array) into a PyTorch tensor suitable for video models.
+
+    Converts (frames, H, W, 3) RGB uint8/float arrays to (frames, 3, H, W) float
+    tensors, with optional normalization and mean/std normalization.
+
+    Parameters
+    ----------
+    normalize : bool, optional
+        If True, scale pixel values to [0, 1] (default: True).
+    mean : tuple or list or np.ndarray or torch.Tensor, optional
+        Per-channel mean for normalization (applied after scaling to [0, 1]).
+        If None, no mean subtraction is performed.
+    std : tuple or list or np.ndarray or torch.Tensor, optional
+        Per-channel std for normalization (applied after mean subtraction).
+        If None, no std division is performed.
+    dtype : torch.dtype, optional
+        Output tensor dtype (default: torch.float32).
+    """
+
+    def __init__(self, normalize=True, mean=None, std=None, dtype=torch.float32):
+        self.normalize = normalize
+        self.mean = mean
+        self.std = std
+        self.dtype = dtype
+
+    def __call__(self, video):
+        """
+        Parameters
+        ----------
+        video : np.ndarray
+            Video as (frames, H, W, 3) RGB, dtype uint8 or float.
+
+        Returns
+        -------
+        torch.Tensor
+            Video as (frames, 3, H, W), dtype as specified.
+        """
+        if not isinstance(video, np.ndarray):
+            raise TypeError("Input video must be a numpy ndarray.")
+        if video.ndim != 4 or video.shape[-1] != 3:
+            raise ValueError("Input video must have shape (frames, H, W, 3) [RGB].")
+
+        # If uint8, convert to float32 for normalization
+        if video.dtype == np.uint8:
+            video = video.astype(np.float32)
+            if self.normalize:
+                video = video / 255.0
+        elif self.normalize:
+            # Assume already float, but ensure in [0, 1]
+            video = np.clip(video, 0.0, 1.0)
+
+        # Rearrange to (frames, 3, H, W)
+        video = np.transpose(video, (0, 3, 1, 2))
+        tensor = torch.from_numpy(video).type(self.dtype)
+
+        # Optional mean/std normalization (per channel)
+        if self.mean is not None:
+            mean = torch.as_tensor(self.mean, dtype=self.dtype, device=tensor.device)
+            if mean.ndim == 1:
+                mean = mean.view(1, 3, 1, 1)
+            tensor = tensor - mean
+        if self.std is not None:
+            std = torch.as_tensor(self.std, dtype=self.dtype, device=tensor.device)
+            if std.ndim == 1:
+                std = std.view(1, 3, 1, 1)
+            tensor = tensor / std
+
+        return tensor
