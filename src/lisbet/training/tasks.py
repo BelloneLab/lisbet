@@ -31,7 +31,7 @@ class Task:
     dev_score: Optional[Metric] = None
 
 
-def _configure_classification_task(
+def _configure_supervised_task(
     train_rec,
     dev_rec,
     window_size,
@@ -202,7 +202,7 @@ def configure_tasks(
     for task_id in task_ids:
         if task_id == "multiclass":
             tasks.append(
-                _configure_classification_task(
+                _configure_supervised_task(
                     train_rec,
                     dev_rec,
                     window_size,
