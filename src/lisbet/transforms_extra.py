@@ -43,36 +43,61 @@ class PoseToVideo:
         self,
         body_specs: dict[str, BodySpecs],
         image_size=(256, 256),
-        background_color=(0, 0, 0),
+        bg_color="black",
     ):
         """
-        Args:
-            body_specs: dict mapping individual_name (or species) to BodySpecs
-            image_size: (width, height) of output frames
-            background_color: BGR tuple or color name/hex (default black)
+        Fast OpenCV-based transformation using BodySpecs for each individual.
+
+        Parameters
+        ----------
+        body_specs : dict of str to BodySpecs
+            Dictionary mapping individual_name (or species) to BodySpecs.
+        image_size : tuple of int, optional
+            (width, height) of output frames. Default is (256, 256).
+        bg_color : tuple or str, optional
+            BGR tuple or color name/hex for background color (default is black).
         """
         self.body_specs = body_specs
-        self.image_size = image_size
-        self.background_color = color_to_bgr(background_color)
+        self.width, self.height = image_size
+        self.bg_color = color_to_bgr(bg_color)
 
-    def __call__(self, posetracks):
-        frames = np.stack(
-            [self.render_frame(posetracks, t) for t in range(posetracks.sizes["time"])],
-            axis=0,
-        )
+    def __call__(self, posetracks, show_progress=False):
+        frames = [
+            self.render_frame(posetracks, t) for t in range(posetracks.sizes["time"])
+        ]
 
-        # Convert to PyTorch tensor
-        frames = torch.Tensor(frames)
+        frames = np.stack(frames, axis=0)
+
+        # # Convert to PyTorch tensor
+        # frames = torch.Tensor(frames)
 
         return frames
 
-    def render_frame(self, posetracks, t):
-        H, W = self.image_size[1], self.image_size[0]
-        frame = np.full((H, W, 3), self.background_color, dtype=np.uint8)
+    def render_frame(self, posetracks, t_idx):
+        """
+        Render a single frame of pose tracks as a BGR image.
+
+        Parameters
+        ----------
+        posetracks : xarray.Dataset
+            The pose tracks dataset containing keypoints and individuals.
+            Must have a "position" variable with dimensions ("time", "individuals",
+            "keypoints", "space").
+        t_idx : int
+            The time index of the frame to render.
+
+        Returns
+        -------
+        frame : numpy.ndarray
+            The rendered frame as a (height, width, 3) uint8 RGB image.
+        """
+        frame = np.full((self.height, self.width, 3), self.bg_color, dtype=np.uint8)
         pos = (
-            posetracks["position"].isel(time=t).values
-        )  # (space, keypoints, individuals)
-        pos = np.transpose(pos, (2, 1, 0))  # (individuals, keypoints, 2)
+            posetracks["position"]
+            .isel(time=t_idx)
+            .transpose("individuals", "keypoints", "space")
+            .values
+        )
         keypoints = list(posetracks.keypoints.values)
         individuals = list(posetracks.individuals.values)
         for ind_idx, ind_name in enumerate(individuals):
@@ -86,7 +111,7 @@ class PoseToVideo:
                     if kp in keypoints:
                         idx = keypoints.index(kp)
                         x, y = pos[ind_idx, idx, :]
-                        pts.append([int(x * W), int(y * H)])
+                        pts.append([int(x * self.width), int(y * self.height)])
                 if len(pts) >= 3:
                     pts_np = np.array([pts], dtype=np.int32)
                     overlay = frame.copy()
@@ -105,8 +130,8 @@ class PoseToVideo:
                     color = color_to_bgr(spec.skeleton_color)
                     cv2.line(
                         frame,
-                        (int(x1 * W), int(y1 * H)),
-                        (int(x2 * W), int(y2 * H)),
+                        (int(x1 * self.width), int(y1 * self.height)),
+                        (int(x2 * self.width), int(y2 * self.height)),
                         color=color,
                         thickness=spec.skeleton_thickness,
                         lineType=cv2.LINE_AA,
@@ -117,17 +142,18 @@ class PoseToVideo:
                 x, y = pos[ind_idx, k, :]
                 cv2.circle(
                     frame,
-                    (int(x * W), int(y * H)),
+                    (int(x * self.width), int(y * self.height)),
                     spec.keypoint_size,
                     color=color,
                     thickness=-1,
                     lineType=cv2.LINE_AA,
                 )
+
+        # Convert a BGR frame (OpenCV) to RGB
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
         return frame
 
-    @staticmethod
-    def cv2_to_rgb(frame_bgr):
-        """
-        Convert a BGR frame (OpenCV) to RGB for matplotlib plotting.
-        """
-        return cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+
+class VideoToTensor:
+    pass

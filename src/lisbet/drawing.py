@@ -1,4 +1,8 @@
+"""Drawing specifications for LISBET."""
+
 from dataclasses import dataclass, field
+
+import matplotlib.colors as mcolors
 
 
 @dataclass
@@ -47,8 +51,6 @@ def color_to_bgr(color):
     Convert a matplotlib color name or hex string to a BGR tuple for OpenCV.
     Accepts color names (e.g. 'red'), hex strings (e.g. '#ff0000'), or BGR tuples.
     """
-    import matplotlib.colors as mcolors
-
     if (
         isinstance(color, tuple)
         and len(color) == 3
