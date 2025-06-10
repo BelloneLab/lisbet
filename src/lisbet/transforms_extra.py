@@ -24,12 +24,52 @@ class RandomXYSwap:
 
 
 class PoseToTensor:
-    """Extract the position variable from a record"""
+    """
+    Convert the 'position' variable from a posetracks xarray.Dataset into a PyTorch
+    tensor.
 
-    def __call__(self, sample):
-        """Extract the position variable from a record."""
-        return torch.Tensor(
-            sample.stack(features=("individuals", "keypoints", "space")).position.values
+    This transformation stacks the 'individuals', 'keypoints', and 'space' dimensions
+    into a single 'features' dimension, resulting in a tensor of shape
+    (time, features), where features = individuals * keypoints * space.
+
+    Parameters
+    ----------
+    None
+
+    Methods
+    -------
+    __call__(posetracks)
+        Stack the 'individuals', 'keypoints', and 'space' dimensions of the 'position'
+        variable and return as a PyTorch tensor.
+
+    Examples
+    --------
+    >>> tensor = PoseToTensor()(posetracks)
+    >>> tensor.shape
+    torch.Size([time, features])
+    """
+
+    def __call__(self, posetracks):
+        """
+        Stack the 'individuals', 'keypoints', and 'space' dimensions of the 'position'
+        variable in the input xarray.Dataset and return as a PyTorch tensor.
+
+        Parameters
+        ----------
+        posetracks : xarray.Dataset
+            Pose tracks dataset with a 'position' variable of shape
+            (time, individuals, keypoints, space).
+
+        Returns
+        -------
+        torch.Tensor
+            Tensor of shape (time, features), where features =
+            individuals * keypoints * space, containing the stacked position data.
+        """
+        return torch.from_numpy(
+            posetracks.stack(
+                features=("individuals", "keypoints", "space")
+            ).position.values.astype("float32")
         )
 
 
