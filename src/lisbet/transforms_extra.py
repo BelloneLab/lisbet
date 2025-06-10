@@ -58,7 +58,7 @@ class RandomXYSwap:
         """
         # Randomly decide whether to swap
         if torch.rand((1,), generator=self.g).item() < 0.5:
-            posetracks = posetracks.reindex(space=["y", "x"])
+            posetracks = posetracks.sel(space=["y", "x"])
         return posetracks
 
 
