@@ -62,6 +62,43 @@ class RandomXYSwap:
         return posetracks
 
 
+class RandomPermutation:
+    """
+    Randomly permutes the order of a specified coordinate (e.g., 'individuals') in an
+    xarray.Dataset, along with its coordinate labels.
+
+    With probability 0.5, the coordinate is permuted; otherwise, the order is left
+    unchanged. This augmentation can be used to increase invariance to coordinate order
+    (e.g., individual identity).
+
+    Parameters
+    ----------
+    seed : int
+        Random seed for reproducibility.
+    coordinate : str
+        Name of the coordinate to permute (e.g., 'individuals', 'keypoints').
+
+    Methods
+    -------
+    __call__(posetracks)
+        Applies the random permutation to the specified coordinate of the input
+        xarray.Dataset.
+    """
+
+    def __init__(self, seed, coordinate="individuals"):
+        self.seed = seed
+        self.coordinate = coordinate
+        self.g = torch.Generator().manual_seed(seed)
+
+    def __call__(self, posetracks):
+        if torch.rand((1,), generator=self.g).item() < 0.5:
+            coord_vals = list(posetracks.coords[self.coordinate].values)
+            perm = torch.randperm(len(coord_vals), generator=self.g).tolist()
+            new_order = [coord_vals[i] for i in perm]
+            posetracks = posetracks.sel({self.coordinate: new_order})
+        return posetracks
+
+
 class PoseToTensor:
     """
     Convert the 'position' variable from a posetracks xarray.Dataset into a PyTorch
