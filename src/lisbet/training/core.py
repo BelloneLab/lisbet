@@ -37,7 +37,7 @@ from lisbet.io import (
 )
 from lisbet.training.preprocessing import split_multi_records
 from lisbet.training.tasks import configure_tasks
-from lisbet.training.utils import generate_seeds, worker_init_fn
+from lisbet.training.utils import estimate_num_workers, generate_seeds, worker_init_fn
 
 
 def _configure_profiler(steps_multiplier):
@@ -157,6 +157,9 @@ def _configure_dataloaders(tasks, group, batch_size, sample_ratio, pin_memory):
         n_batches = int(n_batches * sample_ratio)
     logging.info("Using %d samples from the %s group", n_batches * batch_size, group)
 
+    # Estimate number of workers
+    num_workers = estimate_num_workers(len(tasks), batch_size)
+
     # Create a dataloader for each task
     dataloaders = []
     for task in tasks:
@@ -165,7 +168,7 @@ def _configure_dataloaders(tasks, group, batch_size, sample_ratio, pin_memory):
         dataloader = DataLoader(
             dataset,
             batch_size=batch_size,
-            num_workers=1,
+            num_workers=num_workers,
             persistent_workers=True,
             pin_memory=pin_memory,
             worker_init_fn=worker_init_fn,

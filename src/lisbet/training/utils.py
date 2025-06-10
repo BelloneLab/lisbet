@@ -7,6 +7,7 @@ import struct
 import numpy as np
 import torch
 import torch.distributed as dist
+from lightning.fabric.utilities.data import suggested_max_num_workers
 from torch.utils.data import get_worker_info
 
 
@@ -28,6 +29,45 @@ def generate_seeds(seed, task_ids):
     logging.debug("Generated seeds: %s", run_seeds)
 
     return run_seeds
+
+
+def estimate_num_workers(n_tasks, batch_size, batch_size_per_worker=8):
+    """
+    Estimate the optimal number of DataLoader worker processes to use, based on the
+    number of training tasks, the batch size, and the desired batch size per worker.
+
+    Parameters
+    ----------
+    n_tasks : int
+        The number of training tasks (e.g., datasets or splits) being processed.
+    batch_size : int
+        The total batch size used for loading data.
+    batch_size_per_worker : int, optional
+        The target batch size to be handled by each worker process (default: 8).
+
+    Returns
+    -------
+    num_workers : int
+        The estimated number of DataLoader worker processes to use.
+    """
+    # Estimate number of workers
+    local_world_size = 1  # torch.distributed.get_world_size() in distributed training
+
+    max_workers = suggested_max_num_workers(local_world_size)
+    fair_share = max_workers // max(1, n_tasks)
+    batch_cap = max(1, batch_size // batch_size_per_worker)
+
+    num_workers = max(1, min(max_workers, fair_share, batch_cap))
+
+    logging.debug(
+        "Estimated num_workers: %d (max_workers: %d, fair_share: %d, batch_cap: %d)",
+        num_workers,
+        max_workers,
+        fair_share,
+        batch_cap,
+    )
+
+    return num_workers
 
 
 def worker_init_fn(worker_id: int):
