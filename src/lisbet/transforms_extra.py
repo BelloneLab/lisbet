@@ -8,19 +8,58 @@ from lisbet.drawing import BodySpecs, body_specs_registry, color_to_bgr
 
 
 class RandomXYSwap:
-    """Random transformation swapping x and y coordinates"""
+    """
+    Randomly swaps the x and y coordinates in the 'position' variable of an
+    xarray.Dataset.
+
+    With probability 0.5, the 'space' dimension (typically ['x', 'y']) is swapped to
+    ['y', 'x'] for all timepoints and individuals in the dataset. This augmentation
+    can be used to increase invariance to axis orientation.
+
+    Parameters
+    ----------
+    seed : int
+        Random seed for reproducibility.
+
+    Methods
+    -------
+    __call__(posetracks)
+        Applies the random swap to the 'position' variable of the input xarray.Dataset.
+
+    Examples
+    --------
+    >>> swap = RandomXYSwap(seed=42)
+    >>> posetracks_swapped = swap(posetracks)
+    """
 
     def __init__(self, seed):
         self.seed = seed
-        self.rng = np.random.default_rng(seed)
+        self.g = torch.Generator().manual_seed(seed)
 
-    def __call__(self, sample):
-        transformed_sample = (
-            np.stack((sample[:, 1::2], sample[:, ::2]), axis=2).reshape(sample.shape)
-            if self.rng.random() < 0.5
-            else sample
-        )
-        return transformed_sample
+    def __call__(self, posetracks):
+        """
+        Randomly swaps the x and y coordinates in the 'position' variable of the input
+        xarray.Dataset.
+
+        With probability 0.5, the 'space' dimension is swapped from ['x', 'y'] to
+        ['y', 'x'].
+
+        Parameters
+        ----------
+        posetracks : xarray.Dataset
+            Pose tracks dataset with a 'position' variable of shape
+            (time, individuals, keypoints, space).
+
+        Returns
+        -------
+        xarray.Dataset
+            The input dataset, with the 'position' variable's 'space' dimension
+            possibly swapped to ['y', 'x'].
+        """
+        # Randomly decide whether to swap
+        if torch.rand((1,), generator=self.g).item() < 0.5:
+            posetracks["position"] = posetracks["position"].sel(space=["y", "x"])
+        return posetracks
 
 
 class PoseToTensor:
