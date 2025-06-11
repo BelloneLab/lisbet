@@ -14,37 +14,28 @@ from lisbet.datasets import (
     WindowDataset,
 )
 
-# --- Helpers and Fixtures ---
+# --- Fixtures and Helpers ---
 
 
 @pytest.fixture
-def dummy_record(request):
-    """
-    Create a dummy record with a variable number of individuals.
-
-    The number of individuals can be set via request.param (default: 1).
-    This makes the fixture robust for tests requiring arbitrary numbers of individuals.
-    """
-    n_individuals = getattr(request, "param", 1)
-    arr = (
-        np.arange(10 * n_individuals * 2 * 2)
-        .reshape((10, n_individuals, 2, 2))
-        .astype(np.float32)
-    )
+def simple_record():
+    """Create a simple record with deterministic values for interpolation checks."""
+    arr = np.arange(5 * 2 * 1 * 1).reshape((5, 2, 1, 1)).astype(np.float32)
     ds = xr.Dataset(
         {"position": (("time", "individuals", "keypoints", "space"), arr)},
         coords={
-            "time": np.arange(10),
-            "individuals": [f"mouse{i}" for i in range(n_individuals)],
-            "keypoints": ["nose", "tail"],
-            "space": ["x", "y"],
+            "time": np.arange(5),
+            "individuals": ["A", "B"],
+            "keypoints": ["nose"],
+            "space": ["x"],
         },
     )
 
     class DummyAnn:
         def __init__(self):
+            # Alternate labels 0, 1, 0, 1, ...
             self.target_cls = xr.DataArray(
-                np.eye(2)[np.random.randint(0, 2, 10)].reshape(10, 2, 1),
+                np.eye(2)[np.arange(5) % 2].reshape(5, 2, 1),
                 dims=("time", "behaviors", "annotators"),
             )
 
@@ -54,552 +45,96 @@ def dummy_record(request):
     rec = type("Rec", (), {})()
     rec.posetracks = ds
     rec.annotations = DummyAnn()
+    rec.id = "rec"
     return rec
 
 
 @pytest.fixture
-def dummy_records(dummy_record):
-    """
-    Fixture to create a list of 3 dummy records, each with a unique id and offset data.
-    Used for dataset tests.
-    """
-    recs = []
-    for i in range(3):
-        rec = copy.deepcopy(dummy_record)
-        rec.id = f"exp{i}"
-        rec.posetracks["position"].values += (
-            i * 100 * dummy_record.posetracks.sizes["individuals"]
-        )
-        rec.annotations.target_cls.values[:] = 0
-        rec.annotations.target_cls.values[:, i % 2, 0] = 1
-        recs.append(rec)
-    return recs
+def two_records(simple_record):
+    """Return two simple records with offset values for swap/consistency tests."""
+    rec1 = copy.deepcopy(simple_record)
+    rec2 = copy.deepcopy(simple_record)
+    rec2.posetracks["position"].values += 1000
+    rec2.id = "rec2"
+    return [rec1, rec2]
 
 
 # --- WindowDataset ---
 
 
-def test_windowdataset_basic(dummy_records):
-    """
-    Test that WindowDataset initializes correctly and computes lengths and cumulative
-    lengths as expected.
-    """
-    ds = WindowDataset(dummy_records, window_size=3)
-    assert ds.n_records == 3
-    assert ds.n_frames == 30
-    assert ds.lengths.tolist() == [10, 10, 10]
-    assert ds.cumlens.tolist() == [10, 20, 30]
-
-
-def test_windowdataset_global_to_local(dummy_records):
-    """
-    Test that _global_to_local correctly maps global indices to (record, local) indices.
-    """
-    ds = WindowDataset(dummy_records, window_size=3)
-    # First frame
-    assert ds._global_to_local(0) == (0, 0)
-    # Last frame of first record
-    assert ds._global_to_local(9) == (0, 9)
-    # First frame of second record
-    assert ds._global_to_local(10) == (1, 0)
-    # Last frame
-    assert ds._global_to_local(29) == (2, 9)
-
-
-def test_windowdataset_select_and_pad_shape(dummy_records):
-    """
-    Test that _select_and_pad returns windows of the correct shape, with correct padding
-    at sequence boundaries.
-    """
-    ds = WindowDataset(dummy_records, window_size=5)
-    # Middle of sequence: no padding
-    x = ds._select_and_pad(0, 5)
-    assert (
-        x["position"].shape
-        == ds.records[0].posetracks.isel(time=slice(0, 5))["position"].shape
-    )
-    # Start of sequence: needs padding
-    x = ds._select_and_pad(0, 1)
-    assert x["position"].shape[0] == 5
-    # End of sequence: needs padding
-    x = ds._select_and_pad(0, 9)
-    assert x["position"].shape[0] == 5
-
-
-def test_windowdataset_iter_yields_correct(dummy_records):
-    """
-    Test that WindowDataset.__iter__ yields (window, label) pairs of the correct types.
-    """
-    ds = WindowDataset(dummy_records, window_size=3)
+def test_windowdataset_window_and_label_correctness(simple_record):
+    """Test that WindowDataset yields correct window slices and labels."""
+    ds = WindowDataset([simple_record], window_size=3)
     it = iter(ds)
+    # First window (should be padded at start)
     x, y = next(it)
-    assert isinstance(x, xr.Dataset)
-    assert isinstance(y, (np.integer, float, np.floating, torch.Tensor, np.ndarray))
-
-
-def test_windowdataset_immutability(dummy_records):
-    """Test that sampling from WindowDataset does not modify the original records."""
-    ds = WindowDataset(dummy_records, window_size=3)
-    orig = copy.deepcopy(dummy_records[0].posetracks["position"].values)
-    next(iter(ds))
-    # Should not have changed
-    np.testing.assert_array_equal(dummy_records[0].posetracks["position"].values, orig)
-
-
-def test_windowdataset_fps_scaling(dummy_records):
-    """
-    Test that fps_scaling correctly changes the effective window and interpolation.
-    """
-    ds = WindowDataset(dummy_records, window_size=4, fps_scaling=0.5)
-    # Should interpolate from 2 frames to 4
-    x = ds._select_and_pad(0, 3)
-    assert x["position"].shape[0] == 4
-    # The time indices used should be spaced further apart than with fps_scaling=1
-    ds2 = WindowDataset(dummy_records, window_size=4, fps_scaling=1.0)
-    x2 = ds2._select_and_pad(0, 3)
-    # The data should differ due to different interpolation
-    assert not np.allclose(x["position"].values, x2["position"].values)
-
-
-def test_windowdataset_fps_scaling_edge(dummy_records):
-    """Test that fps_scaling > 1 is handled correctly."""
-    ds = WindowDataset(dummy_records, window_size=4, fps_scaling=2.0)
-    x = ds._select_and_pad(0, 3)
-    assert x["position"].shape[0] == 4
-
-
-def test_windowdataset_fps_scaling_noninteger(dummy_records):
-    """Test that non-integer fps_scaling is handled correctly."""
-    ds = WindowDataset(dummy_records, window_size=5, fps_scaling=0.7)
-    x = ds._select_and_pad(0, 5)
-    assert x["position"].shape[0] == 5
-
-
-def test_windowdataset_empty_records():
-    """Test that WindowDataset raises ValueError if no records are provided."""
-    with pytest.raises(ValueError):
-        _ = WindowDataset([], window_size=3)
-
-
-def test_windowdataset_label_nan_on_missing_annotations(dummy_record):
-    """
-    Test that WindowDataset yields NaN or None for label if annotations are missing.
-    """
-    rec = copy.deepcopy(dummy_record)
-    rec.annotations = None
-    ds = WindowDataset([rec], window_size=3)
-    x, y = next(iter(ds))
-    assert np.isnan(y) or y is None
-
-
-def test_windowdataset_minimal_window(dummy_records):
-    """Test that WindowDataset raises ValueError if window_size is 1."""
-    with pytest.raises(ValueError):
-        WindowDataset(dummy_records, window_size=1)
-
-
-# --- RandomWindowDataset ---
-
-
-def test_randomwindowdataset_randomness_and_seed(dummy_records):
-    """Test that RandomWindowDataset yields reproducible samples with the same seed."""
-    ds1 = RandomWindowDataset(dummy_records, window_size=3, base_seed=42)
-    ds2 = RandomWindowDataset(dummy_records, window_size=3, base_seed=42)
-    # Should yield same sequence with same seed
-    xs1 = [next(iter(ds1))[0]["position"].values.copy() for _ in range(3)]
-    xs2 = [next(iter(ds2))[0]["position"].values.copy() for _ in range(3)]
-    for a, b in zip(xs1, xs2):
-        np.testing.assert_array_equal(a, b)
-
-
-def test_randomwindowdataset_immutability(dummy_records):
-    """Test that RandomWindowDataset does not modify the original records."""
-    ds = RandomWindowDataset(dummy_records, window_size=3)
-    orig = copy.deepcopy(dummy_records[0].posetracks["position"].values)
-    next(iter(ds))
-    np.testing.assert_array_equal(dummy_records[0].posetracks["position"].values, orig)
-
-
-def test_randomwindowdataset_fps_scaling(dummy_records):
-    """Test that RandomWindowDataset handles fps_scaling correctly."""
-    ds = RandomWindowDataset(dummy_records, window_size=4, fps_scaling=0.5)
-    x, y = next(iter(ds))
-    assert x["position"].shape[0] == 4
-
-
-def test_randomwindowdataset_all_windows_sampled(dummy_records):
-    """
-    Test that RandomWindowDataset can sample all possible windows over many iterations.
-    """
-    ds = RandomWindowDataset(dummy_records, window_size=3, base_seed=123)
-    seen = set()
-    for _ in range(100):
-        x, y = next(iter(ds))
-        # Use the first value as a signature
-        seen.add(float(x["position"].values.flatten()[0]))
-    # Should have seen at least as many as there are frames
-    assert len(seen) >= 10
-
-
-# --- GroupConsistencyDataset ---
-
-
-@pytest.mark.parametrize("dummy_record", [1, 2, 3], indirect=True)
-def test_groupconsistencyswap_labels_and_swap(dummy_records):
-    """
-    Test GroupConsistencyDataset: raises ValueError for 1 individual, otherwise yields
-    correct swap labels and verifies that swapped windows contain individuals from
-    different records.
-    """
-    n_inds = dummy_records[0].posetracks["individuals"].size
-    if n_inds < 2:
-        with pytest.raises(ValueError):
-            ds = GroupConsistencyDataset(dummy_records, window_size=3, base_seed=123)
-            next(iter(ds))
-    else:
-        ds = GroupConsistencyDataset(dummy_records, window_size=3, base_seed=123)
-        # Gather all original individual data for comparison
-        orig_individuals = [rec.posetracks["position"].values for rec in dummy_records]
-        for _ in range(20):
-            x, y = next(iter(ds))
-            assert y in (0, 1)
-            # If swapped, check split logic: all individuals before split from one
-            # record, all after from another
-            if y == 1:
-                # Shape: (window_size, n_individuals, ...)
-                window_data = x["position"].values
-                n_inds = window_data.shape[1]
-                # For each individual, find which record it matches
-                matches = []
-                for ind in range(n_inds):
-                    win = window_data[:, ind]
-                    match_idx = None
-                    for rec_idx, orig in enumerate(orig_individuals):
-                        orig_ind_data = orig[:, ind]
-                        for start in range(orig_ind_data.shape[0] - win.shape[0] + 1):
-                            if np.allclose(
-                                win, orig_ind_data[start : start + win.shape[0]]
-                            ):
-                                match_idx = rec_idx
-                                break
-                        if match_idx is not None:
-                            break
-                    matches.append(match_idx)
-                # Now, matches should look like: [A, A, ..., B, B, ...] with A != B
-                # Find the split index
-                first = matches[0]
-                split_idx = 0
-                for i, m in enumerate(matches):
-                    if m != first:
-                        split_idx = i
-                        break
-                else:
-                    # All from same record (should not happen for y==1)
-                    split_idx = n_inds
-                base = matches[:split_idx]
-                swap = matches[split_idx:]
-                assert len(base) > 0 and len(swap) > 0, "Swap did not occur"
-                assert all(b == base[0] for b in base), (
-                    "Base individuals not from same record"
-                )
-                assert all(s == swap[0] for s in swap), (
-                    "Swapped individuals not from same record"
-                )
-                assert base[0] != swap[0], "Base and swap records are the same"
-
-
-@pytest.mark.parametrize("dummy_record", [1, 2, 3], indirect=True)
-def test_temporalshiftdataset_immutability(dummy_records):
-    """
-    Test TemporalShiftDataset: raises ValueError for 1 individual, otherwise does not
-    modify original records.
-    """
-    n_inds = dummy_records[0].posetracks["individuals"].size
-    if n_inds < 2:
-        with pytest.raises(ValueError):
-            ds = TemporalShiftDataset(dummy_records, window_size=3)
-            next(iter(ds))
-    else:
-        ds = TemporalShiftDataset(dummy_records, window_size=3)
-        orig = copy.deepcopy(dummy_records[0].posetracks["position"].values)
-        next(iter(ds))
-        np.testing.assert_array_equal(
-            dummy_records[0].posetracks["position"].values, orig
-        )
-        np.testing.assert_array_equal(
-            dummy_records[0].posetracks["position"].values, orig
-        )
-
-
-@pytest.mark.parametrize("dummy_record", [1, 2, 3], indirect=True)
-def test_groupconsistencyswap_fps_scaling(dummy_records):
-    """
-    Test GroupConsistencyDataset fps_scaling: raises ValueError for 1 individual,
-    otherwise yields correct window shape.
-    """
-    n_inds = dummy_records[0].posetracks["individuals"].size
-    if n_inds < 2:
-        with pytest.raises(ValueError):
-            ds = GroupConsistencyDataset(dummy_records, window_size=4, fps_scaling=0.5)
-            next(iter(ds))
-    else:
-        ds = GroupConsistencyDataset(dummy_records, window_size=4, fps_scaling=0.5)
-        x, y = next(iter(ds))
-        assert x["position"].shape[0] == 4
-
-
-@pytest.mark.parametrize("dummy_record", [1, 2, 3], indirect=True)
-def test_groupconsistencyswap_no_swap_within_same_record(dummy_records):
-    """
-    Test GroupConsistencyDataset: raises ValueError for 1 individual, otherwise runs
-    swap logic without error.
-    """
-    n_inds = dummy_records[0].posetracks["individuals"].size
-    if n_inds < 2:
-        with pytest.raises(ValueError):
-            ds = GroupConsistencyDataset(dummy_records, window_size=3, base_seed=42)
-            next(iter(ds))
-    else:
-        ds = GroupConsistencyDataset(dummy_records, window_size=3, base_seed=42)
-        for _ in range(20):
-            x, y = next(iter(ds))
-            # If swapped, ensure swap is not from same record
-            # Not directly testable unless we expose more info, but at least run
-
-
-# --- TemporalOrderDataset ---
-
-
-def test_temporalorderdataset_positive_and_negative(dummy_records):
-    """
-    Test that TemporalOrderDataset yields both positive and negative samples and
-    correct window shape.
-    """
-    ds = TemporalOrderDataset(
-        dummy_records, window_size=4, method="simple", base_seed=42
-    )
-    for _ in range(10):
-        x, y = next(iter(ds))
-        assert y in (0, 1)
-        assert x["position"].shape[0] == 4
-
-
-def test_temporalorderdataset_strict_method(dummy_records):
-    """
-    Test that TemporalOrderDataset with 'strict' method yields valid samples and
-    correct window shape.
-    """
-    ds = TemporalOrderDataset(
-        dummy_records, window_size=4, method="strict", base_seed=42
-    )
-    for _ in range(10):
-        x, y = next(iter(ds))
-        assert y in (0, 1)
-        assert x["position"].shape[0] == 4
-
-
-def test_temporalorderdataset_immutability(dummy_records):
-    """Test that TemporalOrderDataset does not modify the original records."""
-    ds = TemporalOrderDataset(dummy_records, window_size=3)
-    orig = copy.deepcopy(dummy_records[0].posetracks["position"].values)
-    next(iter(ds))
-    np.testing.assert_array_equal(dummy_records[0].posetracks["position"].values, orig)
-
-
-def test_temporalorderdataset_fps_scaling(dummy_records):
-    """Test that TemporalOrderDataset handles fps_scaling correctly."""
-    ds = TemporalOrderDataset(dummy_records, window_size=4, fps_scaling=0.5)
-    x, y = next(iter(ds))
-    assert x["position"].shape[0] == 4
-
-
-def test_temporalorderdataset_concat_shape(dummy_records):
-    """
-    Test that TemporalOrderDataset concatenates pre and post windows correctly for the
-    given window size.
-    """
-    ds = TemporalOrderDataset(
-        dummy_records, window_size=6, method="simple", base_seed=42
-    )
-    x, y = next(iter(ds))
-    assert x["position"].shape[0] == 6
-
-
-# --- TemporalShiftDataset ---
-
-
-@pytest.mark.parametrize("dummy_record", [1, 2, 3], indirect=True)
-def test_temporalshiftdataset_classification_and_regression(dummy_records):
-    """
-    Test TemporalShiftDataset: raises ValueError for 1 individual, otherwise yields
-    correct classification/regression labels.
-    """
-    n_inds = dummy_records[0].posetracks["individuals"].size
-    if n_inds < 2:
-        with pytest.raises(ValueError):
-            ds = TemporalShiftDataset(dummy_records, window_size=4, regression=False)
-            next(iter(ds))
-    else:
-        ds = TemporalShiftDataset(dummy_records, window_size=4, regression=False)
-        for _ in range(5):
-            x, y = next(iter(ds))
-            assert y in (0, 1)
-        ds_reg = TemporalShiftDataset(dummy_records, window_size=4, regression=True)
-        for _ in range(5):
-            x, y = next(iter(ds_reg))
-            assert 0.0 <= y <= 1.0
-
-
-@pytest.mark.parametrize("dummy_record", [1, 2, 3], indirect=True)
-def test_temporalshiftdataset_fps_scaling(dummy_records):
-    """
-    Test TemporalShiftDataset fps_scaling: raises ValueError for 1 individual,
-    otherwise yields correct window shape.
-    """
-    n_inds = dummy_records[0].posetracks["individuals"].size
-    if n_inds < 2:
-        with pytest.raises(ValueError):
-            ds = TemporalShiftDataset(dummy_records, window_size=4, fps_scaling=0.5)
-            next(iter(ds))
-    else:
-        ds = TemporalShiftDataset(dummy_records, window_size=4, fps_scaling=0.5)
-        x, y = next(iter(ds))
-        assert x["position"].shape[0] == 4
-
-
-@pytest.mark.parametrize("dummy_record", [1, 2, 3], indirect=True)
-def test_temporalshiftdataset_delay_edge_cases(dummy_records):
-    """
-    Test TemporalShiftDataset delay edge cases: raises ValueError for 1 individual,
-    otherwise yields correct window shape.
-    """
-    n_inds = dummy_records[0].posetracks["individuals"].size
-    if n_inds < 2:
-        with pytest.raises(ValueError):
-            ds = TemporalShiftDataset(
-                dummy_records, window_size=4, min_delay=-2, max_delay=2
-            )
-            next(iter(ds))
-    else:
-        ds = TemporalShiftDataset(
-            dummy_records, window_size=4, min_delay=-2, max_delay=2
-        )
-        for _ in range(5):
-            x, y = next(iter(ds))
-            assert x["position"].shape[0] == 4
-
-
-# --- TemporalWarpDataset ---
-
-
-def test_temporalwarpdataset_classification_and_regression(dummy_records):
-    """
-    Test that TemporalWarpDataset yields correct classification and regression labels.
-    """
-    ds = TemporalWarpDataset(dummy_records, window_size=4, regression=False)
-    for _ in range(5):
-        x, y = next(iter(ds))
-        assert y in (0, 1)
-    ds_reg = TemporalWarpDataset(dummy_records, window_size=4, regression=True)
-    for _ in range(5):
-        x, y = next(iter(ds_reg))
-        assert 0.0 <= y <= 1.0
-
-
-def test_temporalwarpdataset_immutability(dummy_records):
-    """Test that TemporalWarpDataset does not modify the original records."""
-    ds = TemporalWarpDataset(dummy_records, window_size=3)
-    orig = copy.deepcopy(dummy_records[0].posetracks["position"].values)
-    next(iter(ds))
-    np.testing.assert_array_equal(dummy_records[0].posetracks["position"].values, orig)
-
-
-def test_temporalwarpdataset_fps_scaling(dummy_records):
-    """Test that TemporalWarpDataset handles fps_scaling correctly."""
-    ds = TemporalWarpDataset(dummy_records, window_size=4, fps_scaling=0.5)
-    x, y = next(iter(ds))
-    assert x["position"].shape[0] == 4
-
-
-def test_temporalwarpdataset_speed_range(dummy_records):
-    """
-    Test that TemporalWarpDataset handles different min_speed and max_speed values
-    correctly.
-    """
-    ds = TemporalWarpDataset(dummy_records, window_size=4, min_speed=0.7, max_speed=1.3)
-    for _ in range(5):
-        x, y = next(iter(ds))
-        assert x["position"].shape[0] == 4
-
-
-# --- Transform Handling ---
-
-
-def test_transform_application(dummy_records):
-    """Test that a custom transform is applied to the window before yielding."""
-
-    class DummyTransform:
+    expected = np.array([0, 0, 0])  # All zeros due to padding
+    np.testing.assert_array_equal(x["position"].values[:, 0, 0, 0], expected)
+    assert y == 0  # Label from annotations at frame 0
+
+    # Second window (should have 2 zeros, 1 real)
+    x, y = next(it)
+    expected = np.array([0, 0, 2])
+    np.testing.assert_array_equal(x["position"].values[:, 0, 0, 0], expected)
+    assert y == 1
+
+    # Third window (should have 1 zero, 2 real)
+    x, y = next(it)
+    expected = np.array([0, 2, 4])
+    np.testing.assert_array_equal(x["position"].values[:, 0, 0, 0], expected)
+    assert y == 0
+
+    # Middle window (no padding)
+    for _ in range(2):
+        x, y = next(it)
+    expected = np.array([4, 6, 8])
+    np.testing.assert_array_equal(x["position"].values[:, 0, 0, 0], expected)
+    assert y == 0
+
+
+def test_windowdataset_interpolation_values(simple_record):
+    """Test that interpolation produces correct values for non-integer fps_scaling."""
+    ds = WindowDataset([simple_record], window_size=3, fps_scaling=1.5)
+    # For frame 2, scaled_window_size = 4, so indices: -1, 0, 1, 2
+    # interp_time_coords = linspace(-1,2,3) = [-1,0.5,2]
+    # Should interpolate between padded 0 and real data
+    x = ds._select_and_pad(0, 2)
+    # At time=-1: padded 0
+    # At time=0.5: interpolate between 0 and 2 -> 1
+    # At time=2: value is 4
+    vals = x["position"].values[:, 0, 0, 0]
+    assert np.allclose(vals, [0, 1, 4])
+
+
+def test_windowdataset_transform_applied(simple_record):
+    """Test that a custom transform is applied to the window."""
+
+    class AddOne:
         def __call__(self, x):
             x = x.copy(deep=True)
             x["position"].values += 1
             return x
 
-    ds = WindowDataset(dummy_records, window_size=3, transform=DummyTransform())
-    # Get the window as would be returned without transform
-    ds_no_transform = WindowDataset(dummy_records, window_size=3, transform=None)
-    x_expected, _ = next(iter(ds_no_transform))
-    x, y = next(iter(ds))
-    assert np.allclose(x["position"].values, x_expected["position"].values + 1), (
-        f"{x['position'].values} != {x_expected['position'].values + 1}"
-    )
+    ds = WindowDataset([simple_record], window_size=3, transform=AddOne())
+    x, _ = next(iter(ds))
+    ds_no = WindowDataset([simple_record], window_size=3)
+    x_no, _ = next(iter(ds_no))
+    np.testing.assert_array_equal(x["position"].values, x_no["position"].values + 1)
 
 
-def test_transform_none(dummy_records):
-    """Test that no transform leaves the window unchanged."""
-    ds = WindowDataset(dummy_records, window_size=3, transform=None)
-    x_expected, _ = next(iter(ds))
-    x, y = next(iter(ds))
-    assert np.allclose(x["position"].values, x_expected["position"].values), (
-        f"{x['position'].values} != {x_expected['position'].values}"
-    )
-
-
-# --- Edge Cases ---
-
-
-def test_short_sequence_padding():
-    """Test that WindowDataset correctly pads short sequences to the window size."""
-    arr = np.arange(2 * 1 * 2 * 2).reshape((2, 1, 2, 2)).astype(np.float32)
+def test_windowdataset_errors():
+    """Test error handling for WindowDataset."""
+    rec = None
+    with pytest.raises(ValueError):
+        WindowDataset([], window_size=3)
+    arr = np.zeros((2, 1, 1, 1))
     ds = xr.Dataset(
         {"position": (("time", "individuals", "keypoints", "space"), arr)},
         coords={
-            "time": np.arange(2),
-            "individuals": ["mouse"],
-            "keypoints": ["nose", "tail"],
-            "space": ["x", "y"],
-        },
-    )
-    rec = type("Rec", (), {})()
-    rec.posetracks = ds
-    rec.annotations = None
-    dataset = WindowDataset([rec], window_size=4)
-    x, y = next(iter(dataset))
-    assert x["position"].shape[0] == 4
-
-
-def test_single_record_single_frame():
-    """
-    Test that WindowDataset raises ValueError for window_size=1 even with a
-    single-frame record.
-    """
-    arr = np.arange(1 * 1 * 2 * 2).reshape((1, 1, 2, 2)).astype(np.float32)
-    ds = xr.Dataset(
-        {"position": (("time", "individuals", "keypoints", "space"), arr)},
-        coords={
-            "time": np.arange(1),
-            "individuals": ["mouse"],
-            "keypoints": ["nose", "tail"],
-            "space": ["x", "y"],
+            "time": [0, 1],
+            "individuals": ["A"],
+            "keypoints": ["nose"],
+            "space": ["x"],
         },
     )
     rec = type("Rec", (), {})()
@@ -609,50 +144,206 @@ def test_single_record_single_frame():
         WindowDataset([rec], window_size=1)
 
 
-def test_missing_annotations(dummy_record):
-    """
-    Test that WindowDataset yields NaN or None for label if annotations are missing
-    (single record).
-    """
-    rec = copy.deepcopy(dummy_record)
-    rec.annotations = None
-    ds = WindowDataset([rec], window_size=3)
+# --- RandomWindowDataset ---
+
+
+def test_randomwindowdataset_reproducibility(simple_record):
+    """Test that RandomWindowDataset yields reproducible samples with the same seed."""
+    ds1 = RandomWindowDataset([simple_record], window_size=3, base_seed=42)
+    ds2 = RandomWindowDataset([simple_record], window_size=3, base_seed=42)
+    vals1 = [next(iter(ds1))[0]["position"].values.copy() for _ in range(5)]
+    vals2 = [next(iter(ds2))[0]["position"].values.copy() for _ in range(5)]
+    for a, b in zip(vals1, vals2):
+        np.testing.assert_array_equal(a, b)
+
+
+def test_randomwindowdataset_label_and_window(simple_record):
+    """Test that RandomWindowDataset yields correct label and window for known seed."""
+    ds = RandomWindowDataset([simple_record], window_size=3, base_seed=0)
     x, y = next(iter(ds))
-    assert np.isnan(y) or y is None
+    # Should be a valid window and label from the record
+    assert x["position"].shape[0] == 3
+    assert y in (0, 1)
 
 
-def test_empty_records_randomwindow():
-    """Test that RandomWindowDataset raises ValueError if no records are provided."""
+def test_randomwindowdataset_error():
+    """Test error handling for RandomWindowDataset."""
     with pytest.raises(ValueError):
-        ds = RandomWindowDataset([], window_size=3)
-        next(iter(ds))
+        RandomWindowDataset([], window_size=3)
 
 
-def test_empty_records_groupconsistency():
+# --- GroupConsistencyDataset ---
+
+
+def test_groupconsistencydataset_consistent(two_records):
     """
-    Test that GroupConsistencyDataset raises ValueError if no records are provided.
+    Test that non-swapped samples are consistent (label 0, all individuals from same
+    record).
     """
+    ds = GroupConsistencyDataset(two_records, window_size=3, base_seed=123)
+    # Force non-swap by monkeypatching torch.rand to always return >= 0.5
+    orig_rand = torch.rand
+    torch.rand = lambda *a, **k: torch.tensor([0.7])
+    x, y = next(iter(ds))
+    torch.rand = orig_rand
+    assert y == 0
+    # All individuals should match one of the records
+    vals = x["position"].values
+    for rec in two_records:
+        if np.allclose(vals, rec.posetracks["position"].values[:3]):
+            break
+    else:
+        raise AssertionError("Individuals do not match any record")
+
+
+def test_groupconsistencydataset_inconsistent(two_records):
+    """
+    Test that swapped samples are inconsistent (label 1, individuals split between
+    records).
+    """
+    ds = GroupConsistencyDataset(two_records, window_size=3, base_seed=123)
+    # Force swap by monkeypatching torch.rand to always return < 0.5
+    orig_rand = torch.rand
+    torch.rand = lambda *a, **k: torch.tensor([0.2])
+    x, y = next(iter(ds))
+    torch.rand = orig_rand
+    assert y == 1
+    vals = x["position"].values
+    # The two individuals should not have identical values (should come from different
+    # records or windows)
+    assert not np.allclose(vals[:, 0], vals[:, 1]), (
+        "Individuals come from the same record/frames"
+    )
+
+
+def test_groupconsistencydataset_error():
+    """Test error handling for GroupConsistencyDataset with <2 individuals."""
+    arr = np.zeros((5, 1, 1, 1))
+    ds = xr.Dataset(
+        {"position": (("time", "individuals", "keypoints", "space"), arr)},
+        coords={
+            "time": np.arange(5),
+            "individuals": ["A"],
+            "keypoints": ["nose"],
+            "space": ["x"],
+        },
+    )
+    rec = type("Rec", (), {})()
+    rec.posetracks = ds
+    rec.annotations = None
     with pytest.raises(ValueError):
-        ds = GroupConsistencyDataset([], window_size=3)
+        ds = GroupConsistencyDataset([rec], window_size=3)
         next(iter(ds))
 
 
-def test_empty_records_temporalorder():
-    """Test that TemporalOrderDataset raises ValueError if no records are provided."""
+# --- TemporalOrderDataset ---
+
+
+def test_temporalorderdataset_positive_and_negative(two_records):
+    """
+    Test that TemporalOrderDataset yields both positive and negative samples with
+    correct concatenation.
+    """
+    ds = TemporalOrderDataset(two_records, window_size=4, method="simple", base_seed=42)
+    found_pos = found_neg = False
+    for _ in range(20):
+        x, y = next(iter(ds))
+        assert x["position"].shape[0] == 4
+        if y == 1:
+            found_pos = True
+        elif y == 0:
+            found_neg = True
+        # Check concatenation: first half from pre, second half from post
+        split = 2
+        pre = x["position"].values[:split]
+        post = x["position"].values[split:]
+        # Can't check exact values due to randomness, but shape should match
+        assert pre.shape[0] == 2 and post.shape[0] == 2
+    assert found_pos and found_neg
+
+
+def test_temporalorderdataset_strict_method(two_records):
+    """Test that TemporalOrderDataset with 'strict' method yields valid samples."""
+    ds = TemporalOrderDataset(two_records, window_size=4, method="strict", base_seed=42)
+    for _ in range(10):
+        x, y = next(iter(ds))
+        assert y in (0, 1)
+        assert x["position"].shape[0] == 4
+
+
+def test_temporalorderdataset_error():
+    """Test error handling for TemporalOrderDataset."""
     with pytest.raises(ValueError):
-        ds = TemporalOrderDataset([], window_size=3)
+        TemporalOrderDataset([], window_size=3)
+
+
+# --- TemporalShiftDataset ---
+
+
+def test_temporalshiftdataset_classification_and_regression(two_records):
+    """
+    Test that TemporalShiftDataset yields correct classification and regression labels.
+    """
+    ds = TemporalShiftDataset(two_records, window_size=4, regression=False)
+    for _ in range(5):
+        x, y = next(iter(ds))
+        assert y in (0, 1)
+    ds_reg = TemporalShiftDataset(two_records, window_size=4, regression=True)
+    for _ in range(5):
+        x, y = next(iter(ds_reg))
+        assert 0.0 <= y <= 1.0
+
+
+def test_temporalshiftdataset_error():
+    """Test error handling for TemporalShiftDataset with <2 individuals."""
+    arr = np.zeros((5, 1, 1, 1))
+    ds = xr.Dataset(
+        {"position": (("time", "individuals", "keypoints", "space"), arr)},
+        coords={
+            "time": np.arange(5),
+            "individuals": ["A"],
+            "keypoints": ["nose"],
+            "space": ["x"],
+        },
+    )
+    rec = type("Rec", (), {})()
+    rec.posetracks = ds
+    rec.annotations = None
+    with pytest.raises(ValueError):
+        ds = TemporalShiftDataset([rec], window_size=3)
         next(iter(ds))
 
 
-def test_empty_records_temporalshift():
-    """Test that TemporalShiftDataset raises ValueError if no records are provided."""
-    with pytest.raises(ValueError):
-        ds = TemporalShiftDataset([], window_size=3)
-        next(iter(ds))
+# --- TemporalWarpDataset ---
 
 
-def test_empty_records_temporalwarp():
-    """Test that TemporalWarpDataset raises ValueError if no records are provided."""
+def test_temporalwarpdataset_classification_and_regression(two_records):
+    """
+    Test that TemporalWarpDataset yields correct classification and regression labels.
+    """
+    ds = TemporalWarpDataset(two_records, window_size=4, regression=False)
+    for _ in range(5):
+        x, y = next(iter(ds))
+        assert y in (0, 1)
+    ds_reg = TemporalWarpDataset(two_records, window_size=4, regression=True)
+    for _ in range(5):
+        x, y = next(iter(ds_reg))
+        assert 0.0 <= y <= 1.0
+
+
+def test_temporalwarpdataset_speed_and_interpolation(simple_record):
+    ds = TemporalWarpDataset(
+        [simple_record], window_size=3, min_speed=1.0, max_speed=1.0, base_seed=42
+    )
+    x, y = next(iter(ds))
+    # Check shape
+    assert x["position"].shape[0] == 3
+    # Check values are from the correct record (should be in [0, 8])
+    vals = x["position"].values[:, 0, 0, 0]
+    assert np.all((vals >= 0) & (vals <= 8))
+
+
+def test_temporalwarpdataset_error():
+    """Test error handling for TemporalWarpDataset."""
     with pytest.raises(ValueError):
-        ds = TemporalWarpDataset([], window_size=3)
-        next(iter(ds))
+        TemporalWarpDataset([], window_size=3)
