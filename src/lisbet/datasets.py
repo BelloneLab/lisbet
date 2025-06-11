@@ -343,11 +343,10 @@ class TemporalOrderDataset(RandomWindowDataset):
        positive and negative, depending on random sampling. This ambiguity is tolerated
        for simplicity, as it is infrequent and unlikely to significantly impact model
        performance.
-    5. The 'method' parameter controls how negative samples are selected:
-       - 'simple': post windows can come from any record or from earlier times in the
-         same record.
-       - 'strict': post windows are always from the same record but must precede the
-         pre window in time.
+    5. The 'method' parameter controls how negative samples are selected: 'simple',
+       post windows can come from any record or from earlier times in the same record;
+       'strict', post windows are always from the same record but must precede the pre
+       window in time.
     """
 
     def __init__(
