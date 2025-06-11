@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from lisbet.datasets.core import load_records
+from lisbet.io import load_records
 
 
 @pytest.fixture
@@ -85,8 +85,8 @@ def test_data_scaling_default(dummy_dataset):
         Path to the dummy dataset fixture.
     """
     records = load_records(data_format="movement", data_path=dummy_dataset)
-    for _, rec in records:
-        ds = rec["posetracks"]
+    for rec in records:
+        ds = rec.posetracks
         arr = ds["position"].values
         assert np.all(arr >= 0.0)
         assert np.all(arr <= 1.0)
@@ -139,7 +139,7 @@ def test_data_scaling_explicit_valid(tmp_path):
     )
     data.to_netcdf(exp_dir / "tracking.nc", engine="scipy")
     records = load_records(data_format="movement", data_path=root, data_scale="1x1")
-    ds = records[0][1]["posetracks"]
+    ds = records[0].posetracks
     arr = ds["position"].values
     assert np.all(arr >= 0.0)
     assert np.all(arr <= 1.0)
@@ -158,7 +158,7 @@ def test_data_filter(dummy_dataset):
         data_format="movement", data_path=dummy_dataset, data_filter="exp0"
     )
     assert len(records) == 1
-    assert records[0][0] == "exp0"
+    assert records[0].id == "exp0"
 
 
 def test_select_coords_selection(dummy_dataset):
@@ -172,7 +172,7 @@ def test_select_coords_selection(dummy_dataset):
         data_path=dummy_dataset,
         select_coords="mouse;x;nose",
     )
-    ds = records[0][1]["posetracks"]
+    ds = records[0].posetracks
     assert list(ds["individuals"].values) == ["mouse"]
     assert list(ds["space"].values) == ["x"]
     assert list(ds["keypoints"].values) == ["nose"]
@@ -187,7 +187,7 @@ def test_select_coords_wildcard(dummy_dataset):
         data_path=dummy_dataset,
         select_coords="*;*;*",
     )
-    ds = records[0][1]["posetracks"]
+    ds = records[0].posetracks
     assert set(str(x) for x in ds["individuals"].values) == {"mouse"}
     assert set(str(x) for x in ds["space"].values) == {"x", "y"}
     assert set(str(x) for x in ds["keypoints"].values) == {"nose", "tail"}
@@ -203,7 +203,7 @@ def test_rename_coords_basic(dummy_dataset):
         data_path=dummy_dataset,
         rename_coords="mouse:rat;x:horizontal;nose:snout,tail:tailbase",
     )
-    ds = records[0][1]["posetracks"]
+    ds = records[0].posetracks
     assert set(str(x) for x in ds["individuals"].values) == {"rat"}
     assert set(str(x) for x in ds["space"].values) == {"horizontal", "y"}
     assert set(str(x) for x in ds["keypoints"].values) == {"snout", "tailbase"}
@@ -218,7 +218,7 @@ def test_rename_coords_wildcard(dummy_dataset):
         data_path=dummy_dataset,
         rename_coords="*;*;*",
     )
-    ds = records[0][1]["posetracks"]
+    ds = records[0].posetracks
     assert set(ds["individuals"].values) == {"mouse"}
     assert set(ds["space"].values) == {"x", "y"}
     assert set(ds["keypoints"].values) == {"nose", "tail"}
@@ -354,7 +354,7 @@ def test_explicit_and_image_size_px_scaling_identical_in_range(tmp_path):
         data_format="movement", data_path=tmp_path / "exp2", data_scale=None
     )
 
-    arr1 = records_explicit[0][1]["posetracks"]["position"].values
-    arr2 = records_image_size[0][1]["posetracks"]["position"].values
+    arr1 = records_explicit[0].posetracks["position"].values
+    arr2 = records_image_size[0].posetracks["position"].values
 
     np.testing.assert_array_equal(arr1, arr2)

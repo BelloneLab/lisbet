@@ -22,7 +22,6 @@ from pathlib import Path
 
 import torch
 import yaml
-from huggingface_hub import snapshot_download
 from rich.console import Console
 from rich.table import Table
 from torch import nn
@@ -284,22 +283,6 @@ def export_embedder(model_path, weights_path, output_path=Path(".")):
     weights_path = output_path / "weights" / weights_path.name
     weights_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(embedding_model.state_dict(), weights_path)
-
-
-def fetch_model(model_id, download_path=Path(".")):
-    """Fetch a model from the HF Hub."""
-    valid_model_ids = [
-        "lisbet32x4-calms21UftT1-classifier",
-        "lisbet32x4-calms21U-embedder",
-    ]
-    assert model_id in valid_model_ids, (
-        f"Model ID '{model_id}' not found in the list of available models."
-    )
-
-    model_path = download_path / model_id
-    snapshot_download(
-        repo_id=f"gchindemi/{model_id}", repo_type="model", local_dir=model_path
-    )
 
 
 def model_info(model_path):

@@ -39,12 +39,11 @@ def test_process_inference_dataset_input_features_success(tmp_path):
     model_dir.mkdir()
     config_path = model_dir / "model_config.yml"
     weights_path = model_dir / "weights.pt"
-    input_features = [
-        ["mouse", "nose", "x"],
-        ["mouse", "nose", "y"],
-        ["mouse", "tail", "x"],
-        ["mouse", "tail", "y"],
-    ]
+    input_features = {
+        "individuals": ["mouse"],
+        "keypoints": ["nose", "tail"],
+        "space": ["x", "y"],
+    }
     config = {
         "bp_dim": 4,
         "emb_dim": 2,
@@ -53,7 +52,7 @@ def test_process_inference_dataset_input_features_success(tmp_path):
         "num_layers": 1,
         "max_len": 10,
         "output_token_idx": -1,
-        "out_dim": {"cfc": 2},
+        "out_dim": {"multiclass": 2},
         "input_features": input_features,
     }
     with open(config_path, "w", encoding="utf-8") as f:
@@ -64,7 +63,7 @@ def test_process_inference_dataset_input_features_success(tmp_path):
     class DummyMultiTaskModel(torch.nn.Module):
         def __init__(self):
             super().__init__()
-            self.task_heads = {"cfc": torch.nn.Linear(2, 2)}
+            self.task_heads = {"multiclass": torch.nn.Linear(2, 2)}
             self.backbone = torch.nn.Linear(4, 2)
 
         def forward(self, x, task_id):
@@ -97,7 +96,11 @@ def test_process_inference_dataset_input_features_incompatible(tmp_path):
     model_dir.mkdir()
     config_path = model_dir / "model_config.yml"
     weights_path = model_dir / "weights.pt"
-    input_features = [["mouse", "nose", "x"], ["mouse", "nose", "y"]]
+    input_features = {
+        "individuals": ["mouse"],
+        "keypoints": ["nose"],
+        "space": ["x", "y"],
+    }
     config = {
         "bp_dim": 2,
         "emb_dim": 2,
@@ -106,7 +109,7 @@ def test_process_inference_dataset_input_features_incompatible(tmp_path):
         "num_layers": 1,
         "max_len": 10,
         "output_token_idx": -1,
-        "out_dim": {"cfc": 2},
+        "out_dim": {"multiclass": 2},
         "input_features": input_features,
     }
     with open(config_path, "w", encoding="utf-8") as f:
@@ -117,7 +120,7 @@ def test_process_inference_dataset_input_features_incompatible(tmp_path):
     class DummyMultiTaskModel(torch.nn.Module):
         def __init__(self):
             super().__init__()
-            self.task_heads = {"cfc": torch.nn.Linear(2, 2)}
+            self.task_heads = {"multiclass": torch.nn.Linear(2, 2)}
             self.backbone = torch.nn.Linear(2, 2)
 
         def forward(self, x, task_id):

@@ -27,6 +27,8 @@ import xarray as xr
 from movement.io import load_poses
 from tqdm.auto import tqdm
 
+from lisbet.io import Record
+
 
 def _preprocess_mabe22_sequence(raw_positions):
     """Preprocess a sequence in the MABe22 Mouse Triplets dataset."""
@@ -63,9 +65,10 @@ def _preprocess_mabe22_sequence(raw_positions):
             "tail_middle",
             "tail_tip",
         ],
-        fps=30,
+        fps=None,  # Force movement to load time coordinate in frame numbers
         source_software="HRnetKumarLab",
     )
+    posetracks.attrs["fps"] = 30  # Useful for interpolation and visualization
     posetracks.attrs["image_size_px"] = [850, 850]
 
     return posetracks
@@ -111,9 +114,9 @@ def _load_train(train_path):
         )
 
         # Create record data structure
-        rec_data = {"posetracks": posetracks, "annotations": annotations}
+        record = Record(id=rec_id, posetracks=posetracks, annotations=annotations)
 
-        train_records.append((rec_id, rec_data))
+        train_records.append(record)
 
     return train_records
 
@@ -196,9 +199,9 @@ def _load_test(test_seq_path, test_labels_path):
         annotations = xr.merge([annot_cls, annot_reg])
 
         # Create record data structure
-        rec_data = {"posetracks": posetracks, "annotations": annotations}
+        record = Record(id=rec_id, posetracks=posetracks, annotations=annotations)
 
-        test_records.append((rec_id, rec_data))
+        test_records.append(record)
 
     return test_records
 

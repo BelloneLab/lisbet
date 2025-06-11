@@ -1,6 +1,6 @@
 import pytest
 
-from lisbet.datasets.core import fetch_dataset
+from lisbet.hub import fetch_dataset
 from lisbet.training import train
 
 
@@ -17,7 +17,7 @@ def test_train_integration(tmp_path):
         window_offset=0,
         epochs=1,
         batch_size=4,
-        task_ids="smp",
+        task_ids="cons",
         emb_dim=4,
         num_layers=1,
         num_heads=1,

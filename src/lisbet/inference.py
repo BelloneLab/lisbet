@@ -18,9 +18,10 @@ from rich.table import Table
 from torchvision import transforms
 from tqdm.auto import tqdm
 
-from . import modeling
-from .datasets import load_records
-from .input_pipeline import FrameClassificationDataset
+from lisbet import modeling
+from lisbet.datasets import WindowDataset
+from lisbet.io import load_records
+from lisbet.transforms_extra import PoseToTensor
 
 
 def run_inference_for_sequence(
@@ -67,19 +68,19 @@ def run_inference_for_sequence(
     """
     model.eval()
 
-    dataset = FrameClassificationDataset(
+    dataset = WindowDataset(
         records=[sequence],
         window_size=window_size,
         window_offset=window_offset,
         fps_scaling=fps_scaling,
-        transform=transforms.Compose([torch.Tensor]),
+        transform=transforms.Compose([PoseToTensor()]),
     )
 
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size)
     predictions = []
 
     with torch.no_grad():
-        for data in dataloader:
+        for data, _ in dataloader:
             data = data.to(device)
             pred = forward_fn(model, data)
             predictions.append(pred.cpu().numpy())
@@ -179,19 +180,51 @@ def _process_inference_dataset(
     )
 
     # Input features compatibility check
-    model_features = [tuple(x) for x in config.get("input_features")]
-    dataset_features = records[0][1]["posetracks"].coords["features"].values.tolist()
-    if dataset_features != model_features:
-        # Make table for better visualization
+    model_features = config.get("input_features", {})
+    dataset_coords = records[0].posetracks.coords
+
+    # Extract dataset features
+    dataset_individuals = list(dataset_coords["individuals"].values)
+    dataset_keypoints = list(dataset_coords["keypoints"].values)
+    dataset_space = list(dataset_coords["space"].values)
+
+    # Extract model features
+    model_individuals = list(model_features.get("individuals", []))
+    model_keypoints = list(model_features.get("keypoints", []))
+    model_space = list(model_features.get("space", []))
+
+    # Compare features
+    features_match = (
+        dataset_individuals == model_individuals
+        and dataset_keypoints == model_keypoints
+        and dataset_space == model_space
+    )
+
+    if not features_match:
         console = Console()
         table = Table(title="Input Features Compatibility Check")
-        table.add_column("Model", style="cyan")
-        table.add_column("Dataset", style="magenta")
 
-        # Add rows to the table
-        rows = zip_longest(model_features, dataset_features, fillvalue="")
-        for m_feat, d_feat in rows:
-            table.add_row(str(m_feat), str(d_feat))
+        columns = [
+            ("Model Individuals", model_individuals, "cyan"),
+            ("Dataset Individuals", dataset_individuals, "magenta"),
+            ("Model Keypoints", model_keypoints, "cyan"),
+            ("Dataset Keypoints", dataset_keypoints, "magenta"),
+            ("Model Space", model_space, "cyan"),
+            ("Dataset Space", dataset_space, "magenta"),
+        ]
+        for name, _, style in columns:
+            table.add_column(name, style=style)
+
+        for row in zip_longest(
+            model_individuals,
+            dataset_individuals,
+            model_keypoints,
+            dataset_keypoints,
+            model_space,
+            dataset_space,
+            fillvalue="",
+        ):
+            table.add_row(*(str(item) for item in row))
 
         # Print the table to string
         with console.capture() as capture:
@@ -214,7 +247,7 @@ def _process_inference_dataset(
     seen_keys = set()
     for seq in tqdm(records, desc=f"Analyzing {data_format} dataset"):
         # Extract sequence ID
-        key = seq[0]
+        key = seq.id
 
         # Check for duplicated keys
         if key in seen_keys:
@@ -252,7 +285,7 @@ def _classification_forward(model: torch.nn.Module, data: torch.Tensor) -> torch
     torch.Tensor
         One-hot encoded class predictions.
     """
-    output = model(data, "cfc")
+    output = model(data, "multiclass")
     return torch.nn.functional.one_hot(
         torch.argmax(output, dim=1), num_classes=output.shape[1]
     )

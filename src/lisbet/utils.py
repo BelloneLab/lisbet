@@ -1,5 +1,6 @@
 """LISBET"""
 
+import imageio.v3 as iio
 import numpy as np
 from scipy.optimize import linear_sum_assignment
 from sklearn.metrics import f1_score
@@ -34,3 +35,15 @@ def permute_predictions(predictions, labels):
         predictions_matched[np.where(predictions == mtf)] = bhv
 
     return predictions_matched
+
+
+def export_pose_video(frames, filename, fps=30):
+    """
+    Export a sequence of frames (numpy arrays, shape [N, H, W, 3]) to mp4 using imageio.
+
+    Args:
+        frames: numpy array of shape (num_frames, height, width, 3), dtype=uint8
+        filename: output mp4 file path
+        fps: frames per second
+    """
+    iio.imwrite(filename, frames, fps=fps, codec="libx264", quality=8)

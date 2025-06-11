@@ -10,8 +10,8 @@ import numpy as np
 import yaml
 from sklearn.metrics import classification_report
 
-from . import inference
-from .datasets import load_records
+from lisbet import inference
+from lisbet.io import load_records
 
 
 def evaluate_model(
@@ -109,17 +109,13 @@ def evaluate_model(
         rename_coords=rename_coords,
     )
 
-    # Convert to dict for easier access
-    records = dict(records)
-
     # Flatten all records
     y_true = []
     y_pred = []
-    for key, pred_arr in results:
-        # Find corresponding record
-        true_labels = (
-            records[key]["annotations"].target_cls.argmax("behaviors").squeeze().values
-        )
+    for (key, pred_arr), rec in zip(results, records):
+        assert rec.id == key
+
+        true_labels = rec.annotations.target_cls.argmax("behaviors").squeeze().values
 
         # pred_arr is one-hot, take argmax
         pred_labels = np.argmax(pred_arr, axis=1)

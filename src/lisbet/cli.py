@@ -176,6 +176,9 @@ def lazy_load_handler(
     module_path: str, function_name: str, args: dict[str, Any]
 ) -> None:
     """Dynamically import and call a command handler."""
+    # Always use absolute imports from the lisbet root package
+    if not module_path.startswith("lisbet"):
+        module_path = f"lisbet{module_path}"
     module = importlib.import_module(module_path)
     handler = getattr(module, function_name)
 
@@ -200,30 +203,30 @@ def configure_train_model_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--task_ids",
         type=str,
-        default="cfc",
+        default="multiclass",
         help=textwrap.dedent(
             """\
             Task ID or comma-separated list of task IDS.
 
             Valid (supervised) tasks are:
-              - cfc: multi-Class Frame Classification
-              - lfc: multi-Label Frame Classification
+              - multiclass: Multi-Class Frame Classification
+              - multilabel: Multi-Label Frame Classification
 
             Valid (self-supervised) tasks are:
-              - nwp: Next Window Prediction
-              - smp: Swap Mouse Prediction
-              - vsp: Video Speed Prediction
-              - dmp: Delay Mouse Prediction
+              - cons: Group Consistency Classification
+              - order: Temporal Order Classification
+              - shift: Temporal Shift Classification
+              - warp: Temporal Warp Classification
 
             Example:
-              nwp,smp
+              order,cons
             """
         ),
     )
     parser.add_argument(
         "--task_data",
         type=str,
-        help="i.e., cfc:[0],nwp:[0,1]",
+        help="i.e., multiclass:[0],order:[0,1]",
     )
     parser.add_argument("--seed", default=1991, type=int, help="Base RNG seed")
     parser.add_argument("--run_id", type=str, help="ID of the run")
@@ -548,13 +551,13 @@ def main() -> None:
         },
         "fetch_dataset": {
             "description": "Download public dataset from the internet",
-            "module": ".datasets",
+            "module": ".hub",
             "function": "fetch_dataset",
             "configure": configure_fetch_dataset_parser,
         },
         "fetch_model": {
             "description": "Download public model from the internet",
-            "module": ".modeling",
+            "module": ".hub",
             "function": "fetch_model",
             "configure": configure_fetch_model_parser,
         },
@@ -598,7 +601,7 @@ def main() -> None:
     # Get command configuration
     cmd_config = commands[args.command]
 
-    # Execute command with lazy loading
+    # Execute command with lazy loading (always absolute import from lisbet root)
     lazy_load_handler(
         module_path=f"lisbet{cmd_config['module']}",
         function_name=cmd_config["function"],

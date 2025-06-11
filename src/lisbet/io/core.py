@@ -1,18 +1,39 @@
-"""Core dataset functionalities."""
+"""IO utilities for LISBET."""
 
 import logging
 import re
+from dataclasses import dataclass
 from functools import partial
+from itertools import repeat
 from pathlib import Path
+from typing import Optional
 
-import pooch
+import torch
 import xarray as xr
-from huggingface_hub import snapshot_download
+import yaml
 from movement.io import load_poses
 from movement.transforms import scale
 from tqdm.auto import tqdm
 
-from . import calms21, mabe22
+
+@dataclass
+class Record:
+    """
+    Data structure representing a single pose-tracking record.
+
+    Parameters
+    ----------
+    id : str
+        Unique identifier for the record, typically derived from the relative path.
+    posetracks : xarray.Dataset
+        Pose-tracking data for the record.
+    annotations : xarray.Dataset or None, optional
+        Annotations associated with the record, if available.
+    """
+
+    id: str
+    posetracks: xr.Dataset
+    annotations: Optional[xr.Dataset] = None
 
 
 def _load_posetracks(seq_path, data_format, data_scale, select_coords, rename_coords):
@@ -69,8 +90,15 @@ def _load_posetracks(seq_path, data_format, data_scale, select_coords, rename_co
     # NOTE: There should be only one dataset per sequence, but we keep this for
     #       compatibility with multiple single-individual datasets
     ds = xr.concat(dss, dim="individuals")
-
     logging.debug("Individuals: %s", ds["individuals"].values)
+
+    # Replace nan values with 0.0 in the 'position' variable
+    # NOTE: This is a workaround for the issue with NaN values in the 'position' during
+    #       training, which can cause issues with the model. In the future, we could try
+    #       to handle NaN values more gracefully, e.g., by interpolating them or using a
+    #       more sophisticated imputation method in movement.
+    ds["position"] = ds["position"].fillna(0.0)
+    logging.debug("Replaced NaN values in 'position' with 0.0")
 
     # Drop confidence variable, if present
     # NOTE: This variable is currently not needed in LISBET, but it may become useful in
@@ -179,11 +207,6 @@ def _load_posetracks(seq_path, data_format, data_scale, select_coords, rename_co
             "(data_scale=None) for normalization."
         )
 
-    # Stack variables into a single dimension
-    # NOTE: This is done already here for performance reasons, as stacking in the
-    #       `input_pipeline._select_and_pad` is very inefficient.
-    ds = ds.stack(features=("individuals", "keypoints", "space"))
-
     # NOTE: We keep the whole Dataset object, rather than selecting the "position"
     #       variable, to allow for future extensions (e.g., adding more variables) and
     #       to keep the FPS information.
@@ -258,9 +281,9 @@ def load_records(
 
     Returns
     -------
-    list[tuple[str, dict[str, xarray.Dataset]]]
-        A list of (record_id, data_dict) pairs; every data_dict contains at least
-        'posetracks' (xarray.Dataset), and optionally 'annotations'.
+    list[Record]
+        A list of Record objects, each containing id, posetracks, and optionally
+        annotations.
 
     Raises
     ------
@@ -279,10 +302,12 @@ def load_records(
     ... )
     >>> print(len(records))
     42
-    >>> print(records[0][0])
+    >>> print(records[0].id)
     'session1/seq001'
-    >>> print(records[0][1].keys())
-    dict_keys(['posetracks', 'annotations'])
+    >>> print(records[0].posetracks)
+    <xarray.Dataset ...>
+    >>> print(records[0].annotations)
+    <xarray.Dataset ...> or None
 
     """
     # Find all potential record paths
@@ -305,39 +330,109 @@ def load_records(
     records = []
     for seq_path in tqdm(seq_paths, desc="Loading dataset"):
         # Load pose-tracking data
-        ds = _load_posetracks(
+        posetracks = _load_posetracks(
             seq_path, data_format, data_scale, select_coords, rename_coords
         )
-        if ds is not None:
-            rec_data = {"posetracks": ds}
-        else:
+        if posetracks is None:
             logging.debug("Skipping %s, no tracking data found", str(seq_path))
             continue
 
         # Load annotations
-        if (annotations := _load_annotations(seq_path)) is not None:
-            rec_data["annotations"] = annotations
+        annotations = _load_annotations(seq_path)
 
         # Create record id
         rec_id = str(seq_path.relative_to(data_path))
 
-        # Add record to the list
-        records.append((rec_id, rec_data))
+        # Add Record object to the list
+        records.append(
+            Record(id=rec_id, posetracks=posetracks, annotations=annotations)
+        )
 
     # Sanity check: All posetracks must have the same 'features' coordinate (summary of
     #               individuals/keypoints/space)
     if records:
-        ref_features = records[0][1]["posetracks"].coords["features"].values.tolist()
-        for rec_id, rec_data in records:
-            ds_features = rec_data["posetracks"].coords["features"].values.tolist()
-            if ds_features != ref_features:
-                raise ValueError(
-                    f"Inconsistent posetracks coordinates in record '{rec_id}':\n"
-                    f"Reference features:\n{ref_features}\n"
-                    f"Record features:\n{ds_features}"
-                )
+        ref_coords = {
+            dim: records[0].posetracks.coords[dim].values.tolist()
+            for dim in ("individuals", "keypoints", "space")
+        }
+        for rec in records:
+            for dim in ("individuals", "keypoints", "space"):
+                ds_coords = rec.posetracks.coords[dim].values.tolist()
+                if ds_coords != ref_coords[dim]:
+                    raise ValueError(
+                        f"Inconsistent posetracks coordinates in record '{rec.id}':\n"
+                        f"Reference {dim}:\n{ref_coords[dim]}\n"
+                        f"Record {dim}:\n{ds_coords}"
+                    )
+    else:
+        raise ValueError(
+            "No valid records found in the specified directory. Please check the data "
+            "path, format and filters to ensure they match the dataset structure.\n"
+            f"Current values are: \n data_path = {data_path}\n "
+            f"data_format = {data_format}\n data_filter = {data_filter}\n"
+        )
 
     return records
+
+
+def load_multi_records(
+    data_format,
+    data_path,
+    data_scale,
+    data_filter,
+    select_coords,
+    rename_coords,
+):
+    """Internal helper. Loads and splits records for all tasks."""
+    datasets = data_format.split(",")
+    datapaths = data_path.split(",")
+    if len(datasets) == len(datapaths):
+        datasources = list(zip(datasets, datapaths))
+    elif len(datapaths) == 1:
+        datasources = list(zip(datasets, repeat(datapaths[0])))
+    else:
+        raise ValueError(
+            "Input arguments datasets and datapaths must have the same length, or"
+            " datapath must be a single element."
+        )
+    logging.debug(datasources)
+
+    # Load records
+    multi_records = [
+        load_records(
+            dataset,
+            datapath,
+            data_scale=data_scale,
+            data_filter=data_filter,
+            select_coords=select_coords,
+            rename_coords=rename_coords,
+        )
+        for dataset, datapath in datasources
+    ]
+
+    # Sanity check: All posetracks must have the same 'individuals', 'keypoints', and
+    #               'space' coordinates across datasets. As consistency within a dataset
+    #               is already checked, we only need to check the first record of each
+    #               dataset against the others.
+    main_coords = [
+        {
+            dim: recs[0].posetracks.coords[dim].values.tolist()
+            for dim in ("individuals", "keypoints", "space")
+        }
+        for recs in multi_records
+    ]
+    ref_coords = main_coords[0]
+    for i, coords in enumerate(main_coords):
+        for dim in ("individuals", "keypoints", "space"):
+            if coords[dim] != ref_coords[dim]:
+                raise ValueError(
+                    "Inconsistent posetracks coordinates in loaded records, dataset "
+                    f"{i}:\n"
+                    f"Reference {dim}:\n{ref_coords[dim]}\n"
+                    f"Record {dim}:\n{coords[dim]}"
+                )
+
+    return multi_records
 
 
 def dump_records(data_path, records):
@@ -351,169 +446,78 @@ def dump_records(data_path, records):
     data_path : str or Path
         Directory where the records will be saved.
 
-    records : list of tuples
-        List of records to be saved. Each record is a tuple containing
+    records : list of Record
+        List of Record objects to be saved.
 
     """
-    for key, data in tqdm(records, desc="Dumping records to disk"):
-        rec_path = Path(data_path) / key
+    for rec in tqdm(records, desc="Dumping records to disk"):
+        rec_path = Path(data_path) / rec.id
         rec_path.mkdir(parents=True, exist_ok=True)
 
         # Save posetracks
-        data["posetracks"].to_netcdf(rec_path / "tracking.nc", engine="scipy")
+        rec.posetracks.to_netcdf(rec_path / "tracking.nc", engine="scipy")
 
         # Save annotations
-        if "annotations" in data:
-            data["annotations"].to_netcdf(rec_path / "annotations.nc", engine="scipy")
+        if rec.annotations is not None:
+            rec.annotations.to_netcdf(rec_path / "annotations.nc", engine="scipy")
 
 
-def fetch_dataset(dataset_id, download_path):
-    """
-    Download and preprocess keypoints datasets from remote repositories.
+def dump_weights(model, output_path, run_id, filename):
+    """Internal helper. Saves model weights."""
+    weights_path = Path(output_path) / "models" / run_id / "weights" / filename
+    weights_path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(model.state_dict(), weights_path)
 
-    Downloads the specified dataset, processes raw data (e.g., keypoints, annotations),
-    and stores them in a standardized format for analysis.
 
-    Parameters
-    ----------
-    dataset_id : str
-        Identifier for the dataset to fetch. Currently supported datasets:
-        - "CalMS21_Task1": Mouse behavior classification dataset
-        - "CalMS21_Unlabeled": Unlabeled mouse behavior videos
-        - "SampleData": Sample dataset for testing
-        Additional datasets may be supported in future versions.
+def dump_model_config(
+    output_path,
+    run_id,
+    window_size,
+    window_offset,
+    output_token_idx,
+    bp_dim,
+    emb_dim,
+    hidden_dim,
+    num_heads,
+    num_layers,
+    max_len,
+    tasks,
+    input_features,
+):
+    """Internal helper. Saves model config."""
+    model_config = {
+        "model_id": run_id,
+        "window_size": window_size,
+        "window_offset": window_offset,
+        "output_token_idx": output_token_idx,
+        "bp_dim": bp_dim,
+        "emb_dim": emb_dim,
+        "hidden_dim": hidden_dim,
+        "num_heads": num_heads,
+        "num_layers": num_layers,
+        "max_len": max_len,
+        "out_dim": {task.task_id: task.out_dim for task in tasks},
+        "input_features": input_features,
+    }
+    model_path = Path(output_path) / "models" / run_id / "model_config.yml"
+    model_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(model_path, "w", encoding="utf-8") as f_yaml:
+        yaml.safe_dump(model_config, f_yaml)
 
-    download_path : str
-        Base directory path where the dataset will be stored. The function creates
-        subdirectories for cache and processed data.
 
-    Returns
-    -------
-    None
-        Data is saved to disk in standardized format.
+def dump_profiling_results(output_path, run_id, prof):
+    """Internal helper. Saves profiling results."""
+    # Create profiling directory
+    profiling_path = Path(output_path) / "models" / run_id / "profiler"
+    profiling_path.mkdir(parents=True, exist_ok=True)
 
-    Raises
-    ------
-    ValueError
-        If dataset_id is not one of the supported options.
-
-    Notes
-    -----
-    The function handles downloads with checksums and caching using pooch.
-    Downloaded data is temporarily stored in a cache directory before being
-    processed into the final standardized format.
-
-    """
-    if dataset_id == "CalMS21_Task1":
-        # Get data from Caltech repo
-        fnames = pooch.retrieve(
-            url=(
-                "https://data.caltech.edu/records/s0vdx-0k302/files/"
-                "task1_classic_classification.zip?download=1"
-            ),
-            known_hash="md5:8a02654fddae28614ee24a6a082261b8",
-            path=Path(download_path) / "datasets" / ".cache" / "lisbet",
-            processor=pooch.Unzip(
-                members=[
-                    "task1_classic_classification/calms21_task1_train.json",
-                    "task1_classic_classification/calms21_task1_test.json",
-                ],
-            ),
-            progressbar=True,
-        )
-
-        # Preprocess keypoints
-        rawdata_path = Path(fnames[0]).parents[1]
-        train_records, test_records = calms21.load_taskx(rawdata_path, taskid=1)
-
-        # Store data in LISBET-compatible format
-        data_path = (
-            Path(download_path)
-            / "datasets"
-            / "CalMS21"
-            / "task1_classic_classification"
-        )
-        dump_records(data_path, train_records)
-        dump_records(data_path, test_records)
-
-    elif dataset_id == "CalMS21_Unlabeled":
-        # Get data from Caltech repo
-        fnames = pooch.retrieve(
-            url=(
-                "https://data.caltech.edu/records/s0vdx-0k302/files/"
-                "unlabeled_videos.zip?download=1"
-            ),
-            known_hash="md5:35ab3acdeb231a3fe1536e38ad223b2e",
-            path=Path(download_path) / "datasets" / ".cache" / "lisbet",
-            processor=pooch.Unzip(
-                members=[
-                    "unlabeled_videos/calms21_unlabeled_videos_part1.json",
-                    "unlabeled_videos/calms21_unlabeled_videos_part2.json",
-                    "unlabeled_videos/calms21_unlabeled_videos_part3.json",
-                    "unlabeled_videos/calms21_unlabeled_videos_part4.json",
-                ],
-            ),
-            progressbar=True,
-        )
-
-        # Preprocess keypoints
-        rawdata_path = Path(fnames[0]).parents[1]
-        records = calms21.load_unlabeled(rawdata_path)
-
-        # Store data in LISBET-compatible format
-        data_path = Path(download_path) / "datasets" / "CalMS21" / "unlabeled_videos"
-        dump_records(data_path, records)
-
-    elif dataset_id == "MABe22_MouseTriplets":
-        # Get data from Caltech repo
-        train_path = pooch.retrieve(
-            url=(
-                "https://data.caltech.edu/records/rdsa8-rde65/files/"
-                "mouse_triplet_train.npy?download=1"
-            ),
-            known_hash="md5:76a48f3a1679a219a0e7e8a87871cc74",
-            path=Path(download_path) / "datasets" / ".cache" / "lisbet",
-            progressbar=True,
-        )
-        test_seq_path = pooch.retrieve(
-            url=(
-                # TMP, bug in default Caltech repo
-                "https://data.caltech.edu/records/8kdn3-95j37/files/"
-                "mouse_triplet_test.npy?download=1"
-            ),
-            known_hash="md5:20dc132300118a64aac665dd68153b20",
-            path=Path(download_path) / "datasets" / ".cache" / "lisbet",
-            progressbar=True,
-        )
-        test_labels_path = pooch.retrieve(
-            url=(
-                "https://data.caltech.edu/records/rdsa8-rde65/files/"
-                "mouse_triplets_test_labels.npy?download=1"
-            ),
-            known_hash="md5:5a54f2d29a13a256aabbefc61a633176",
-            path=Path(download_path) / "datasets" / ".cache" / "lisbet",
-            progressbar=True,
-        )
-
-        # Preprocess keypoints
-        train_records, test_records = mabe22.load_mouse_triplets(
-            train_path, test_seq_path, test_labels_path
-        )
-
-        # Store records in LISBET-compatible format
-        data_path = Path(download_path) / "datasets" / "MABe22" / "mouse_triplets"
-        dump_records(data_path / "train", train_records)
-        dump_records(data_path / "test", test_records)
-
-    elif dataset_id == "SampleData":
-        # Fetch data from HuggingFace repo
-        # NOTE: This is a small sample dataset for testing purposes
-        data_path = snapshot_download(
-            repo_id="gchindemi/lisbet-examples",
-            allow_patterns="sample_keypoints/",
-            local_dir=Path(download_path) / "datasets",
-            repo_type="dataset",
-        )
-
-    else:
-        raise ValueError(f"Unknown dataset {dataset_id}")
+    # Save profiling results
+    prof.export_chrome_trace(str(profiling_path / "chrome_trace.json.gz"))
+    prof.export_memory_timeline(str(profiling_path / "memory_trace.html"))
+    prof.export_stacks(str(profiling_path / "cpu_stacks.txt"), "self_cpu_time_total")
+    prof.export_stacks(str(profiling_path / "cuda_stacks.txt"), "self_cuda_time_total")
+    with open(profiling_path / "profiling_summary.txt", "w", encoding="utf-8") as f:
+        f.write("CPU Profiling Summary:\n")
+        f.write(prof.key_averages().table(sort_by="self_cpu_time_total", row_limit=10))
+        f.write("\n\nCUDA Profiling Summary:\n")
+        f.write(prof.key_averages().table(sort_by="self_cuda_time_total", row_limit=10))

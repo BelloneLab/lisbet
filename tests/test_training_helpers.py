@@ -7,8 +7,8 @@ import xarray as xr
 import yaml
 from sklearn.utils._param_validation import InvalidParameterError
 
+from lisbet.io import Record, dump_model_config, dump_weights, load_multi_records
 from lisbet.training.core import _compute_epoch_logs, _configure_dataloaders
-from lisbet.training.io import dump_model_config, dump_weights, load_multi_records
 from lisbet.training.preprocessing import split_multi_records
 from lisbet.training.tasks import Task
 from lisbet.training.utils import generate_seeds
@@ -153,14 +153,16 @@ def test_splits_raises(dummy_dataset):
         Path to the dummy dataset fixture.
     """
     # Create dummy multi_records: one dataset with two records
-    multi_records = [[("exp0", {"posetracks": None}), ("exp1", {"posetracks": None})]]
+    multi_records = [
+        [Record(id="exp0", posetracks=None), Record(id="exp1", posetracks=None)]
+    ]
     # dev_ratio=1.0 would leave no training data
     with pytest.raises(InvalidParameterError) as excinfo:
         split_multi_records(
             multi_records=multi_records,
             dev_ratio=1.0,
             dev_seed=42,
-            task_ids=["cfc"],
+            task_ids=["multiclass"],
             task_data=None,
         )
     assert "test_size" in str(excinfo.value)
@@ -177,30 +179,30 @@ def test_valid_two_way_split(large_dummy_dataset):
         Path to the large dummy dataset fixture.
     """
     # Create multi_records as a single dataset with 5 records
-    multi_records = [[(f"exp{i}", {"posetracks": None}) for i in range(5)]]
+    multi_records = [[Record(id=f"exp{i}", posetracks=None) for i in range(5)]]
     # Use dev_ratio=0.2 (should give 4 train, 1 dev)
     train_rec, dev_rec = split_multi_records(
         multi_records=multi_records,
         dev_ratio=0.2,
         dev_seed=42,
-        task_ids=["cfc"],
+        task_ids=["multiclass"],
         task_data=None,
     )
-    # Should have 4 train, 1 dev for task 'cfc'
-    assert "cfc" in train_rec
-    assert "cfc" in dev_rec
-    assert len(train_rec["cfc"]) == 4
-    assert len(dev_rec["cfc"]) == 1
+    # Should have 4 train, 1 dev for task 'multiclass'
+    assert "multiclass" in train_rec
+    assert "multiclass" in dev_rec
+    assert len(train_rec["multiclass"]) == 4
+    assert len(dev_rec["multiclass"]) == 1
     # All record IDs should be unique across splits
-    train_ids = set(rec[0] for rec in train_rec["cfc"])
-    dev_ids = set(rec[0] for rec in dev_rec["cfc"])
+    train_ids = set(rec.id for rec in train_rec["multiclass"])
+    dev_ids = set(rec.id for rec in dev_rec["multiclass"])
     assert train_ids.isdisjoint(dev_ids)
     assert len(train_ids | dev_ids) == 5
 
 
 def test_generate_seeds_deterministic_and_override():
-    seeds1 = generate_seeds(123, ["cfc", "nwp"])
-    seeds2 = generate_seeds(123, ["cfc", "nwp"])
+    seeds1 = generate_seeds(123, ["multiclass", "order"])
+    seeds2 = generate_seeds(123, ["multiclass", "order"])
     assert seeds1 == seeds2
     assert "torch" in seeds1
 
@@ -208,14 +210,14 @@ def test_generate_seeds_deterministic_and_override():
 def test_configure_dataloaders_min_samples(monkeypatch):
     # Mock a minimal dataset and dataloader
     class DummyDataset:
+        def __init__(self):
+            self.n_frames = 10  # Add n_frames attribute
+
         def __len__(self):
             return 10
 
-        def resample_dataset(self):
-            self.resampled = True
-
     class DummyDataLoader:
-        def __init__(self, dataset, batch_size, sampler, num_workers, pin_memory):
+        def __init__(self, dataset, batch_size, *args, **kwargs):
             self.dataset = dataset
             self.batch_size = batch_size
 
@@ -226,7 +228,7 @@ def test_configure_dataloaders_min_samples(monkeypatch):
             self.num_samples = num_samples
 
     monkeypatch.setattr("torch.utils.data.RandomSampler", DummySampler)
-    monkeypatch.setattr("torch.utils.data.DataLoader", DummyDataLoader)
+    monkeypatch.setattr("lisbet.training.core.DataLoader", DummyDataLoader)
 
     # Use Task dataclass with train_dataset attribute
     task1 = Task(
@@ -237,7 +239,6 @@ def test_configure_dataloaders_min_samples(monkeypatch):
         train_dataset=DummyDataset(),
         train_loss=None,
         train_score=None,
-        resample=False,
     )
     task2 = Task(
         task_id="dummy2",
@@ -247,15 +248,13 @@ def test_configure_dataloaders_min_samples(monkeypatch):
         train_dataset=DummyDataset(),
         train_loss=None,
         train_score=None,
-        resample=True,
     )
     tasks = [task1, task2]
-    dataloaders = _configure_dataloaders(
-        tasks, "train", batch_size=4, group_sample=None, pin_memory=False
+    dataloaders, n_batches = _configure_dataloaders(
+        tasks, "train", batch_size=4, sample_ratio=None, pin_memory=False
     )
     assert len(dataloaders) == 2
     assert isinstance(dataloaders[0], DummyDataLoader)
-    assert hasattr(tasks[1].train_dataset, "resampled")
 
 
 def test_compute_epoch_logs_basic():
@@ -274,34 +273,32 @@ def test_compute_epoch_logs_basic():
             pass
 
     task1 = Task(
-        task_id="cfc",
+        task_id="multiclass",
         head=None,
         out_dim=1,
         loss_function=None,
         train_dataset=None,
         train_loss=DummyMetric(),
         train_score=DummyMetric(),
-        resample=False,
     )
     task2 = Task(
-        task_id="nwp",
+        task_id="order",
         head=None,
         out_dim=1,
         loss_function=None,
         train_dataset=None,
         train_loss=DummyMetric(),
         train_score=DummyMetric(),
-        resample=False,
     )
     tasks = [task1, task2]
     logs = _compute_epoch_logs("train", tasks)
-    assert "cfc_train_score" in logs
-    assert "nwp_train_score" in logs
-    assert "cfc_train_loss" in logs
-    assert "nwp_train_loss" in logs
-    assert np.isclose(logs["cfc_train_loss"], 0.5)
-    assert np.isclose(logs["nwp_train_loss"], 0.5)
-    assert 0.0 <= logs["cfc_train_score"] <= 1.0
+    assert "multiclass_train_score" in logs
+    assert "order_train_score" in logs
+    assert "multiclass_train_loss" in logs
+    assert "order_train_loss" in logs
+    assert np.isclose(logs["multiclass_train_loss"], 0.5)
+    assert np.isclose(logs["order_train_loss"], 0.5)
+    assert 0.0 <= logs["multiclass_train_score"] <= 1.0
 
 
 def test_save_and_load_weights(tmp_path):
@@ -321,24 +318,22 @@ def test_save_model_config(tmp_path):
     run_id = "testrun"
     # Use Task dataclass for tasks
     task1 = Task(
-        task_id="cfc",
+        task_id="multiclass",
         head=None,
         out_dim=3,
         loss_function=None,
         train_dataset=None,
         train_loss=None,
         train_score=None,
-        resample=False,
     )
     task2 = Task(
-        task_id="nwp",
+        task_id="order",
         head=None,
         out_dim=1,
         loss_function=None,
         train_dataset=None,
         train_loss=None,
         train_score=None,
-        resample=False,
     )
     tasks = [task1, task2]
     input_features = [["mouse", "nose", "x"], ["mouse", "nose", "y"]]

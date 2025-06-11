@@ -3,11 +3,14 @@
 import json
 import logging
 import os
+from pathlib import Path
 
 import numpy as np
 import xarray as xr
 from movement.io import load_poses
 from tqdm.auto import trange
+
+from lisbet.io import Record
 
 
 def _preprocess_calms21(raw_data):
@@ -34,13 +37,14 @@ def _preprocess_calms21(raw_data):
                 "right_hip",
                 "tail",
             ],
-            fps=30,
+            fps=None,  # Force movement to load time coordinate in frame numbers
             source_software="MARS",
         )
+        posetracks.attrs["fps"] = 30  # Useful for interpolation and visualization
         posetracks.attrs["image_size_px"] = [1024, 570]
 
         # Create record data structure
-        rec_data = {"posetracks": posetracks}
+        record = Record(id=rec_id, posetracks=posetracks)
 
         # Load annotations
         # NOTE: For the moment we keep annotations as a separate field, but this could
@@ -60,7 +64,7 @@ def _preprocess_calms21(raw_data):
             one_hot_annotations = np.eye(len(behaviors), dtype=int)[val["annotations"]]
 
             # Convert to xarray Dataset
-            rec_data["annotations"] = xr.Dataset(
+            record.annotations = xr.Dataset(
                 data_vars=dict(
                     target_cls=(
                         ["time", "behaviors", "annotators"],
@@ -81,7 +85,7 @@ def _preprocess_calms21(raw_data):
             )
 
         # Store preprocessed sequence
-        records.append((rec_id, rec_data))
+        records.append(record)
 
     return records
 
@@ -162,33 +166,36 @@ def load_taskx(datapath, taskid):
 
     # Validate arguments
     assert taskid in (1, 2, 3)
+    taskpath = Path(datapath) / dataset_names[taskid]
 
-    # Load and preprocess raw data
-    records = {}
-    for key in ["train", "test"]:
-        logging.debug("Loading %s data...", key)
+    # Load and preprocess train data
+    logging.debug("Loading train data...")
+    with open(taskpath / f"calms21_task{taskid}_train.json", encoding="utf-8") as f:
+        train_data = json.load(f)
 
-        raw_path = os.path.join(
-            datapath, dataset_names[taskid], f"calms21_task{taskid}_{key}"
-        )
+    # NOTE 1: We use a list to simplify splitting into train/dev/test sets
+    # NOTE 2: The record name is sufficient to disambiguate conditions (i.e.
+    #         annotator ID)
+    train_records = [
+        rec
+        for annot_data in train_data.values()
+        for rec in _preprocess_calms21(annot_data)
+    ]
 
-        # Load from source
-        with open(raw_path + ".json", encoding="utf-8") as f_json:
-            raw_data = json.load(f_json)
+    # Load and preprocess test data
+    logging.debug("Loading test data...")
+    with open(taskpath / f"calms21_task{taskid}_test.json", encoding="utf-8") as f:
+        test_data = json.load(f)
 
-        # Preprocess data
-        # NOTE 1: We use a list to simplify splitting into train/dev/test sets
-        # NOTE 2: The record name is sufficient to disambiguate conditions (i.e.
-        #         annotator ID)
-        records[key] = [
-            rec
-            for cond_data in raw_data.values()
-            for rec in _preprocess_calms21(cond_data)
-        ]
+    test_records = [
+        rec
+        for annot_data in test_data.values()
+        for rec in _preprocess_calms21(annot_data)
+    ]
 
-    logging.info("Training set size =  %d videos", len(records["train"]))
-    logging.debug([key for key, val in records["train"]])
-    logging.info("Test set size = %d videos", len(records["test"]))
-    logging.debug([key for key, val in records["test"]])
+    logging.info("Train set size: %d videos", len(train_records))
+    logging.debug("Train seq IDs: %s", ", ".join(str(rec.id) for rec in train_records))
+    logging.info("Test set size: %d videos", len(test_records))
+    logging.debug("Test seq IDs: %s", ", ".join(str(rec.id) for rec in test_records))
 
-    return records["train"], records["test"]
+    return train_records, test_records
