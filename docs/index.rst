@@ -80,6 +80,12 @@ Design Philosophy
 LISBET works with standard body tracking data from common tools like DeepLabCut and SLEAP.
 The model captures interactions across multiple timescales and can correlate motifs with neural recordings, making it particularly valuable for neuroscience research.
 
+A key feature of LISBET is the use of **self-supervised tasks** to learn meaningful representations of social behavior directly from data, without relying solely on human annotation.
+These tasks challenge the model to understand the structure, timing, and dynamics of social interactions by solving auxiliary prediction problems constructed from the data itself.
+By doing so, LISBET learns to focus on the aspects of behavior that are most relevant for social analysis, such as synchrony, causality, and invariance to speed or identity.
+
+To learn more about these self-supervised tasks and how they shape LISBET’s understanding of behavior, see :doc:`user_guide/self_supervised_tasks`.
+
 The design of LISBET addresses fundamental challenges in social behavior research by moving beyond human-defined behavioral categories.
 By identifying motifs in an unbiased way and also providing tools for traditional behavior classification, LISBET offers a comprehensive approach to understanding social interactions.
 

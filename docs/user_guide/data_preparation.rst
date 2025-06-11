@@ -3,7 +3,7 @@
 Data Preparation
 ================
 
-LISBET currently supports several key point tracking formats, including DeepLabCut.
+LISBET currently supports several key point tracking formats, including DeepLabCut and SLEAP.
 However, to ensure proper data loading and analysis, your dataset must have a specific structure.
 
 Directory Structure
@@ -17,8 +17,6 @@ Otherwise, LISBET will try to (in order):
 2. Look for any CSV file containing the tag "tracking" in its name (e.g., "myexperiment_tracking_42.csv").
 
 Finally, in case no ``tracking file`` can be found using all methods above or multiple files are conflicting, LISBET will raise an error.
-
-While we also support H5 archives following a similar structure for advanced use cases, the directory-based organization is recommended for most users.
 
 Directory Tree and Experimental Conditions
 ------------------------------------------

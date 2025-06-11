@@ -28,6 +28,10 @@ Step 2: Train the model
 
 To train a model, you can use the ``betman train_model`` command.
 The following command trains a model using the CalMS21 dataset with all the available self-supervised tasks.
+
+.. note::
+   For a detailed explanation of the self-supervised tasks available in LISBET, see :doc:`self_supervised_tasks`.
+
 The model is a transformer model with 8 layers, 8 heads, and a hidden dimension of 256.
 The embedding dimension is 64.
 The training process is limited to 100 epochs, randomly sampling 5% of the data at the beginning of each epoch.
@@ -37,9 +41,8 @@ The training history is saved to a file for later review.
 
    $ betman train_model \
       -v \
-      --task_ids=nwp,smp,vsp,dmp \  # Use all the available self-supervised tasks
+      --task_ids=cons,order,shift,warp \  # Use all the available self-supervised tasks
       --data_format=movement \
-      --data_scale="1024x570" \
       --run_id=lisbet64x8-calms21U \
       --seed=1234 \
       --epochs=100 \

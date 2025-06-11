@@ -10,6 +10,7 @@ User Guide
    behavior_classification
    behavior_discovery
    dimensionality_reduction
+   self_supervised_tasks
 
 Advanced
 --------

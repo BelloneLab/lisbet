@@ -31,11 +31,11 @@ This will download the dataset in the ``datasets`` folder under your root direct
 
 Second, we need a model to compute the embeddings.
 You can train your own model (see :ref:`model-training`) or download a pretrained one.
-In this example, we will download a pretrained model called ``lisbet64x8-calms21U-embedder`` from our `model zoo <https://huggingface.co/collections/gchindemi/lisbet-67291c1a44d24865532699b8>`_ using the following command:
+In this example, we will download a pretrained model called ``lisbet32x4-calms21U-embedder`` from our `model zoo <https://huggingface.co/collections/gchindemi/lisbet-67291c1a44d24865532699b8>`_ using the following command:
 
 .. code-block:: console
 
-   $ betman fetch_model lisbet64x8-calms21U-embedder
+   $ betman fetch_model lisbet32x4-calms21U-embedder
 
 The embedding model will be available in the ``models`` folder under your root directory.
 
@@ -44,11 +44,11 @@ Finally we can compute the embeddings using the following command:
 .. code-block:: console
 
    $ betman compute_embeddings \
-    --data_format=saDLC \
+    --data_format=DLC \
     datasets/sample_keypoints \
-    models/lisbet64x8-calms21U-embedder/model_config.yml \
-    models/lisbet64x8-calms21U-embedder/weights/weights_last.pt
+    models/lisbet32x4-calms21U-embedder/model_config.yml \
+    models/lisbet32x4-calms21U-embedder/weights/weights_last.pt
 
 You will find the embeddings in the ``embeddings`` folder under your root directory.
 
-This example can easily be adapted to your own data and models, and to generate behavioral annotations by switching the model to a classifier (e.g., try the ``lisbet64x8-calms21UftT1`` model from our `model zoo <https://huggingface.co/collections/gchindemi/lisbet-67291c1a44d24865532699b8>`_).
+This example can easily be adapted to your own data and models, and to generate behavioral annotations by switching the model to a classifier (e.g., try the ``lisbet32x4-calms21UftT1`` model from our `model zoo <https://huggingface.co/collections/gchindemi/lisbet-67291c1a44d24865532699b8>`_).

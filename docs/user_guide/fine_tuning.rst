@@ -27,18 +27,17 @@ Fine-tuning the model on the CalMS21 dataset - Task 1 can be done using the ``be
 
     betman train_model \
         -v \
-        --data_format=h5archive \
-        --data_scale="1024x570" \
+        --data_format=movement \
         --data_filter=train \
-        --run_id=lisbet64x8-calms21UftT1 \
+        --run_id=lisbet32x4-calms21UftT1 \
         --seed=42 \
         --learning_rate=1e-6 \
         --epochs=15 \
-        --emb_dim=64 \
-        --num_layers=8 \
-        --num_heads=8 \
-        --hidden_dim=256 \
-        --load_backbone_weights=models/lisbet64x8-calms21U/weights/weights_last.pt \
+        --emb_dim=32 \
+        --num_layers=4 \
+        --num_heads=4 \
+        --hidden_dim=128 \
+        --load_backbone_weights=models/lisbet32x4-calms21U/weights/weights_last.pt \
         --window_offset=99 \
         --save_history \
         datasets/CalMS21/task1_classic_classification
