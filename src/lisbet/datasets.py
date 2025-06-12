@@ -40,12 +40,11 @@ class WindowDataset(IterableDataset):
         """
         super().__init__()
 
+        # Validate input parameters
         if not records:
             raise ValueError("No records provided to the dataset.")
-        if window_size <= 1:
-            raise ValueError(
-                "window_size must be greater than 1 to avoid degenerate interpolation."
-            )
+        if any([rec.posetracks["individuals"].size < 2 for rec in records]):
+            raise ValueError("LISBET requires at least 2 individuals in each record.")
 
         self.records = records
         self.n_records = len(records)
@@ -113,7 +112,8 @@ class WindowDataset(IterableDataset):
             window_size = self.window_size
         if window_size <= 1:
             raise ValueError(
-                "window_size must be greater than 1 to avoid degenerate interpolation."
+                "LISBET requires window_size to be greater than 1 to avoid degenerate "
+                "interpolation."
             )
 
         x = self.records[curr_key].posetracks
@@ -180,9 +180,6 @@ class RandomWindowDataset(WindowDataset):
             The windows dataset from the provided records.
         """
         super().__init__(records, window_size, window_offset, fps_scaling, transform)
-
-        if self.n_frames < 1:
-            raise ValueError("No frames available for sampling in the dataset.")
 
         self.base_seed = (
             base_seed
@@ -253,11 +250,6 @@ class GroupConsistencyDataset(RandomWindowDataset):
     """
 
     def __iter__(self):
-        if self.records[0].posetracks["individuals"].size < 2:
-            raise ValueError(
-                "GroupConsistencyDataset requires at least 2 individuals in each "
-                "record."
-            )
         while True:
             # Select a random window (global frame index)
             global_idx = torch.randint(0, self.n_frames, (1,), generator=self.g).item()
@@ -300,8 +292,13 @@ class GroupConsistencyDataset(RandomWindowDataset):
 
             else:
                 # Don't swap
+                rec_idx_swap, frame_idx_swap, split_idx = rec_idx, frame_idx, 0  # debug
                 x = x_orig
                 y = np.array(0, ndmin=1, dtype=np.float32)
+
+            # Add debugging information
+            x.attrs["orig_coords"] = [rec_idx, frame_idx]
+            x.attrs["swap_coords"] = [rec_idx_swap, frame_idx_swap, split_idx]
 
             if self.transform:
                 x = self.transform(x)
@@ -411,12 +408,10 @@ class TemporalOrderDataset(RandomWindowDataset):
             if torch.rand((1,), generator=self.g).item() < 0.5:
                 # Positive sample: post window follows pre window in the same record
                 # Allow zero-distance windows for every frame, including the last
-                global_idx_post = torch.randint(
+                rec_idx_post = rec_idx_pre
+                frame_idx_post = torch.randint(
                     frame_idx_pre, self.lengths[rec_idx_pre], (1,), generator=self.g
                 ).item()
-
-                # Map global index to (record_index, frame_index)
-                rec_idx_post, frame_idx_post = self._global_to_local(global_idx_post)
 
                 y = np.array(1, ndmin=1, dtype=np.float32)
 
@@ -456,20 +451,26 @@ class TemporalOrderDataset(RandomWindowDataset):
                 y = np.array(0, ndmin=1, dtype=np.float32)
 
             # Extract corresponding window
-            x_pre = self._select_and_pad(rec_idx_pre, frame_idx_pre)
+            x_pre = self._select_and_pad(
+                rec_idx_pre, frame_idx_pre, np.ceil(self.window_size / 2).astype(int)
+            )
 
             # Extract next window
-            x_post = self._select_and_pad(rec_idx_post, frame_idx_post)
+            x_post = self._select_and_pad(
+                rec_idx_post, frame_idx_post, np.floor(self.window_size / 2).astype(int)
+            )
+
+            # Shift the time coordinates of x_post so that it follows x_pre in time
+            x_post = x_post.assign_coords(
+                time=x_post.coords["time"] + x_pre.coords["time"][-1] + 1
+            )
 
             # Concatenate pre and post half-windows
-            split_idx = np.ceil(self.window_size / 2).astype(int)
-            x = xr.concat(
-                [
-                    x_pre.isel(time=slice(0, split_idx)),
-                    x_post.isel(time=slice(split_idx, None)),
-                ],
-                dim="time",
-            )
+            x = xr.concat((x_pre, x_post), dim="time")
+
+            # Add debugging information
+            x.attrs["pre_coords"] = [rec_idx_pre, frame_idx_pre]
+            x.attrs["post_coords"] = [rec_idx_post, frame_idx_post]
 
             if self.transform:
                 x = self.transform(x)
@@ -507,7 +508,7 @@ class TemporalShiftDataset(RandomWindowDataset):
        trajectory may correspond to any individual in the group except the first.
     4. The label is either:
         - For regression: the normalized shift value in [0, 1], where 0 corresponds to
-          min_delay and 1 to max_delay.
+          neg. max_shift and 1 to pos. max shift.
         - For classification: 1 if the shift is positive (delta_delay > 0), 0
           otherwise.
     5. Padding may occur if the shifted window extends beyond the sequence boundaries,
@@ -523,8 +524,7 @@ class TemporalShiftDataset(RandomWindowDataset):
         window_size,
         window_offset=0,
         fps_scaling=1.0,
-        min_delay=-60,
-        max_delay=60,
+        max_shift=60,
         regression=False,
         transform=None,
         base_seed=None,
@@ -542,10 +542,8 @@ class TemporalShiftDataset(RandomWindowDataset):
             Offset for the window in frames (default is 0).
         fps_scaling : float, optional
             Scaling factor for the frames per second (default is 1.0).
-        min_delay : int, optional
-            Minimum delay in frames (default is -60).
-        max_delay : int, optional
-            Maximum delay in frames (default is 60).
+        max_shift : int, optional
+            Maximum time shift to apply, expressed in number of frames (default is 60).
         regression : bool, optional
             Whether to perform regression (default is False, which performs binary
             classification).
@@ -563,16 +561,14 @@ class TemporalShiftDataset(RandomWindowDataset):
 
         super().__init__(records, window_size, window_offset, fps_scaling, transform)
 
-        self.min_delay = min_delay
-        self.max_delay = max_delay
+        if max_shift <= 0:
+            raise ValueError("LISBET requires max_shift to be a positive integer.")
+
+        self.min_delay = -max_shift
+        self.max_delay = max_shift
         self.regression = regression
 
     def __iter__(self):
-        if self.records[0].posetracks["individuals"].size < 2:
-            raise ValueError(
-                "GroupConsistencyDataset requires at least 2 individuals in each "
-                "record."
-            )
         while True:
             # Select a random window (global frame index)
             global_idx = torch.randint(0, self.n_frames, (1,), generator=self.g).item()
@@ -618,6 +614,10 @@ class TemporalShiftDataset(RandomWindowDataset):
             else:
                 y = np.array(delta_delay > 0, ndmin=1, dtype=np.float32)
 
+            # Add debugging information
+            x.attrs["orig_coords"] = [rec_idx, frame_idx]
+            x.attrs["shift_coords"] = [rec_idx, frame_idx_delay, delta_delay]
+
             if self.transform:
                 x = self.transform(x)
 
@@ -646,21 +646,18 @@ class TemporalWarpDataset(RandomWindowDataset):
 
     Notes
     -----
-    1. The speed factor is sampled uniformly at random from [min_speed, max_speed] for
-       each sample.
+    1. The speed factor is sampled uniformly at random from [max_warp, 100 + max_warp]
+       for each sample.
     2. The actual window is extracted by resampling the original frames at the chosen
        speed, then interpolated to the fixed window size.
     3. For regression, the label is the normalized speed factor in [0, 1], where 0
-       corresponds to min_speed and 1 to max_speed.
-    4. For classification, the label is 1 if the speed is above the midpoint
-       ((min_speed + max_speed) / 2), and 0 otherwise.
+       corresponds to max_warp and 1 to 100 + max_warp.
+    4. For classification, the label is 1 if the speed is above 100, and 0 otherwise.
     5. Padding may occur if the resampled window extends beyond the sequence
        boundaries, but this is handled by the window extraction logic and is rare for
        typical settings.
     6. The window_offset parameter determines the temporal alignment of the window
        relative to the reference frame.
-    7. This task encourages the model to learn temporal dynamics and invariance to
-       speed changes in the input data.
     """
 
     def __init__(
@@ -669,8 +666,7 @@ class TemporalWarpDataset(RandomWindowDataset):
         window_size,
         window_offset=0,
         fps_scaling=1.0,
-        min_speed=0.5,
-        max_speed=1.5,
+        max_warp=50.0,
         regression=False,
         transform=None,
         base_seed=None,
@@ -688,10 +684,8 @@ class TemporalWarpDataset(RandomWindowDataset):
             Offset for the window in frames (default is 0).
         fps_scaling : float, optional
             Scaling factor for the frames per second (default is 1.0).
-        min_speed : float, optional
-            Minimum playback speed (default is 0.5).
-        max_speed : float, optional
-            Maximum playback speed (default is 1.5).
+        max_warp : float, optional
+            Maximum time warp to apply, expressed as a percentage (default is 50).
         regression : bool, optional
             Whether to perform regression (default is False, which performs binary
             classification).
@@ -708,8 +702,12 @@ class TemporalWarpDataset(RandomWindowDataset):
         """
         super().__init__(records, window_size, window_offset, fps_scaling, transform)
 
-        self.min_speed = min_speed
-        self.max_speed = max_speed
+        if not (0 < max_warp <= 100):
+            raise ValueError(
+                "LISBET requires max_warp to be a positive value between 0 and 100."
+            )
+        self.min_speed = max_warp / 100.0
+        self.max_speed = 1.0 + max_warp / 100.0
         self.regression = regression
 
     def __iter__(self):
@@ -746,8 +744,11 @@ class TemporalWarpDataset(RandomWindowDataset):
 
             else:
                 # Set speed threshold as label
-                speed_threshold = (self.min_speed + self.max_speed) / 2.0
-                y = np.array(speed > speed_threshold, ndmin=1, dtype=np.float32)
+                y = np.array(speed > 1, ndmin=1, dtype=np.float32)
+
+            # Add debugging information
+            x.attrs["orig_coords"] = [rec_idx, frame_idx]
+            x.attrs["warp_coords"] = [rec_idx, frame_idx, speed]
 
             if self.transform:
                 x = self.transform(x)
