@@ -7,7 +7,16 @@ from torch.utils.data import IterableDataset
 
 
 class WindowDataset(IterableDataset):
-    """Base class for datasets that generate windows of frames from records."""
+    """
+    Base class for datasets that generate windows of frames from records.
+
+    This class is meant to be used during inference (no labels, ordered windows), or to
+    be subclassed for specific tasks that require labeled windows (e.g., classification,
+    regression, etc.). It provides a mechanism to extract windows of frames from a
+    collection of records, applying padding and interpolation as needed.
+    The windows can be centered, causal, or anticausal with respect to the reference
+    frame, depending on the window_offset parameter.
+    """
 
     def __init__(
         self,
@@ -134,6 +143,16 @@ class WindowDataset(IterableDataset):
 
 
 class LabeledDataset(WindowDataset):
+    """
+    Base class for datasets that generate labeled windows of frames from records.
+
+    This class is meant to be used during evaluation, since it provides labeled windows
+    of frames in an orderly fashion. It extends the WindowDataset class to include
+    label extraction based on the specified label format. The labels can be in binary,
+    multiclass, or multilabel format, allowing for different types of classification
+    tasks.
+    """
+
     def __init__(
         self,
         records,
@@ -220,7 +239,17 @@ class LabeledDataset(WindowDataset):
 
 
 class SocialBehaviorDataset(LabeledDataset):
-    """Base class for datasets that generate random windows of frames from records."""
+    """
+    Dataset generator for the social behavior classification task.
+
+    This dataset is designed to classify social behaviors based on the pose data of
+    individuals in a window of frames. For each sample, a window of frames is selected
+    from a record, and the corresponding label is extracted based on the specified
+    label_format. The classifier must predict the social behavior of the individuals
+    in the window, which can be either binary (e.g., presence/absence of a behavior),
+    multiclass (e.g., different types of behaviors), or multilabel (e.g., multiple
+    behaviors occurring simultaneously).
+    """
 
     def __init__(
         self,
