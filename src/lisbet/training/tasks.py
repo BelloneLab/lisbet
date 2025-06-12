@@ -81,7 +81,7 @@ def _configure_supervised_task(
     )
 
     # Create dataloaders
-    train_dataset = datasets.RandomWindowDataset(
+    train_dataset = datasets.SocialBehaviorDataset(
         records=train_rec["multiclass"],
         window_size=window_size,
         window_offset=window_offset,
@@ -103,7 +103,7 @@ def _configure_supervised_task(
     # Update dev attributes if dev records are provided
     if dev_rec["multiclass"]:
         dev_transform = transforms.Compose([PoseToTensor()])
-        task.dev_dataset = datasets.RandomWindowDataset(
+        task.dev_dataset = datasets.SocialBehaviorDataset(
             records=dev_rec["multiclass"],
             window_size=window_size,
             window_offset=window_offset,
