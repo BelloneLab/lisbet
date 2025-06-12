@@ -411,12 +411,10 @@ class TemporalOrderDataset(RandomWindowDataset):
             if torch.rand((1,), generator=self.g).item() < 0.5:
                 # Positive sample: post window follows pre window in the same record
                 # Allow zero-distance windows for every frame, including the last
-                global_idx_post = torch.randint(
+                rec_idx_post = rec_idx_pre
+                frame_idx_post = torch.randint(
                     frame_idx_pre, self.lengths[rec_idx_pre], (1,), generator=self.g
                 ).item()
-
-                # Map global index to (record_index, frame_index)
-                rec_idx_post, frame_idx_post = self._global_to_local(global_idx_post)
 
                 y = np.array(1, ndmin=1, dtype=np.float32)
 
@@ -456,20 +454,26 @@ class TemporalOrderDataset(RandomWindowDataset):
                 y = np.array(0, ndmin=1, dtype=np.float32)
 
             # Extract corresponding window
-            x_pre = self._select_and_pad(rec_idx_pre, frame_idx_pre)
+            x_pre = self._select_and_pad(
+                rec_idx_pre, frame_idx_pre, np.ceil(self.window_size / 2).astype(int)
+            )
 
             # Extract next window
-            x_post = self._select_and_pad(rec_idx_post, frame_idx_post)
+            x_post = self._select_and_pad(
+                rec_idx_post, frame_idx_post, np.floor(self.window_size / 2).astype(int)
+            )
+
+            # Shift the time coordinates of x_post so that it follows x_pre in time
+            x_post = x_post.assign_coords(
+                time=x_post.coords["time"] + x_pre.coords["time"][-1] + 1
+            )
 
             # Concatenate pre and post half-windows
-            split_idx = np.ceil(self.window_size / 2).astype(int)
-            x = xr.concat(
-                [
-                    x_pre.isel(time=slice(0, split_idx)),
-                    x_post.isel(time=slice(split_idx, None)),
-                ],
-                dim="time",
-            )
+            x = xr.concat((x_pre, x_post), dim="time")
+
+            # Add debugging information
+            x.attrs["pre_coords"] = [rec_idx_pre, frame_idx_pre]
+            x.attrs["post_coords"] = [rec_idx_post, frame_idx_post]
 
             if self.transform:
                 x = self.transform(x)
