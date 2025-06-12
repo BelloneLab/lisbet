@@ -704,7 +704,7 @@ class TemporalWarpDataset(RandomWindowDataset):
 
         if not (0 < max_warp <= 100):
             raise ValueError(
-                "LISBET requires max_warp to be a positive integer between 0 and 100."
+                "LISBET requires max_warp to be a positive value between 0 and 100."
             )
         self.min_speed = max_warp / 100.0
         self.max_speed = 1.0 + max_warp / 100.0
