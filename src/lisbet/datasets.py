@@ -209,7 +209,12 @@ class LabeledDataset(WindowDataset):
             )
 
         elif self.label_format == "multilabel":
-            y = self.records[rec_idx].annotations.target_cls.isel(time=frame_idx).values
+            y = (
+                self.records[rec_idx]
+                .annotations.target_cls.isel(time=frame_idx)
+                .squeeze()
+                .values
+            )
 
         return y
 
