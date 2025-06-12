@@ -300,8 +300,13 @@ class GroupConsistencyDataset(RandomWindowDataset):
 
             else:
                 # Don't swap
+                rec_idx_swap, frame_idx_swap, split_idx = rec_idx, frame_idx, 0  # debug
                 x = x_orig
                 y = np.array(0, ndmin=1, dtype=np.float32)
+
+            # Add debugging information
+            x.attrs["orig_coords"] = [rec_idx, frame_idx]
+            x.attrs["swap_coords"] = [rec_idx_swap, frame_idx_swap, split_idx]
 
             if self.transform:
                 x = self.transform(x)
@@ -622,6 +627,10 @@ class TemporalShiftDataset(RandomWindowDataset):
             else:
                 y = np.array(delta_delay > 0, ndmin=1, dtype=np.float32)
 
+            # Add debugging information
+            x.attrs["orig_coords"] = [rec_idx, frame_idx]
+            x.attrs["shift_coords"] = [rec_idx, frame_idx_delay, delta_delay]
+
             if self.transform:
                 x = self.transform(x)
 
@@ -752,6 +761,10 @@ class TemporalWarpDataset(RandomWindowDataset):
                 # Set speed threshold as label
                 speed_threshold = (self.min_speed + self.max_speed) / 2.0
                 y = np.array(speed > speed_threshold, ndmin=1, dtype=np.float32)
+
+            # Add debugging information
+            x.attrs["orig_coords"] = [rec_idx, frame_idx]
+            x.attrs["warp_coords"] = [rec_idx, frame_idx, speed]
 
             if self.transform:
                 x = self.transform(x)
