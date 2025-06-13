@@ -142,7 +142,7 @@ class WindowDataset(IterableDataset):
         return x
 
 
-class LabeledDataset(WindowDataset):
+class AnnotatedDataset(WindowDataset):
     """
     Base class for datasets that generate labeled windows of frames from records.
 
@@ -160,7 +160,7 @@ class LabeledDataset(WindowDataset):
         window_offset=0,
         fps_scaling=1.0,
         transform=None,
-        label_format="multiclass",
+        annot_format="multiclass",
     ):
         """
         Initialize the dataset.
@@ -177,7 +177,7 @@ class LabeledDataset(WindowDataset):
             Scaling factor for the frames per second (default is 1.0).
         transform : callable, optional
             A function/transform to apply to the data (default is None).
-        label_format : str, optional
+        annot_format : str, optional
             Format of the labels. Valid options are 'binary', 'multiclass' 'multilabel'
             for the respective classification tasks (default is 'multiclass').
 
@@ -187,15 +187,15 @@ class LabeledDataset(WindowDataset):
             The windows dataset from the provided records.
         """
         # Validate input parameters
-        if label_format not in ("binary", "multiclass", "multilabel"):
+        if annot_format not in ("binary", "multiclass", "multilabel"):
             raise ValueError(
-                f"Invalid label format '{label_format}'. "
+                f"Invalid label format '{annot_format}'. "
                 "Choose either 'binary', 'multiclass', or 'multilabel'."
             )
 
         super().__init__(records, window_size, window_offset, fps_scaling, transform)
 
-        self.label_format = label_format
+        self.annot_format = annot_format
 
     def __iter__(self):
         for global_idx in range(self.n_frames):
@@ -215,10 +215,10 @@ class LabeledDataset(WindowDataset):
 
     def _select_label(self, rec_idx, frame_idx):
         """Get the label for a given record index and frame index."""
-        if self.label_format == "binary":
+        if self.annot_format == "binary":
             y = self.records[rec_idx].annotations.target_cls.isel(time=frame_idx).values
 
-        elif self.label_format == "multiclass":
+        elif self.annot_format == "multiclass":
             y = (
                 self.records[rec_idx]
                 .annotations.target_cls.isel(time=frame_idx)
@@ -227,7 +227,7 @@ class LabeledDataset(WindowDataset):
                 .values
             )
 
-        elif self.label_format == "multilabel":
+        elif self.annot_format == "multilabel":
             y = (
                 self.records[rec_idx]
                 .annotations.target_cls.isel(time=frame_idx)
@@ -238,14 +238,14 @@ class LabeledDataset(WindowDataset):
         return y
 
 
-class SocialBehaviorDataset(LabeledDataset):
+class SocialBehaviorDataset(AnnotatedDataset):
     """
     Dataset generator for the social behavior classification task.
 
     This dataset is designed to classify social behaviors based on the pose data of
     individuals in a window of frames. For each sample, a window of frames is selected
     from a record, and the corresponding label is extracted based on the specified
-    label_format. The classifier must predict the social behavior of the individuals
+    annot_format. The classifier must predict the social behavior of the individuals
     in the window, which can be either binary (e.g., presence/absence of a behavior),
     multiclass (e.g., different types of behaviors), or multilabel (e.g., multiple
     behaviors occurring simultaneously).
@@ -258,7 +258,7 @@ class SocialBehaviorDataset(LabeledDataset):
         window_offset=0,
         fps_scaling=1.0,
         transform=None,
-        label_format="multiclass",
+        annot_format="multiclass",
         base_seed=None,
     ):
         """
@@ -276,7 +276,7 @@ class SocialBehaviorDataset(LabeledDataset):
             Scaling factor for the frames per second (default is 1.0).
         transform : callable, optional
             A function/transform to apply to the data (default is None).
-        label_format : str, optional
+        annot_format : str, optional
             Format of the labels. Valid options are 'binary', 'multiclass' 'multilabel'
             for the respective classification tasks (default is 'multiclass').
         base_seed : int, optional
@@ -289,7 +289,7 @@ class SocialBehaviorDataset(LabeledDataset):
             The windows dataset from the provided records.
         """
         super().__init__(
-            records, window_size, window_offset, fps_scaling, transform, label_format
+            records, window_size, window_offset, fps_scaling, transform, annot_format
         )
 
         self.base_seed = (

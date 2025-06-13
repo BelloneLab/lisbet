@@ -87,7 +87,7 @@ def _configure_supervised_multilabel_task(
         window_size=window_size,
         window_offset=window_offset,
         transform=train_transform,
-        label_format="multilabel",
+        annot_format="multilabel",
         base_seed=run_seeds["dataset_multilabel"],
     )
 
@@ -110,7 +110,7 @@ def _configure_supervised_multilabel_task(
             window_size=window_size,
             window_offset=window_offset,
             transform=dev_transform,
-            label_format="multilabel",
+            annot_format="multilabel",
             base_seed=run_seeds["dataset_multilabel"],
         )
         task.dev_loss = MeanMetric().to(device)

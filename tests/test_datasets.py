@@ -42,8 +42,8 @@ import torch
 import xarray as xr
 
 from lisbet.datasets import (
+    AnnotatedDataset,
     GroupConsistencyDataset,
-    LabeledDataset,
     SocialBehaviorDataset,
     TemporalOrderDataset,
     TemporalShiftDataset,
@@ -227,12 +227,14 @@ class TestSocialBehaviorDataset:
         assert differences > 0, "Different seeds should produce different sequences"
 
 
-class TestLabeledDataset:
-    """Test LabeledDataset label format functionality."""
+class TestAnnotatedDataset:
+    """Test AnnotatedDataset label format functionality."""
 
-    def test_multiclass_label_format(self, mock_records):
+    def test_multiclass_annot_format(self, mock_records):
         """Test multiclass label extraction."""
-        dataset = LabeledDataset(mock_records, window_size=5, label_format="multiclass")
+        dataset = AnnotatedDataset(
+            mock_records, window_size=5, annot_format="multiclass"
+        )
         x, y = next(iter(dataset))
 
         # Should return class index (0-3 for 4 behaviors) as numpy array
@@ -240,9 +242,11 @@ class TestLabeledDataset:
         assert y.shape == ()  # scalar array
         assert 0 <= y <= 3
 
-    def test_multilabel_label_format(self, mock_records):
+    def test_multilabel_annot_format(self, mock_records):
         """Test multilabel label extraction."""
-        dataset = LabeledDataset(mock_records, window_size=5, label_format="multilabel")
+        dataset = AnnotatedDataset(
+            mock_records, window_size=5, annot_format="multilabel"
+        )
         x, y = next(iter(dataset))
 
         # Should return array of shape (4,) for 4 behaviors
@@ -251,19 +255,19 @@ class TestLabeledDataset:
         assert y.dtype in [np.int32, np.int64]
         assert np.all((y == 0) | (y == 1))  # Should be binary
 
-    def test_binary_label_format(self, mock_records):
+    def test_binary_annot_format(self, mock_records):
         """Test binary label extraction."""
-        dataset = LabeledDataset(mock_records, window_size=5, label_format="binary")
+        dataset = AnnotatedDataset(mock_records, window_size=5, annot_format="binary")
         x, y = next(iter(dataset))
 
         # Should return array of shape (4, 1) for 4 behaviors x 1 annotator
         assert isinstance(y, np.ndarray)
         assert y.shape == (4, 1)
 
-    def test_invalid_label_format_raises_error(self, mock_records):
+    def test_invalid_annot_format_raises_error(self, mock_records):
         """Test that invalid label format raises error."""
         with pytest.raises(ValueError, match="Invalid label format 'invalid'"):
-            LabeledDataset(mock_records, window_size=5, label_format="invalid")
+            AnnotatedDataset(mock_records, window_size=5, annot_format="invalid")
 
 
 class TestGroupConsistencyDataset:
