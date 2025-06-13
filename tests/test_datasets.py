@@ -43,7 +43,8 @@ import xarray as xr
 
 from lisbet.datasets import (
     GroupConsistencyDataset,
-    RandomWindowDataset,
+    LabeledDataset,
+    SocialBehaviorDataset,
     TemporalOrderDataset,
     TemporalShiftDataset,
     TemporalWarpDataset,
@@ -186,13 +187,13 @@ class TestWindowDataset:
             dataset._select_and_pad(0, 10)
 
 
-class TestRandomWindowDataset:
-    """Test RandomWindowDataset randomness control."""
+class TestSocialBehaviorDataset:
+    """Test SocialBehaviorDataset randomness control."""
 
     def test_deterministic_with_seed(self, mock_records):
         """Test that identical seeds produce identical sequences."""
-        dataset1 = RandomWindowDataset(mock_records, window_size=5, base_seed=42)
-        dataset2 = RandomWindowDataset(mock_records, window_size=5, base_seed=42)
+        dataset1 = SocialBehaviorDataset(mock_records, window_size=5, base_seed=42)
+        dataset2 = SocialBehaviorDataset(mock_records, window_size=5, base_seed=42)
 
         # Get first few samples from each dataset
         iter1 = iter(dataset1)
@@ -208,8 +209,8 @@ class TestRandomWindowDataset:
 
     def test_different_seeds_produce_different_sequences(self, mock_records):
         """Test that different seeds produce different sequences."""
-        dataset1 = RandomWindowDataset(mock_records, window_size=5, base_seed=42)
-        dataset2 = RandomWindowDataset(mock_records, window_size=5, base_seed=123)
+        dataset1 = SocialBehaviorDataset(mock_records, window_size=5, base_seed=42)
+        dataset2 = SocialBehaviorDataset(mock_records, window_size=5, base_seed=123)
 
         iter1 = iter(dataset1)
         iter2 = iter(dataset2)
@@ -224,6 +225,45 @@ class TestRandomWindowDataset:
                 differences += 1
 
         assert differences > 0, "Different seeds should produce different sequences"
+
+
+class TestLabeledDataset:
+    """Test LabeledDataset label format functionality."""
+
+    def test_multiclass_label_format(self, mock_records):
+        """Test multiclass label extraction."""
+        dataset = LabeledDataset(mock_records, window_size=5, label_format="multiclass")
+        x, y = next(iter(dataset))
+
+        # Should return class index (0-3 for 4 behaviors) as numpy array
+        assert isinstance(y, np.ndarray)
+        assert y.shape == ()  # scalar array
+        assert 0 <= y <= 3
+
+    def test_multilabel_label_format(self, mock_records):
+        """Test multilabel label extraction."""
+        dataset = LabeledDataset(mock_records, window_size=5, label_format="multilabel")
+        x, y = next(iter(dataset))
+
+        # Should return array of shape (4,) for 4 behaviors
+        assert isinstance(y, np.ndarray)
+        assert y.shape == (4,)
+        assert y.dtype in [np.int32, np.int64]
+        assert np.all((y == 0) | (y == 1))  # Should be binary
+
+    def test_binary_label_format(self, mock_records):
+        """Test binary label extraction."""
+        dataset = LabeledDataset(mock_records, window_size=5, label_format="binary")
+        x, y = next(iter(dataset))
+
+        # Should return array of shape (4, 1) for 4 behaviors x 1 annotator
+        assert isinstance(y, np.ndarray)
+        assert y.shape == (4, 1)
+
+    def test_invalid_label_format_raises_error(self, mock_records):
+        """Test that invalid label format raises error."""
+        with pytest.raises(ValueError, match="Invalid label format 'invalid'"):
+            LabeledDataset(mock_records, window_size=5, label_format="invalid")
 
 
 class TestGroupConsistencyDataset:
@@ -538,12 +578,12 @@ class TestTemporalWarpDataset:
     def test_invalid_max_warp_raises_error(self, mock_records):
         """Test that invalid max_warp parameter raises error."""
         with pytest.raises(
-            ValueError, match="max_warp to be a positive integer between 0 and 100"
+            ValueError, match="max_warp to be a positive value between 0 and 100"
         ):
             TemporalWarpDataset(mock_records, window_size=10, max_warp=0)
 
         with pytest.raises(
-            ValueError, match="max_warp to be a positive integer between 0 and 100"
+            ValueError, match="max_warp to be a positive value between 0 and 100"
         ):
             TemporalWarpDataset(mock_records, window_size=10, max_warp=150)
 
@@ -560,22 +600,22 @@ class TestDatasetIntegration:
             return x
 
         dataset = WindowDataset(mock_records, window_size=5, transform=dummy_transform)
-        x, y = next(iter(dataset))
+        x = next(iter(dataset))
 
         assert x.attrs.get("transformed") is True
 
     def test_consistent_output_structure(self, mock_records):
         """Test that all datasets produce consistent output structures."""
-        datasets = [
-            WindowDataset(mock_records, window_size=5),
-            RandomWindowDataset(mock_records, window_size=5, base_seed=42),
+        # Test labeled datasets (return x, y)
+        labeled_datasets = [
+            SocialBehaviorDataset(mock_records, window_size=5, base_seed=42),
             GroupConsistencyDataset(mock_records, window_size=5, base_seed=42),
             TemporalOrderDataset(mock_records, window_size=5, base_seed=42),
             TemporalShiftDataset(mock_records, window_size=5, base_seed=42),
             TemporalWarpDataset(mock_records, window_size=5, base_seed=42),
         ]
 
-        for dataset in datasets:
+        for dataset in labeled_datasets:
             x, y = next(iter(dataset))
 
             # All should return xarray.Dataset for x
@@ -593,6 +633,18 @@ class TestDatasetIntegration:
             # Label should be numeric
             assert isinstance(y, np.ndarray)
             assert y.dtype in [np.float32, np.int32, np.int64]
+
+        # Test unlabeled dataset (returns only x)
+        unlabeled_dataset = WindowDataset(mock_records, window_size=5)
+        x = next(iter(unlabeled_dataset))
+
+        # Should return xarray.Dataset
+        assert isinstance(x, xr.Dataset)
+        assert "position" in x.data_vars
+        assert "time" in x.dims
+        assert "space" in x.dims
+        assert "keypoints" in x.dims
+        assert "individuals" in x.dims
 
 
 class TestDebugInformation:
@@ -865,10 +917,10 @@ class TestEdgeCasesAndBoundaryConditions:
         record = Record(id="no_annotations", posetracks=posetracks, annotations=None)
 
         dataset = WindowDataset([record], window_size=5)
-        x, y = next(iter(dataset))
+        x = next(iter(dataset))
 
-        # Should handle missing annotations gracefully
-        assert np.isnan(y) or y is None
+        # WindowDataset should handle missing annotations gracefully by returning only x
+        assert isinstance(x, xr.Dataset)
 
     def test_zero_window_offset_vs_nonzero(self, mock_records):
         """Test that window_offset affects window extraction as expected."""
@@ -910,9 +962,9 @@ class TestEdgeCasesAndBoundaryConditions:
         assert "transform_applied" in x.attrs
         assert x.attrs["transform_applied"] is True
 
-    def test_random_window_infinite_iteration(self, mock_records):
-        """Test that RandomWindowDataset can iterate indefinitely."""
-        dataset = RandomWindowDataset(mock_records, window_size=5, base_seed=42)
+    def test_social_behavior_infinite_iteration(self, mock_records):
+        """Test that SocialBehaviorDataset can iterate indefinitely."""
+        dataset = SocialBehaviorDataset(mock_records, window_size=5, base_seed=42)
 
         # Should be able to get many samples without exhaustion
         iterator = iter(dataset)
