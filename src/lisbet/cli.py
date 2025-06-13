@@ -296,6 +296,16 @@ def configure_annotate_behavior_parser(parser: argparse.ArgumentParser) -> None:
     add_verbosity_args(parser)
     add_keypoints_args(parser)
     add_data_io_args(parser, "Keypoint data location")
+    parser.add_argument(
+        "--mode",
+        type=str,
+        default="multiclass",
+        choices=["multiclass", "multilabel"],
+        help="Classification mode",
+    )
+    parser.add_argument(
+        "--threshold", type=float, default=0.5, help="Threshold for multilabel"
+    )
     parser.add_argument("model_path", type=Path, help="Path to model config")
     parser.add_argument("weights_path", type=Path, help="Path to model weights")
 

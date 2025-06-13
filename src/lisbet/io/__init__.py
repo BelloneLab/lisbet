@@ -1,5 +1,7 @@
 from lisbet.io.core import (
     Record,
+    dump_annotations,
+    dump_embeddings,
     dump_model_config,
     dump_profiling_results,
     dump_records,
@@ -10,6 +12,8 @@ from lisbet.io.core import (
 
 __all__ = [
     "Record",
+    "dump_annotations",
+    "dump_embeddings",
     "dump_model_config",
     "dump_profiling_results",
     "dump_records",
