@@ -57,7 +57,7 @@ def _configure_supervised_multilabel_task(
             for rec in train_rec["multilabel"]
         ]
     )
-    num_labels = labels.shape[1]  # You could also use the first record's xarray
+    n_samples, num_labels = labels.shape
 
     # Create classification head
     head = modeling.FrameClassificationHead(
@@ -68,10 +68,8 @@ def _configure_supervised_multilabel_task(
     )
 
     # Compute label weight
-    label_freq = np.mean(labels, axis=0)
-    label_weight = 1.0 / (label_freq + 1e-6)
-    label_weight = label_weight / np.sum(label_weight) * num_labels
-    label_weight = torch.Tensor(label_weight)
+    n_positive = np.sum(labels, axis=0)
+    label_weight = torch.from_numpy(n_samples / (2.0 * n_positive + 1e-6))
     logging.debug("Label weights: %s", label_weight)
 
     # Create data transformers
