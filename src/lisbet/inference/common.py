@@ -192,6 +192,10 @@ def predict_record(
         transform=transforms.Compose([PoseToTensor()]),
     )
 
+    # WARNING: Do not use `num_workers` in DataLoader for inference. The behavior of
+    #          an iterable-style dataset is different from a map-style dataset, and will
+    #          cause `num_workers` * `batch_size` batches to be generated before
+    #          exhausting the dataset.
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size)
     predictions = []
 
