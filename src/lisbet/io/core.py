@@ -503,6 +503,29 @@ def dump_embeddings(results, output_path):
         pd.DataFrame(model_output).to_csv(dst_path, index=False)
 
 
+def dump_evaluation_results(report: dict, output_path: str, model_path: str):
+    """
+    Save evaluation report to a YAML file in a standardized location.
+
+    Parameters
+    ----------
+    report : dict
+        The evaluation report.
+    output_path : str or Path
+        Directory to save the report.
+    model_path : str
+        Path to the model config (used to extract model_id).
+    """
+    with open(model_path, encoding="utf-8") as f_yaml:
+        model_config = yaml.safe_load(f_yaml)
+    model_id = model_config.get("model_id", "unknown_model")
+
+    report_path = Path(output_path) / "evaluations" / model_id / "evaluation_report.yml"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(report_path, "w", encoding="utf-8") as f_yaml:
+        yaml.safe_dump(report, f_yaml)
+
+
 def dump_weights(model, output_path, run_id, filename):
     """Internal helper. Saves model weights."""
     weights_path = Path(output_path) / "models" / run_id / "weights" / filename
