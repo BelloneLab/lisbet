@@ -147,12 +147,9 @@ def _configure_optimizer_and_scheduler(model, learning_rate):
 def _configure_dataloaders(tasks, group, batch_size, sample_ratio, pin_memory):
     """Internal helper. Configures dataloaders for a group."""
     # Estimate number of samples
-    n_batches = int(
-        np.ceil(
-            min(getattr(task, f"{group}_dataset").n_frames for task in tasks)
-            / batch_size
-        )
-    )
+    n_batches = np.ceil(
+        min(getattr(task, f"{group}_dataset").n_frames for task in tasks) / batch_size
+    ).astype(int)
     if sample_ratio is not None:
         n_batches = int(n_batches * sample_ratio)
     logging.info("Using %d samples from the %s group", n_batches * batch_size, group)

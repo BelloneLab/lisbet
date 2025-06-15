@@ -55,7 +55,7 @@ class WindowSelector:
             [rec.posetracks.sizes["time"] for rec in self.records], dtype=int
         )
         self.cumlens = torch.cumsum(self.lengths, dim=0)
-        self.n_frames = self.cumlens[-1]
+        self.n_frames = int(self.cumlens[-1])
 
     def global_to_local(self, global_idx):
         """
