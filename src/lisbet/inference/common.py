@@ -7,6 +7,7 @@ from itertools import zip_longest
 import numpy as np
 import torch
 import yaml
+from lightning.fabric.utilities.data import suggested_max_num_workers
 from rich.console import Console
 from rich.table import Table
 from torchvision import transforms
@@ -192,11 +193,13 @@ def predict_record(
         transform=transforms.Compose([PoseToTensor()]),
     )
 
-    # WARNING: Do not use `num_workers` in DataLoader for inference. The behavior of
-    #          an iterable-style dataset is different from a map-style dataset, and will
-    #          cause `num_workers` * `batch_size` batches to be generated before
-    #          exhausting the dataset.
-    dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size)
+    dataloader = torch.utils.data.DataLoader(
+        dataset,
+        batch_size=batch_size,
+        num_workers=min(suggested_max_num_workers(1), batch_size // 8),
+        prefetch_factor=4,
+        pin_memory=device.type == "cuda",
+    )
     predictions = []
 
     with torch.no_grad():

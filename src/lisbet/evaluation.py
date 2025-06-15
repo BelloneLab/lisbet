@@ -6,13 +6,13 @@ using the new LISBET inference API, torchmetrics, and improved output handling.
 
 from typing import Optional
 
-import numpy as np
 import torch
+from lightning.fabric.utilities.data import suggested_max_num_workers
 from torch.utils.data import DataLoader
 from torchmetrics.classification import Accuracy, F1Score
 from tqdm.auto import tqdm
 
-from lisbet.datasets import AnnotatedDataset
+from lisbet.datasets import AnnotatedWindowDataset
 from lisbet.inference.common import (
     check_feature_compatibility,
     load_model_and_config,
@@ -99,7 +99,7 @@ def evaluate(
     check_feature_compatibility(config, records)
 
     # Prepare dataset for evaluation
-    dataset = AnnotatedDataset(
+    dataset = AnnotatedWindowDataset(
         records=records,
         window_size=window_size,
         window_offset=window_offset,
@@ -107,12 +107,13 @@ def evaluate(
         transform=PoseToTensor(),
         annot_format=mode,
     )
-    # WARNING: Do not use `num_workers` in DataLoader for evaluation. The behavior of
-    #          an iterable-style dataset is different from a map-style dataset, and will
-    #          cause `num_workers` * `batch_size` batches to be generated before
-    #          exhausting the dataset.
-    dataloader = DataLoader(dataset, batch_size=batch_size)
-    n_batches = np.ceil(dataset.n_frames / batch_size).astype(int)
+    dataloader = DataLoader(
+        dataset,
+        batch_size=batch_size,
+        num_workers=min(suggested_max_num_workers(1), batch_size // 8),
+        prefetch_factor=4,
+        pin_memory=device.type == "cuda",
+    )
 
     # Initialize metrics
     n_categories = records[0].annotations.sizes["behaviors"]
@@ -133,7 +134,7 @@ def evaluate(
 
     model.eval()
     with torch.no_grad():
-        for x, y in tqdm(dataloader, desc="Evaluating", total=n_batches, leave=True):
+        for x, y in tqdm(dataloader, desc="Evaluating"):
             x, y = x.to(device), y.to(device)
 
             # Forward pass
