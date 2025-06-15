@@ -108,12 +108,15 @@ def evaluate(
         transform=PoseToTensor(),
         annot_format=mode,
     )
+    num_workers = min(suggested_max_num_workers(1), batch_size // 8)
+    prefetch_factor = 4 if num_workers > 0 else None
+    pin_memory = device.type == "cuda"
     dataloader = DataLoader(
         dataset,
         batch_size=batch_size,
-        num_workers=min(suggested_max_num_workers(1), batch_size // 8),
-        prefetch_factor=4,
-        pin_memory=device.type == "cuda",
+        num_workers=num_workers,
+        prefetch_factor=prefetch_factor,
+        pin_memory=pin_memory,
     )
 
     # Initialize metrics
