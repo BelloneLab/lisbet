@@ -8,8 +8,9 @@ from typing import Optional
 
 import torch
 from lightning.fabric.utilities.data import suggested_max_num_workers
+from rich import print as rprint
 from torch.utils.data import DataLoader
-from torchmetrics.classification import Accuracy, F1Score
+from torchmetrics.classification import Accuracy, F1Score, Precision, Recall
 from tqdm.auto import tqdm
 
 from lisbet.datasets import AnnotatedWindowDataset
@@ -129,8 +130,16 @@ def evaluate(
     else:
         raise ValueError(f"Unknown mode: {mode}")
 
+    # Per-class metrics
+    per_class_metrics_kwargs = metrics_kwargs.copy()
+    per_class_metrics_kwargs["average"] = "none"
+    per_class_metrics_kwargs["ignore_index"] = None
+
     f1_metric = F1Score(task=mode, **metrics_kwargs).to(device)
     acc_metric = Accuracy(task=mode, **metrics_kwargs).to(device)
+    f1_per_class = F1Score(task=mode, **per_class_metrics_kwargs).to(device)
+    precision_per_class = Precision(task=mode, **per_class_metrics_kwargs).to(device)
+    recall_per_class = Recall(task=mode, **per_class_metrics_kwargs).to(device)
 
     model.eval()
     with torch.no_grad():
@@ -143,18 +152,45 @@ def evaluate(
             # Udpate metrics
             f1_metric.update(logits, y)
             acc_metric.update(logits, y)
+            f1_per_class.update(logits, y)
+            precision_per_class.update(logits, y)
+            recall_per_class.update(logits, y)
 
     # Compute metrics
     report = {
         "mode": mode,
         "f1_macro": float(f1_metric.compute()),
         "accuracy_macro": float(acc_metric.compute()),
+        "per_class": {
+            "f1": f1_per_class.compute().cpu().numpy().tolist(),
+            "precision": precision_per_class.compute().cpu().numpy().tolist(),
+            "recall": recall_per_class.compute().cpu().numpy().tolist(),
+        },
     }
 
     # Print summary
-    print(f"Evaluation mode: {mode}")
-    print(f"Macro F1: {report['f1_macro']:.3f}")
-    print(f"Macro Accuracy: {report['accuracy_macro']:.3f}")
+    if ignore_index is not None:
+        rprint(
+            f"\n[bold red]WARNING: Ignoring index {ignore_index} in macro metrics.\n"
+            "A bug in torchmetrics may cause incorrect macro F1 and accuracy "
+            "(see https://github.com/Lightning-AI/torchmetrics/issues/2441).\n"
+            "Please consider validating your results agaist the per-class metrics.",
+        )
+    rprint("\n[bold green]Evaluation Summary")
+    rprint(f"Mode: {mode}")
+    rprint(f"Macro F1: {report['f1_macro']:.3f}")
+    rprint(f"Macro Accuracy: {report['accuracy_macro']:.3f}")
+    rprint("Per-class metrics:")
+    for i, (f1, precision, recall) in enumerate(
+        zip(
+            report["per_class"]["f1"],
+            report["per_class"]["precision"],
+            report["per_class"]["recall"],
+        )
+    ):
+        rprint(
+            f"  Class {i}: F1={f1:.3f}, Precision={precision:.3f}, Recall={recall:.3f}"
+        )
 
     # Save results if requested
     if output_path is not None:
