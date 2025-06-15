@@ -7,7 +7,7 @@ classes rather than trivial shape checks. It includes:
 1. **WindowDataset**: Tests core window extraction, global-to-local mapping, padding,
    fps scaling, and input validation.
 
-2. **RandomWindowDataset**: Tests deterministic behavior with seeds and randomness
+2. **SocialBehaviorDataset**: Tests deterministic behavior with seeds and randomness
    control using monkeypatching.
 
 3. **GroupConsistencyDataset**: Tests the group swapping logic, labeling consistency,
@@ -42,7 +42,7 @@ import torch
 import xarray as xr
 
 from lisbet.datasets import (
-    AnnotatedDataset,
+    AnnotatedWindowDataset,
     GroupConsistencyDataset,
     SocialBehaviorDataset,
     TemporalOrderDataset,
@@ -129,21 +129,21 @@ class TestWindowDataset:
 
         # Record 0 has 100 frames, Record 1 has 50 frames
         # Global indices 0-99 should map to record 0
-        assert dataset._global_to_local(0) == (0, 0)
-        assert dataset._global_to_local(50) == (0, 50)
-        assert dataset._global_to_local(99) == (0, 99)
+        assert dataset.window_selector.global_to_local(0) == (0, 0)
+        assert dataset.window_selector.global_to_local(50) == (0, 50)
+        assert dataset.window_selector.global_to_local(99) == (0, 99)
 
         # Global indices 100-149 should map to record 1
-        assert dataset._global_to_local(100) == (1, 0)
-        assert dataset._global_to_local(125) == (1, 25)
-        assert dataset._global_to_local(149) == (1, 49)
+        assert dataset.window_selector.global_to_local(100) == (1, 0)
+        assert dataset.window_selector.global_to_local(125) == (1, 25)
+        assert dataset.window_selector.global_to_local(149) == (1, 49)
 
     def test_window_extraction_basic(self, mock_records):
         """Test basic window extraction without padding."""
         dataset = WindowDataset(mock_records, window_size=5)
 
         # Extract window from middle of record 0
-        window = dataset._select_and_pad(curr_key=0, curr_loc=10)
+        window = dataset.window_selector.select(rec_idx=0, frame_idx=10)
 
         assert window.sizes["time"] == 5
         assert window.sizes["space"] == 2
@@ -158,13 +158,13 @@ class TestWindowDataset:
         dataset = WindowDataset(mock_records, window_size=10)
 
         # Extract window at beginning (should be padded)
-        window = dataset._select_and_pad(curr_key=0, curr_loc=2)
+        window = dataset.window_selector.select(rec_idx=0, frame_idx=2)
 
         assert window.sizes["time"] == 10
         # The extracted data should handle padding (filled with 0s)
 
         # Extract window at end (should be padded)
-        window = dataset._select_and_pad(curr_key=0, curr_loc=98)
+        window = dataset.window_selector.select(rec_idx=0, frame_idx=98)
         assert window.sizes["time"] == 10
 
     def test_fps_scaling(self, mock_records):
@@ -172,7 +172,7 @@ class TestWindowDataset:
         dataset = WindowDataset(mock_records, window_size=10, fps_scaling=0.5)
 
         # With fps_scaling=0.5, should extract from fewer actual frames
-        window = dataset._select_and_pad(curr_key=0, curr_loc=20)
+        window = dataset.window_selector.select(rec_idx=0, frame_idx=20)
         assert window.sizes["time"] == 10  # Output size unchanged
 
     def test_validation_errors(self, mock_records):
@@ -184,7 +184,7 @@ class TestWindowDataset:
         # Window size too small
         with pytest.raises(ValueError, match="window_size to be greater than 1"):
             dataset = WindowDataset(mock_records, window_size=1)
-            dataset._select_and_pad(0, 10)
+            dataset.window_selector.select(0, 10)
 
 
 class TestSocialBehaviorDataset:
@@ -227,12 +227,12 @@ class TestSocialBehaviorDataset:
         assert differences > 0, "Different seeds should produce different sequences"
 
 
-class TestAnnotatedDataset:
-    """Test AnnotatedDataset label format functionality."""
+class TestAnnotatedWindowDataset:
+    """Test AnnotatedWindowDataset label format functionality."""
 
     def test_multiclass_annot_format(self, mock_records):
         """Test multiclass label extraction."""
-        dataset = AnnotatedDataset(
+        dataset = AnnotatedWindowDataset(
             mock_records, window_size=5, annot_format="multiclass"
         )
         x, y = next(iter(dataset))
@@ -244,7 +244,7 @@ class TestAnnotatedDataset:
 
     def test_multilabel_annot_format(self, mock_records):
         """Test multilabel label extraction."""
-        dataset = AnnotatedDataset(
+        dataset = AnnotatedWindowDataset(
             mock_records, window_size=5, annot_format="multilabel"
         )
         x, y = next(iter(dataset))
@@ -257,7 +257,9 @@ class TestAnnotatedDataset:
 
     def test_binary_annot_format(self, mock_records):
         """Test binary label extraction."""
-        dataset = AnnotatedDataset(mock_records, window_size=5, annot_format="binary")
+        dataset = AnnotatedWindowDataset(
+            mock_records, window_size=5, annot_format="binary"
+        )
         x, y = next(iter(dataset))
 
         # Should return array of shape (4, 1) for 4 behaviors x 1 annotator
@@ -267,7 +269,7 @@ class TestAnnotatedDataset:
     def test_invalid_annot_format_raises_error(self, mock_records):
         """Test that invalid label format raises error."""
         with pytest.raises(ValueError, match="Invalid label format 'invalid'"):
-            AnnotatedDataset(mock_records, window_size=5, annot_format="invalid")
+            AnnotatedWindowDataset(mock_records, window_size=5, annot_format="invalid")
 
 
 class TestGroupConsistencyDataset:
@@ -899,7 +901,7 @@ class TestEdgeCasesAndBoundaryConditions:
         dataset = WindowDataset(mock_records, window_size=4, fps_scaling=2.0)
 
         # Extract a window where we can predict the interpolation
-        window = dataset._select_and_pad(curr_key=0, curr_loc=10)
+        window = dataset.window_selector.select(rec_idx=0, frame_idx=10)
 
         # Should still have 4 time points after interpolation
         assert window.sizes["time"] == 4
@@ -932,8 +934,8 @@ class TestEdgeCasesAndBoundaryConditions:
         dataset_offset = WindowDataset(mock_records, window_size=6, window_offset=2)
 
         # Extract from same location
-        window_zero = dataset_zero._select_and_pad(curr_key=0, curr_loc=20)
-        window_offset = dataset_offset._select_and_pad(curr_key=0, curr_loc=20)
+        window_zero = dataset_zero.window_selector.select(rec_idx=0, frame_idx=20)
+        window_offset = dataset_offset.window_selector.select(rec_idx=0, frame_idx=20)
 
         # Both should have same output size
         assert window_zero.sizes["time"] == 6
