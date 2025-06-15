@@ -22,7 +22,7 @@ We will call this environment ``lisbet-env``, but feel free to use any other nam
 
       .. code-block:: console
 
-         $ python -m venv lisbet-env
+         $ python3 -m venv lisbet-env
          $ source lisbet-env/bin/activate
 
 After creating and activating the ``lisbet-env`` environment, we can install the library using pip:
