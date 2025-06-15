@@ -45,6 +45,8 @@ Finally we can compute the embeddings using the following command:
 
    $ betman compute_embeddings \
     --data_format=DLC \
+    --select_coords="*;*;nose,earL,earR,neck,hipsL,hipsR,tail" \
+    --rename_coords="experimental:resident,stimuli:intruder;*;earL:left_ear,earR:right_ear,hipsL:left_hip,hipsR:right_hip" \
     datasets/sample_keypoints \
     models/lisbet32x4-calms21U-embedder/model_config.yml \
     models/lisbet32x4-calms21U-embedder/weights/weights_last.pt
