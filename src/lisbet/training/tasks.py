@@ -10,7 +10,11 @@ from sklearn.utils.class_weight import compute_class_weight
 from torch.utils.data import Dataset
 from torchmetrics import Metric
 from torchmetrics.aggregation import MeanMetric
-from torchmetrics.classification import BinaryAccuracy, MulticlassF1Score
+from torchmetrics.classification import (
+    BinaryAccuracy,
+    MulticlassF1Score,
+    MultilabelF1Score,
+)
 from torchvision import transforms
 
 from lisbet import datasets, modeling
@@ -31,7 +35,7 @@ class Task:
     dev_score: Optional[Metric] = None
 
 
-def _configure_supervised_task(
+def _configure_supervised_multilabel_task(
     train_rec,
     dev_rec,
     window_size,
@@ -42,7 +46,91 @@ def _configure_supervised_task(
     run_seeds,
     device,
 ):
-    """Internal helper. Configures the classification task."""
+    """Internal helper. Configures the multi-label classification task."""
+    if train_rec["multilabel"][0].annotations is None:
+        raise RuntimeError("The provided dataset does not contain annotations.")
+
+    # Find number of behaviors in the training set
+    labels = np.concatenate(
+        [
+            rec.annotations.target_cls.mean(dim="annotators").values
+            for rec in train_rec["multilabel"]
+        ]
+    )
+    n_samples, num_labels = labels.shape
+
+    # Create classification head
+    head = modeling.FrameClassificationHead(
+        output_token_idx=-(window_offset + 1),
+        emb_dim=emb_dim,
+        out_dim=num_labels,
+        hidden_dim=hidden_dim,
+    )
+
+    # Compute label weight
+    n_positive = np.sum(labels, axis=0)
+    label_weight = torch.from_numpy(n_samples / (2.0 * n_positive + 1e-6))
+    logging.debug("Label weights: %s", label_weight)
+
+    # Create data transformers
+    train_transform = (
+        transforms.Compose(
+            [RandomXYSwap(run_seeds["transform_multilabel"]), PoseToTensor()]
+        )
+        if data_augmentation
+        else transforms.Compose([PoseToTensor()])
+    )
+
+    # Create dataloaders
+    train_dataset = datasets.SocialBehaviorDataset(
+        records=train_rec["multilabel"],
+        window_size=window_size,
+        window_offset=window_offset,
+        transform=train_transform,
+        annot_format="multilabel",
+        base_seed=run_seeds["dataset_multilabel"],
+    )
+
+    # Create task as dataclass with default dev attributes
+    task = Task(
+        task_id="multilabel",
+        head=head,
+        out_dim=num_labels,
+        loss_function=torch.nn.BCEWithLogitsLoss(weight=label_weight.to(device)),
+        train_dataset=train_dataset,
+        train_loss=MeanMetric().to(device),
+        train_score=MultilabelF1Score(num_labels, average="macro").to(device),
+    )
+
+    # Update dev attributes if dev records are provided
+    if dev_rec["multilabel"]:
+        dev_transform = transforms.Compose([PoseToTensor()])
+        task.dev_dataset = datasets.SocialBehaviorDataset(
+            records=dev_rec["multilabel"],
+            window_size=window_size,
+            window_offset=window_offset,
+            transform=dev_transform,
+            annot_format="multilabel",
+            base_seed=run_seeds["dataset_multilabel"],
+        )
+        task.dev_loss = MeanMetric().to(device)
+        task.dev_score = MultilabelF1Score(num_labels, average="macro").to(device)
+
+    return task
+
+
+def _configure_supervised_multiclass_task(
+    train_rec,
+    dev_rec,
+    window_size,
+    window_offset,
+    emb_dim,
+    hidden_dim,
+    data_augmentation,
+    run_seeds,
+    device,
+):
+    """Internal helper. Configures the multi-class classification task."""
     if train_rec["multiclass"][0].annotations is None:
         raise RuntimeError("The provided dataset does not contain annotations.")
 
@@ -81,7 +169,7 @@ def _configure_supervised_task(
     )
 
     # Create dataloaders
-    train_dataset = datasets.RandomWindowDataset(
+    train_dataset = datasets.SocialBehaviorDataset(
         records=train_rec["multiclass"],
         window_size=window_size,
         window_offset=window_offset,
@@ -103,7 +191,7 @@ def _configure_supervised_task(
     # Update dev attributes if dev records are provided
     if dev_rec["multiclass"]:
         dev_transform = transforms.Compose([PoseToTensor()])
-        task.dev_dataset = datasets.RandomWindowDataset(
+        task.dev_dataset = datasets.SocialBehaviorDataset(
             records=dev_rec["multiclass"],
             window_size=window_size,
             window_offset=window_offset,
@@ -202,7 +290,7 @@ def configure_tasks(
     for task_id in task_ids:
         if task_id == "multiclass":
             tasks.append(
-                _configure_supervised_task(
+                _configure_supervised_multiclass_task(
                     train_rec,
                     dev_rec,
                     window_size,
@@ -215,8 +303,18 @@ def configure_tasks(
                 )
             )
         elif task_id == "multilabel":
-            raise NotImplementedError(
-                "Multi-Label Frame Classification task is not implemented yet."
+            tasks.append(
+                _configure_supervised_multilabel_task(
+                    train_rec,
+                    dev_rec,
+                    window_size,
+                    window_offset,
+                    emb_dim,
+                    hidden_dim,
+                    data_augmentation,
+                    run_seeds,
+                    device,
+                )
             )
         elif task_id in ("cons", "order", "shift", "warp"):
             tasks.append(

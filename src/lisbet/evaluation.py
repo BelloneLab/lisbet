@@ -1,20 +1,30 @@
 """Model evaluation utilities for LISBET.
 
-This module provides functions to evaluate classification models on labeled datasets.
+This module provides functions to evaluate classification models on labeled datasets,
+using the new LISBET inference API, torchmetrics, and improved output handling.
 """
 
-from pathlib import Path
 from typing import Optional
 
-import numpy as np
-import yaml
-from sklearn.metrics import classification_report
+import torch
+from lightning.fabric.utilities.data import suggested_max_num_workers
+from rich import print as rprint
+from torch.utils.data import DataLoader
+from torchmetrics.classification import Accuracy, F1Score, Precision, Recall
+from tqdm.auto import tqdm
 
-from lisbet import inference
+from lisbet.datasets import AnnotatedWindowDataset
+from lisbet.inference.common import (
+    check_feature_compatibility,
+    load_model_and_config,
+    select_device,
+)
 from lisbet.io import load_records
+from lisbet.io.core import dump_evaluation_results
+from lisbet.transforms_extra import PoseToTensor
 
 
-def evaluate_model(
+def evaluate(
     model_path: str,
     weights_path: str,
     data_format: str,
@@ -27,20 +37,18 @@ def evaluate_model(
     batch_size: int = 128,
     select_coords: Optional[str] = None,
     rename_coords: Optional[str] = None,
-    labels: Optional[str] = None,
+    ignore_index: Optional[int] = None,
+    mode: str = "multiclass",
+    threshold: float = 0.5,
     output_path: Optional[str] = None,
-):
+) -> dict:
     """
-    Evaluate a classification model on a labeled dataset and print F1 score.
-
-    This function loads a classification model, runs inference on a labeled dataset,
-    and computes classification metrics (F1 score and others). Optionally, it saves
-    the classification report to a YAML file.
+    Evaluate a classification model on a labeled dataset and print/save metrics.
 
     Parameters
     ----------
     model_path : str
-        Path to the model config (YAML format).
+        Path to the model config (YAML).
     weights_path : str
         Path to the model weights.
     data_format : str
@@ -60,102 +68,135 @@ def evaluate_model(
     batch_size : int, default=128
         Batch size for inference.
     select_coords : str, optional
-        Optional subset string in the format 'INDIVIDUALS;AXES;KEYPOINTS', where each
-        field is a comma-separated list or '*' for all. If None, all data is loaded.
+        Optional subset string in the format 'INDIVIDUALS;AXES;KEYPOINTS'.
     rename_coords : str, optional
-        Optional coordinate names remapping in the format 'INDIVIDUALS;AXES;KEYPOINTS',
-        where each field is a comma-separated list of maps 'old_id:new_id' or '*' for
-        no remapping at that level. If None, original dataset names are used.
-    labels : str, optional
-        Comma-separated list of integer class labels to include in the report. If None,
-        all labels present in the data are used.
+        Optional coordinate names remapping in the format 'INDIVIDUALS;AXES;KEYPOINTS'.
+    mode : str, default='multiclass'
+        Evaluation mode: 'multiclass' or 'multilabel'.
     output_path : str, optional
-        If given, the classification report will be saved as a YAML file in this
-        directory.
+        If given, the evaluation report will be saved as a YAML file in this directory.
+    ignore_index : int, optional
+        Index to ignore in the evaluation metrics (e.g., background class).
+    threshold : float, default=0.5
+        Threshold for multilabel binarization.
 
     Returns
     -------
     dict
-        Classification report as returned by `sklearn.metrics.classification_report`.
-
+        Evaluation report with metrics.
     """
-    # Run inference to get predictions
-    results = inference._process_inference_dataset(
-        model_path=model_path,
-        weights_path=weights_path,
-        forward_fn=inference._classification_forward,
-        data_format=data_format,
-        data_path=data_path,
-        data_scale=data_scale,
-        window_size=window_size,
-        window_offset=window_offset,
-        fps_scaling=fps_scaling,
-        batch_size=batch_size,
-        data_filter=data_filter,
-        select_coords=select_coords,
-        rename_coords=rename_coords,
-    )
+    device = select_device()
+    model, config = load_model_and_config(model_path, weights_path, device)
 
-    # Load ground-truth labels
-    # NOTE: We load the records twice, but at least we don't have to re-implement the
-    #       forward pass. In the future, we could consider decomposing the inference
-    #       function into smaller components to avoid this duplication.
+    # Load records and check features
     records = load_records(
         data_format=data_format,
         data_path=data_path,
-        data_filter=data_filter,
         data_scale=data_scale,
+        data_filter=data_filter,
         select_coords=select_coords,
         rename_coords=rename_coords,
     )
+    check_feature_compatibility(config, records)
 
-    # Flatten all records
-    y_true = []
-    y_pred = []
-    for (key, pred_arr), rec in zip(results, records):
-        assert rec.id == key
-
-        true_labels = rec.annotations.target_cls.argmax("behaviors").squeeze().values
-
-        # pred_arr is one-hot, take argmax
-        pred_labels = np.argmax(pred_arr, axis=1)
-
-        y_true.append(true_labels)
-        y_pred.append(pred_labels)
-
-    y_true = np.concatenate(y_true)
-    y_pred = np.concatenate(y_pred)
-
-    # Process user-specified labels if provided
-    label_list = None
-    if labels is not None:
-        label_list = [int(x) for x in labels.split(",") if x.strip() != ""]
-
-    # Compute and print F1 score
-    # NOTE: This repetition is not ideal, but we need to print the report in a
-    #       human-readable format and also save it to a file. We could consider
-    #       refactoring, but the current approach is simple and works well.
-    report_dict = classification_report(
-        y_true, y_pred, digits=3, labels=label_list, output_dict=True
+    # Prepare dataset for evaluation
+    dataset = AnnotatedWindowDataset(
+        records=records,
+        window_size=window_size,
+        window_offset=window_offset,
+        fps_scaling=fps_scaling,
+        transform=PoseToTensor(),
+        annot_format=mode,
     )
-    report_str = classification_report(y_true, y_pred, digits=3, labels=label_list)
-    print(report_str)
+    num_workers = min(suggested_max_num_workers(1), batch_size // 8)
+    prefetch_factor = 4 if num_workers > 0 else None
+    pin_memory = device.type == "cuda"
+    dataloader = DataLoader(
+        dataset,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        prefetch_factor=prefetch_factor,
+        pin_memory=pin_memory,
+    )
 
-    # Save classification report to file if output_path is provided
-    if output_path is not None:
-        # Find model ID
-        with open(model_path, encoding="utf-8") as f_yaml:
-            model_config = yaml.safe_load(f_yaml)
-        model_id = model_config["model_id"]
+    # Initialize metrics
+    n_categories = records[0].annotations.sizes["behaviors"]
+    metrics_kwargs = {
+        "average": "macro",
+        "ignore_index": ignore_index,
+    }
+    if mode == "multiclass":
+        metrics_kwargs["num_classes"] = n_categories
+    elif mode == "multilabel":
+        metrics_kwargs["num_labels"] = n_categories
+        metrics_kwargs["threshold"] = threshold
+    else:
+        raise ValueError(f"Unknown mode: {mode}")
 
-        # Create output directory if it doesn't exist
-        report_path = (
-            Path(output_path) / "evaluations" / model_id / "classification_report.yml"
+    # Per-class metrics
+    per_class_metrics_kwargs = metrics_kwargs.copy()
+    per_class_metrics_kwargs["average"] = "none"
+    per_class_metrics_kwargs["ignore_index"] = None
+
+    f1_metric = F1Score(task=mode, **metrics_kwargs).to(device)
+    acc_metric = Accuracy(task=mode, **metrics_kwargs).to(device)
+    f1_per_class = F1Score(task=mode, **per_class_metrics_kwargs).to(device)
+    precision_per_class = Precision(task=mode, **per_class_metrics_kwargs).to(device)
+    recall_per_class = Recall(task=mode, **per_class_metrics_kwargs).to(device)
+
+    model.eval()
+    with torch.no_grad():
+        for x, y in tqdm(dataloader, desc="Evaluating"):
+            x, y = x.to(device), y.to(device)
+
+            # Forward pass
+            logits = model(x, mode)
+
+            # Udpate metrics
+            f1_metric.update(logits, y)
+            acc_metric.update(logits, y)
+            f1_per_class.update(logits, y)
+            precision_per_class.update(logits, y)
+            recall_per_class.update(logits, y)
+
+    # Compute metrics
+    report = {
+        "mode": mode,
+        "f1_macro": float(f1_metric.compute()),
+        "accuracy_macro": float(acc_metric.compute()),
+        "per_class": {
+            "f1": f1_per_class.compute().cpu().numpy().tolist(),
+            "precision": precision_per_class.compute().cpu().numpy().tolist(),
+            "recall": recall_per_class.compute().cpu().numpy().tolist(),
+        },
+    }
+
+    # Print summary
+    if ignore_index is not None:
+        rprint(
+            f"\n[bold red]WARNING: Ignoring index {ignore_index} in macro metrics.\n"
+            "A bug in torchmetrics may cause incorrect macro F1 and accuracy "
+            "(see https://github.com/Lightning-AI/torchmetrics/issues/2441).\n"
+            "Please consider validating your results agaist the per-class metrics.",
         )
-        report_path.parent.mkdir(parents=True, exist_ok=True)
+    rprint("\n[bold green]Evaluation Summary")
+    rprint(f"Mode: {mode}")
+    rprint(f"Macro F1: {report['f1_macro']:.3f}")
+    rprint(f"Macro Accuracy: {report['accuracy_macro']:.3f}")
+    rprint("Per-class metrics:")
+    for i, (f1, precision, recall) in enumerate(
+        zip(
+            report["per_class"]["f1"],
+            report["per_class"]["precision"],
+            report["per_class"]["recall"],
+        )
+    ):
+        rprint(
+            f"  Class {i}: F1={f1:.3f}, Precision={precision:.3f}, Recall={recall:.3f}"
+        )
 
-        # Save report
-        with open(report_path, "w", encoding="utf-8") as f_yaml:
-            yaml.safe_dump(report_dict, f_yaml)
+    # Save results if requested
+    if output_path is not None:
+        dump_evaluation_results(report, output_path, model_path)
 
-    return report_dict
+    return report

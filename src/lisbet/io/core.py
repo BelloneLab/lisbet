@@ -8,6 +8,7 @@ from itertools import repeat
 from pathlib import Path
 from typing import Optional
 
+import pandas as pd
 import torch
 import xarray as xr
 import yaml
@@ -460,6 +461,69 @@ def dump_records(data_path, records):
         # Save annotations
         if rec.annotations is not None:
             rec.annotations.to_netcdf(rec_path / "annotations.nc", engine="scipy")
+
+
+def dump_annotations(results, output_path):
+    """
+    Save LISBET behavior predictions to CSV files.
+
+    Parameters
+    ----------
+    results : list of (record_id, np.ndarray)
+        Output from annotate_behavior.
+    output_path : str or Path
+        Root directory to save CSVs. Each record will be saved under
+        output_path/annotations/<record_id>/machineAnnotation_lisbet.csv
+    """
+    for key, model_output in tqdm(results, desc="Saving LISBET annotations"):
+        dst_path = (
+            Path(output_path) / "annotations" / key / "machineAnnotation_lisbet.csv"
+        )
+        dst_path.parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(model_output).to_csv(dst_path, index=False)
+
+
+def dump_embeddings(results, output_path):
+    """
+    Save LISBET embeddings to CSV files.
+
+    Parameters
+    ----------
+    results : list of (record_id, np.ndarray)
+        Output from compute_embeddings.
+    output_path : str or Path
+        Root directory to save CSVs. Each record will be saved under
+        output_path/embeddings/<record_id>/features_lisbet_embedding.csv
+    """
+    for key, model_output in tqdm(results, desc="Saving LISBET embeddings"):
+        dst_path = (
+            Path(output_path) / "embeddings" / key / "features_lisbet_embedding.csv"
+        )
+        dst_path.parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(model_output).to_csv(dst_path, index=False)
+
+
+def dump_evaluation_results(report: dict, output_path: str, model_path: str):
+    """
+    Save evaluation report to a YAML file in a standardized location.
+
+    Parameters
+    ----------
+    report : dict
+        The evaluation report.
+    output_path : str or Path
+        Directory to save the report.
+    model_path : str
+        Path to the model config (used to extract model_id).
+    """
+    with open(model_path, encoding="utf-8") as f_yaml:
+        model_config = yaml.safe_load(f_yaml)
+    model_id = model_config.get("model_id", "unknown_model")
+
+    report_path = Path(output_path) / "evaluations" / model_id / "evaluation_report.yml"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(report_path, "w", encoding="utf-8") as f_yaml:
+        yaml.safe_dump(report, f_yaml)
 
 
 def dump_weights(model, output_path, run_id, filename):

@@ -296,6 +296,16 @@ def configure_annotate_behavior_parser(parser: argparse.ArgumentParser) -> None:
     add_verbosity_args(parser)
     add_keypoints_args(parser)
     add_data_io_args(parser, "Keypoint data location")
+    parser.add_argument(
+        "--mode",
+        type=str,
+        default="multiclass",
+        choices=["multiclass", "multilabel"],
+        help="Classification mode",
+    )
+    parser.add_argument(
+        "--threshold", type=float, default=0.5, help="Threshold for multilabel"
+    )
     parser.add_argument("model_path", type=Path, help="Path to model config")
     parser.add_argument("weights_path", type=Path, help="Path to model weights")
 
@@ -470,13 +480,19 @@ def configure_evaluate_model_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("model_path", type=Path, help="Path to model config")
     parser.add_argument("weights_path", type=Path, help="Path to model weights")
     parser.add_argument(
-        "--labels",
+        "--ignore_index",
+        type=int,
+        help="Ignore this label index in the evaluation (e.g., background label)",
+    )
+    parser.add_argument(
+        "--mode",
         type=str,
-        default=None,
-        help=(
-            "Comma-separated list of integer labels to use for F1 score (e.g. "
-            "'0,1,2'). If not set, use all labels."
-        ),
+        default="multiclass",
+        choices=["multiclass", "multilabel"],
+        help="Classification mode",
+    )
+    parser.add_argument(
+        "--threshold", type=float, default=0.5, help="Threshold for multilabel"
     )
 
 
@@ -570,7 +586,7 @@ def main() -> None:
         "evaluate_model": {
             "description": "Evaluate a classification model on a labeled dataset",
             "module": ".evaluation",
-            "function": "evaluate_model",
+            "function": "evaluate",
             "configure": configure_evaluate_model_parser,
         },
     }

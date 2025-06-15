@@ -1,150 +1,24 @@
-"""Input data management."""
+"""
+Iterable-style datasets for social behavior classification and self-supervised tasks.
+"""
 
 import numpy as np
 import torch
 import xarray as xr
 from torch.utils.data import IterableDataset
 
-
-class WindowDataset(IterableDataset):
-    """Base class for datasets that generate windows of frames from records."""
-
-    def __init__(
-        self,
-        records,
-        window_size,
-        window_offset=0,
-        fps_scaling=1.0,
-        transform=None,
-    ):
-        """
-        Initialize the dataset.
-
-        Parameters
-        ----------
-        records : list
-            List of records containing the data.
-        window_size : int
-            Size of the window in frames.
-        window_offset : int, optional
-            Offset for the window in frames (default is 0).
-        fps_scaling : float, optional
-            Scaling factor for the frames per second (default is 1.0).
-        transform : callable, optional
-            A function/transform to apply to the data (default is None).
-
-        Returns
-        -------
-        torch.utils.data.IterableDataset
-            The windows dataset from the provided records.
-        """
-        super().__init__()
-
-        # Validate input parameters
-        if not records:
-            raise ValueError("No records provided to the dataset.")
-        if any([rec.posetracks["individuals"].size < 2 for rec in records]):
-            raise ValueError("LISBET requires at least 2 individuals in each record.")
-
-        self.records = records
-        self.n_records = len(records)
-
-        self.window_size = window_size
-        self.window_offset = window_offset
-        self.fps_scaling = fps_scaling
-        self.transform = transform
-
-        self.lengths = np.array(
-            [rec.posetracks.sizes["time"] for rec in self.records], dtype=int
-        )
-        self.cumlens = self.lengths.cumsum()
-        self.n_frames = self.cumlens[-1]
-
-    def __iter__(self):
-        for global_idx in range(self.n_frames):
-            # Map global index to (record_index, frame_index)
-            rec_idx, frame_idx = self._global_to_local(global_idx)
-
-            # Extract corresponding window
-            x = self._select_and_pad(rec_idx, frame_idx)
-
-            if self.transform:
-                x = self.transform(x)
-
-            y = (
-                self.records[rec_idx]
-                .annotations.target_cls.isel(time=frame_idx)
-                .argmax("behaviors")
-                .squeeze()
-                .values
-                if self.records[rec_idx].annotations is not None
-                else torch.nan  # Should it be None instead?
-            )
-
-            yield x, y
-
-    def _global_to_local(self, global_idx):
-        """
-        Map a global frame index (0 ≤ global_idx < total_n_frames) to a local pair
-        (record_index, local_frame_index).
-        """
-        rec_idx = np.searchsorted(self.cumlens, global_idx, "right")
-        prev_sum = 0 if rec_idx == 0 else self.cumlens[rec_idx - 1]
-        local_idx = global_idx - prev_sum
-
-        return rec_idx, local_idx
-
-    def _select_and_pad(self, curr_key, curr_loc, window_size=None):
-        """Select a window from the catalog, applying padding if needed.
-
-        The selected window is returned as a new numpy array to avoid unintentional
-        changes to the records in the window dictionary (i.e. by the swap mouse
-        prediction task).
-
-        Notes
-        -----
-        1. The interpolation is done here, and not directly on the records, to avoid
-           resampling at the original fps before retuning the output during inference.
-           Furthermore, even during training, it is useful to only consider the original
-           frames, rather than artificially inflating or deflating the dataset.
-        """
-        if window_size is None:
-            window_size = self.window_size
-        if window_size <= 1:
-            raise ValueError(
-                "LISBET requires window_size to be greater than 1 to avoid degenerate "
-                "interpolation."
-            )
-
-        x = self.records[curr_key].posetracks
-
-        # Compute scaled time coordinates
-        scaled_window_size = int(np.rint(self.fps_scaling * window_size))
-        scaled_window_offset = int(np.rint(self.fps_scaling * self.window_offset))
-        scaled_start_idx = curr_loc - scaled_window_size + scaled_window_offset + 1
-        scaled_stop_idx = curr_loc + scaled_window_offset
-        scaled_time_coords = np.linspace(
-            scaled_start_idx, scaled_stop_idx, scaled_window_size, dtype=int
-        )
-
-        # Compute interpolation time coordinates
-        interp_time_coords = np.linspace(scaled_start_idx, scaled_stop_idx, window_size)
-
-        # Compute relative time coordinates
-        rel_time_coords = np.linspace(0, window_size - 1, window_size, dtype=int)
-
-        # Select, pad (reindex) and interpolate data
-        x = (
-            x.reindex(time=scaled_time_coords, fill_value=0)
-            .interp(time=interp_time_coords)
-            .assign_coords(time=rel_time_coords)
-        )
-
-        return x
+from lisbet.datasets.common import AnnotatedWindowSelector, WindowSelector
 
 
-class RandomWindowDataset(WindowDataset):
-    """Base class for datasets that generate random windows of frames from records."""
+class SocialBehaviorDataset(IterableDataset):
+    """
+    Iterable dataset for social behavior classification.
+
+    Generates windows of pose data and corresponding labels for supervised
+    classification of social behaviors. Each sample consists of a window of frames
+    selected from a record, with the label extracted according to the specified
+    annotation format. Supports binary, multiclass, and multilabel classification tasks.
+    """
 
     def __init__(
         self,
@@ -153,10 +27,11 @@ class RandomWindowDataset(WindowDataset):
         window_offset=0,
         fps_scaling=1.0,
         transform=None,
+        annot_format="multiclass",
         base_seed=None,
     ):
         """
-        Initialize the dataset.
+        Initialize the SocialBehaviorDataset.
 
         Parameters
         ----------
@@ -170,16 +45,21 @@ class RandomWindowDataset(WindowDataset):
             Scaling factor for the frames per second (default is 1.0).
         transform : callable, optional
             A function/transform to apply to the data (default is None).
+        annot_format : str, optional
+            Format of the labels. Valid options are 'binary', 'multiclass', or
+            'multilabel' for the respective classification tasks (default is
+            'multiclass').
         base_seed : int, optional
             Base seed for random number generation (default is None, which generates a
             random seed).
-
-        Returns
-        -------
-        torch.utils.data.IterableDataset
-            The windows dataset from the provided records.
         """
-        super().__init__(records, window_size, window_offset, fps_scaling, transform)
+        super().__init__()
+
+        self.window_selector = AnnotatedWindowSelector(
+            records, window_size, window_offset, fps_scaling, annot_format
+        )
+        self.n_frames = self.window_selector.n_frames
+        self.transform = transform
 
         self.base_seed = (
             base_seed
@@ -198,43 +78,29 @@ class RandomWindowDataset(WindowDataset):
             global_idx = torch.randint(0, self.n_frames, (1,), generator=self.g).item()
 
             # Map global index to (record_index, frame_index)
-            rec_idx, frame_idx = self._global_to_local(global_idx)
+            rec_idx, frame_idx = self.window_selector.global_to_local(global_idx)
 
             # Extract corresponding window
-            x = self._select_and_pad(rec_idx, frame_idx)
+            x, y = self.window_selector.select(rec_idx, frame_idx)
 
             if self.transform:
                 x = self.transform(x)
 
-            # Select annotation data
-            y = (
-                self.records[rec_idx]
-                .annotations.target_cls.isel(time=frame_idx)
-                .argmax("behaviors")
-                .squeeze()
-                .values
-            )
-
             yield x, y
 
 
-class GroupConsistencyDataset(RandomWindowDataset):
+class GroupConsistencyDataset(IterableDataset):
     """
-    Dataset generator for the Group Consistency (consistency) self-supervised task.
+    Iterable dataset for the Group Consistency self-supervised task.
 
-    This dataset is designed to train models to determine whether a group of tracked
-    individuals in a window of frames originates from the same recording (i.e., is
-    "consistent") or is artificially constructed by combining individuals from
-    different records. For each sample, a window of frames is selected from a record.
-    With 50% probability, the group is left unchanged (label 0, "consistent"), and with
-    50% probability, the group is "remixed" by replacing the tracking data of one or
-    more individuals (randomly chosen split) with those from another record at a
-    randomly selected window (label 1, "inconsistent"). The classifier must predict
-    whether the group is consistent or not, based solely on the pose data in the
-    window.
+    Generates windows for training models to determine whether a group of tracked
+    individuals in a window of frames originates from the same recording ("consistent")
+    or is artificially constructed by combining individuals from different records
+    ("inconsistent").
 
-    The window can include frames from the past, future, or both, depending on the
-    window_offset parameter.
+    Each sample consists of a window of frames, with 50% probability of being
+    consistent and 50% probability of being inconsistent (via swapping individuals from
+    another record).
 
     Notes
     -----
@@ -249,16 +115,63 @@ class GroupConsistencyDataset(RandomWindowDataset):
        inconsistent (group contains individuals from different records).
     """
 
+    def __init__(
+        self,
+        records,
+        window_size,
+        window_offset=0,
+        fps_scaling=1.0,
+        transform=None,
+        base_seed=None,
+    ):
+        """
+        Initialize the GroupConsistencyDataset.
+
+        Parameters
+        ----------
+        records : list
+            List of records containing the data.
+        window_size : int
+            Size of the window in frames.
+        window_offset : int, optional
+            Offset for the window in frames (default is 0).
+        fps_scaling : float, optional
+            Scaling factor for the frames per second (default is 1.0).
+        transform : callable, optional
+            A function/transform to apply to the data (default is None).
+        base_seed : int, optional
+            Base seed for random number generation (default is None, which generates a
+            random seed).
+        """
+        super().__init__()
+
+        self.window_selector = WindowSelector(
+            records, window_size, window_offset, fps_scaling
+        )
+        self.n_frames = self.window_selector.n_frames
+        self.transform = transform
+
+        self.base_seed = (
+            base_seed
+            if base_seed is not None
+            else torch.randint(0, 2**31 - 1, (1,)).item()
+        )
+
+        # Set random generator for reproducibility
+        # NOTE: This could be overridden by the worker_init_fn to ensure each worker
+        #       has a different seed for data shuffling.
+        self.g = torch.Generator().manual_seed(self.base_seed)
+
     def __iter__(self):
         while True:
             # Select a random window (global frame index)
             global_idx = torch.randint(0, self.n_frames, (1,), generator=self.g).item()
 
             # Map global index to (record_index, frame_index)
-            rec_idx, frame_idx = self._global_to_local(global_idx)
+            rec_idx, frame_idx = self.window_selector.global_to_local(global_idx)
 
             # Extract corresponding window
-            x_orig = self._select_and_pad(rec_idx, frame_idx)
+            x_orig = self.window_selector.select(rec_idx, frame_idx)
 
             if torch.rand((1,), generator=self.g).item() < 0.5:
                 # Swap group, retry if a window from the same sequence was chosen
@@ -266,7 +179,7 @@ class GroupConsistencyDataset(RandomWindowDataset):
                     global_idx_swap = torch.randint(
                         0, self.n_frames, (1,), generator=self.g
                     ).item()
-                    rec_idx_swap, frame_idx_swap = self._global_to_local(
+                    rec_idx_swap, frame_idx_swap = self.window_selector.global_to_local(
                         global_idx_swap
                     )
 
@@ -274,7 +187,7 @@ class GroupConsistencyDataset(RandomWindowDataset):
                         break
 
                 # Extract swap window
-                x_swap = self._select_and_pad(rec_idx_swap, frame_idx_swap)
+                x_swap = self.window_selector.select(rec_idx_swap, frame_idx_swap)
 
                 # Swap individuals splitting the group at a random index
                 split_idx = torch.randint(
@@ -306,22 +219,18 @@ class GroupConsistencyDataset(RandomWindowDataset):
             yield x, y
 
 
-class TemporalOrderDataset(RandomWindowDataset):
+class TemporalOrderDataset(IterableDataset):
     """
-    Dataset generator for the temporal order prediction task.
+    Iterable dataset for the temporal order prediction self-supervised task.
 
-    This dataset generates samples for a self-supervised temporal order prediction task.
+    Generates samples for predicting whether a 'post' half-window follows a 'pre'
+    half-window in the same recording (ordered) or not (unordered).
+
     Each sample consists of a window created by concatenating the first half of one
-    window ("pre") and the second half of another window ("post"). The classifier must
-    predict whether the "post" half-window comes after the "pre" half-window in the same
-    recording (label 1, "ordered") or not (label 0, "unordered"). In positive samples,
-    the "post" window is randomly chosen to follow the "pre" window within the same
-    record, possibly with a random delay (including zero). In negative samples, the
-    "post" window is either from a different record or, depending on the method, from an
-    earlier time in the same record.
-
-    The window_offset parameter determines whether the windows are centered, causal, or
-    anticausal with respect to the reference frame.
+    window ('pre') and the second half of another window ('post'). Positive samples
+    have the post window following the pre window in the same record; negative samples
+    have the post window from a different record or from an earlier time in the same
+    record, depending on the chosen 'method'.
 
     Notes
     -----
@@ -329,7 +238,7 @@ class TemporalOrderDataset(RandomWindowDataset):
        boundaries. This is not explicitly handled, as the number of such cases is small
        relative to the dataset size.
     2. The last window_size frames of each record may produce overlapping pre and post
-       windows in the positive ("ordered") case. These are included for simplicity and
+       windows in the positive ('ordered') case. These are included for simplicity and
        may help the model learn temporal relationships.
     3. The concatenation of pre and post windows along the time dimension is used for
        simplicity and compatibility with multi-task training. This approach encourages
@@ -352,12 +261,12 @@ class TemporalOrderDataset(RandomWindowDataset):
         window_size,
         window_offset=0,
         fps_scaling=1.0,
-        method="strict",
         transform=None,
+        method="strict",
         base_seed=None,
     ):
         """
-        Initialize the dataset.
+        Initialize the TemporalOrderDataset.
 
         Parameters
         ----------
@@ -369,31 +278,43 @@ class TemporalOrderDataset(RandomWindowDataset):
             Offset for the window in frames (default is 0).
         fps_scaling : float, optional
             Scaling factor for the frames per second (default is 1.0).
+        transform : callable, optional
+            A function/transform to apply to the data (default is None).
         method : str, optional
             Selection method for negative class examples. Options are 'simple'
             (post window can be from any record or earlier in the same record) and
             'strict' (post window is always from the same record but must precede the
             pre window).
-        transform : callable, optional
-            A function/transform to apply to the data (default is None).
         base_seed : int, optional
             Base seed for random number generation (default is None, which generates a
             random seed).
-
-        Returns
-        -------
-        torch.utils.data.IterableDataset
-            The windows dataset from the provided records.
         """
-        super().__init__(
-            records, window_size, window_offset, fps_scaling, transform, base_seed
-        )
-
+        # Validate input parameters
         if method not in ("simple", "strict"):
             raise ValueError(
                 f"Invalid method '{method}'. Choose either 'simple' or 'strict'."
             )
+
+        super().__init__()
+
+        self.window_selector = WindowSelector(
+            records, window_size, window_offset, fps_scaling
+        )
+        self.n_frames = self.window_selector.n_frames
+        self.transform = transform
+
         self.method = method
+
+        self.base_seed = (
+            base_seed
+            if base_seed is not None
+            else torch.randint(0, 2**31 - 1, (1,)).item()
+        )
+
+        # Set random generator for reproducibility
+        # NOTE: This could be overridden by the worker_init_fn to ensure each worker
+        #       has a different seed for data shuffling.
+        self.g = torch.Generator().manual_seed(self.base_seed)
 
     def __iter__(self):
         while True:
@@ -403,14 +324,19 @@ class TemporalOrderDataset(RandomWindowDataset):
             ).item()
 
             # Map global index to (record_index, frame_index)
-            rec_idx_pre, frame_idx_pre = self._global_to_local(global_idx_pre)
+            rec_idx_pre, frame_idx_pre = self.window_selector.global_to_local(
+                global_idx_pre
+            )
 
             if torch.rand((1,), generator=self.g).item() < 0.5:
                 # Positive sample: post window follows pre window in the same record
                 # Allow zero-distance windows for every frame, including the last
                 rec_idx_post = rec_idx_pre
                 frame_idx_post = torch.randint(
-                    frame_idx_pre, self.lengths[rec_idx_pre], (1,), generator=self.g
+                    frame_idx_pre,
+                    self.window_selector.lengths[rec_idx_pre],
+                    (1,),
+                    generator=self.g,
                 ).item()
 
                 y = np.array(1, ndmin=1, dtype=np.float32)
@@ -423,8 +349,8 @@ class TemporalOrderDataset(RandomWindowDataset):
                         global_idx_post = torch.randint(
                             0, self.n_frames, (1,), generator=self.g
                         ).item()
-                        rec_idx_post, frame_idx_post = self._global_to_local(
-                            global_idx_post
+                        rec_idx_post, frame_idx_post = (
+                            self.window_selector.global_to_local(global_idx_post)
                         )
 
                         if (
@@ -451,13 +377,17 @@ class TemporalOrderDataset(RandomWindowDataset):
                 y = np.array(0, ndmin=1, dtype=np.float32)
 
             # Extract corresponding window
-            x_pre = self._select_and_pad(
-                rec_idx_pre, frame_idx_pre, np.ceil(self.window_size / 2).astype(int)
+            x_pre = self.window_selector.select(
+                rec_idx_pre,
+                frame_idx_pre,
+                np.ceil(self.window_selector.window_size / 2).astype(int),
             )
 
             # Extract next window
-            x_post = self._select_and_pad(
-                rec_idx_post, frame_idx_post, np.floor(self.window_size / 2).astype(int)
+            x_post = self.window_selector.select(
+                rec_idx_post,
+                frame_idx_post,
+                np.floor(self.window_selector.window_size / 2).astype(int),
             )
 
             # Shift the time coordinates of x_post so that it follows x_pre in time
@@ -478,26 +408,24 @@ class TemporalOrderDataset(RandomWindowDataset):
             yield x, y
 
 
-class TemporalShiftDataset(RandomWindowDataset):
+class TemporalShiftDataset(IterableDataset):
     """
-    Dataset generator for the temporal shift prediction or regression task.
+    Iterable dataset for the temporal shift prediction or regression task.
 
-    This dataset creates samples in which the trajectory of the second individual in a
-    group is shifted in time by a random delay within a specified interval (default: -60
-    to +60 frames). For each sample, a window of frames is selected from a record.
-    The first individual's data is taken from this window, while the second individual's
-    data is taken from a window at the same location but shifted by a random delay
-    (positive or negative) within the allowed range. The two individuals' data are then
-    concatenated along the 'individuals' dimension, forming a group window where one
-    individual's trajectory is temporally shifted relative to the other.
+    Generates samples in which the trajectory of the second individual in a group is
+    shifted in time by a random delay within a specified interval (default: -60 to +60
+    frames).
 
-    The task can be formulated as either:
-        - Binary classification: predict whether the shift is positive (future) or
-          negative (past).
-        - Regression: estimate the normalized value of the temporal shift.
+    For each sample, a window of frames is selected from a record. The first
+    individual's data is taken from this window, while the second individual's data is
+    taken from a window at the same location but shifted by a random delay (positive or
+    negative) within the allowed range. The two individuals' data are then concatenated
+    along the 'individuals' dimension, forming a group window where one individual's
+    trajectory is temporally shifted relative to the other.
 
-    The classifier has access to a window of frames (past, future, or both) as
-    determined by the window_offset parameter.
+    The task can be formulated as either: binary classification, predict whether the
+    shift is positive (future) or negative (past); regression, estimate the normalized
+    value of the temporal shift.
 
     Notes
     -----
@@ -506,11 +434,9 @@ class TemporalShiftDataset(RandomWindowDataset):
        sampled such that it stays within the valid frame range.
     3. The split between individuals is randomized for each sample, so the shifted
        trajectory may correspond to any individual in the group except the first.
-    4. The label is either:
-        - For regression: the normalized shift value in [0, 1], where 0 corresponds to
-          neg. max_shift and 1 to pos. max shift.
-        - For classification: 1 if the shift is positive (delta_delay > 0), 0
-          otherwise.
+    4. The label is either: the normalized shift value in [0, 1], where 0 corresponds to
+       neg. max_shift and 1 to pos. max shift (regression); or 1 if the shift is
+       positive (delta_delay > 0), 0 otherwise (classification).
     5. Padding may occur if the shifted window extends beyond the sequence boundaries,
        but this is handled by the window extraction logic and is rare for typical
        settings.
@@ -524,13 +450,13 @@ class TemporalShiftDataset(RandomWindowDataset):
         window_size,
         window_offset=0,
         fps_scaling=1.0,
+        transform=None,
         max_shift=60,
         regression=False,
-        transform=None,
         base_seed=None,
     ):
         """
-        Initialize the dataset.
+        Initialize the TemporalShiftDataset.
 
         Parameters
         ----------
@@ -542,31 +468,43 @@ class TemporalShiftDataset(RandomWindowDataset):
             Offset for the window in frames (default is 0).
         fps_scaling : float, optional
             Scaling factor for the frames per second (default is 1.0).
+        transform : callable, optional
+            A function/transform to apply to the data (default is None).
         max_shift : int, optional
             Maximum time shift to apply, expressed in number of frames (default is 60).
         regression : bool, optional
             Whether to perform regression (default is False, which performs binary
             classification).
-        transform : callable, optional
-            A function/transform to apply to the data (default is None).
         base_seed : int, optional
             Base seed for random number generation (default is None, which generates a
             random seed).
-
-        Returns
-        -------
-        torch.utils.data.IterableDataset
-            The windows dataset from the provided records.
         """
-
-        super().__init__(records, window_size, window_offset, fps_scaling, transform)
-
+        # Validate input parameters
         if max_shift <= 0:
             raise ValueError("LISBET requires max_shift to be a positive integer.")
+
+        super().__init__()
+
+        self.window_selector = WindowSelector(
+            records, window_size, window_offset, fps_scaling
+        )
+        self.n_frames = self.window_selector.n_frames
+        self.transform = transform
 
         self.min_delay = -max_shift
         self.max_delay = max_shift
         self.regression = regression
+
+        self.base_seed = (
+            base_seed
+            if base_seed is not None
+            else torch.randint(0, 2**31 - 1, (1,)).item()
+        )
+
+        # Set random generator for reproducibility
+        # NOTE: This could be overridden by the worker_init_fn to ensure each worker
+        #       has a different seed for data shuffling.
+        self.g = torch.Generator().manual_seed(self.base_seed)
 
     def __iter__(self):
         while True:
@@ -574,14 +512,16 @@ class TemporalShiftDataset(RandomWindowDataset):
             global_idx = torch.randint(0, self.n_frames, (1,), generator=self.g).item()
 
             # Map global index to (record_index, frame_index)
-            rec_idx, frame_idx = self._global_to_local(global_idx)
+            rec_idx, frame_idx = self.window_selector.global_to_local(global_idx)
 
             # Extract corresponding window
-            x_orig = self._select_and_pad(rec_idx, frame_idx)
+            x_orig = self.window_selector.select(rec_idx, frame_idx)
 
             # Compute shift bounds
             lower_bound = max(frame_idx + self.min_delay, 0)
-            upper_bound = min(frame_idx + self.max_delay, self.lengths[rec_idx])
+            upper_bound = min(
+                frame_idx + self.max_delay, self.window_selector.lengths[rec_idx]
+            )
 
             # Select random window from same sequence for the shift
             frame_idx_delay = torch.randint(
@@ -589,7 +529,7 @@ class TemporalShiftDataset(RandomWindowDataset):
             ).item()
 
             # Get shift data
-            x_shft = self._select_and_pad(rec_idx, frame_idx_delay)
+            x_shft = self.window_selector.select(rec_idx, frame_idx_delay)
 
             # Apply shifting by swapping individuals in the group at a random index
             split_idx = torch.randint(
@@ -624,25 +564,22 @@ class TemporalShiftDataset(RandomWindowDataset):
             yield x, y
 
 
-class TemporalWarpDataset(RandomWindowDataset):
+class TemporalWarpDataset(IterableDataset):
     """
-    Dataset generator for the temporal warp prediction or regression task.
+    Iterable dataset for the temporal warp prediction or regression task.
 
-    This dataset generates windows in which the temporal pace (speed) of the window is
-    artificially warped by resampling the frames at a random speed factor within a
-    specified range (default: 0.5 to 1.5). For each sample, a window is extracted from
-    a random location in a record, and the time axis is rescaled by a randomly chosen
-    speed factor. The resulting window is then interpolated back to the original window
-    size, so the model always receives a fixed number of frames, but the underlying
-    motion is either sped up or slowed down.
+    Generates windows in which the temporal pace (speed) of the window is artificially
+    warped by resampling the frames at a random speed factor within a specified range
+    (default: 50% to 150%).
 
-    The task can be formulated as either:
-        - Binary classification: predict whether the window was sped up (speed >
-          midpoint) or slowed down (speed < midpoint).
-        - Regression: estimate the normalized speed factor used to warp the window.
+    For each sample, a window is extracted from a random location in a record, and the
+    time axis is rescaled by a randomly chosen speed factor. The resulting window is
+    then interpolated back to the original window size, so the model always receives a
+    fixed number of frames, but the underlying motion is either sped up or slowed down.
 
-    The classifier has access to a window of frames (past, future, or both) as
-    determined by the window_offset parameter.
+    The task can be formulated as either: binary classification, predict whether the
+    window was sped up (speed > 100%) or slowed down (speed < 100%); regression,
+    estimate the normalized speed factor used to warp the window.
 
     Notes
     -----
@@ -666,13 +603,13 @@ class TemporalWarpDataset(RandomWindowDataset):
         window_size,
         window_offset=0,
         fps_scaling=1.0,
+        transform=None,
         max_warp=50.0,
         regression=False,
-        transform=None,
         base_seed=None,
     ):
         """
-        Initialize the dataset.
+        Initialize the TemporalWarpDataset.
 
         Parameters
         ----------
@@ -684,31 +621,45 @@ class TemporalWarpDataset(RandomWindowDataset):
             Offset for the window in frames (default is 0).
         fps_scaling : float, optional
             Scaling factor for the frames per second (default is 1.0).
+        transform : callable, optional
+            A function/transform to apply to the data (default is None).
         max_warp : float, optional
             Maximum time warp to apply, expressed as a percentage (default is 50).
         regression : bool, optional
             Whether to perform regression (default is False, which performs binary
             classification).
-        transform : callable, optional
-            A function/transform to apply to the data (default is None).
         base_seed : int, optional
             Base seed for random number generation (default is None, which generates a
             random seed).
-
-        Returns
-        -------
-        torch.utils.data.IterableDataset
-            The windows dataset from the provided records.
         """
-        super().__init__(records, window_size, window_offset, fps_scaling, transform)
-
+        # Validate input parameters
         if not (0 < max_warp <= 100):
             raise ValueError(
                 "LISBET requires max_warp to be a positive value between 0 and 100."
             )
+
+        super().__init__()
+
+        self.window_selector = WindowSelector(
+            records, window_size, window_offset, fps_scaling
+        )
+        self.n_frames = self.window_selector.n_frames
+        self.transform = transform
+
         self.min_speed = max_warp / 100.0
         self.max_speed = 1.0 + max_warp / 100.0
         self.regression = regression
+
+        self.base_seed = (
+            base_seed
+            if base_seed is not None
+            else torch.randint(0, 2**31 - 1, (1,)).item()
+        )
+
+        # Set random generator for reproducibility
+        # NOTE: This could be overridden by the worker_init_fn to ensure each worker
+        #       has a different seed for data shuffling.
+        self.g = torch.Generator().manual_seed(self.base_seed)
 
     def __iter__(self):
         while True:
@@ -716,7 +667,7 @@ class TemporalWarpDataset(RandomWindowDataset):
             global_idx = torch.randint(0, self.n_frames, (1,), generator=self.g).item()
 
             # Map global index to (record_index, frame_index)
-            rec_idx, frame_idx = self._global_to_local(global_idx)
+            rec_idx, frame_idx = self.window_selector.global_to_local(global_idx)
 
             # Draw playback speed at random
             rel_speed = torch.rand((1,), generator=self.g).item()
@@ -724,15 +675,22 @@ class TemporalWarpDataset(RandomWindowDataset):
 
             # Compute actual window size (i.e. the actual frames required to generate
             # the window)
-            window_size_act = np.round(speed * self.window_size).astype(int)
+            window_size_act = np.round(speed * self.window_selector.window_size).astype(
+                int
+            )
 
             # Extract corresponding window
-            x = self._select_and_pad(rec_idx, frame_idx, window_size_act)
+            x = self.window_selector.select(rec_idx, frame_idx, window_size_act)
 
             # Compute interpolation and relative time coordinates
-            interp_time_coords = np.linspace(0, window_size_act - 1, self.window_size)
+            interp_time_coords = np.linspace(
+                0, window_size_act - 1, self.window_selector.window_size
+            )
             rel_time_coords = np.linspace(
-                0, self.window_size - 1, self.window_size, dtype=int
+                0,
+                self.window_selector.window_size - 1,
+                self.window_selector.window_size,
+                dtype=int,
             )
 
             # Interpolate data
