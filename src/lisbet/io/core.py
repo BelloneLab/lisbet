@@ -18,6 +18,13 @@ from movement.transforms import scale
 from torchinfo import summary
 from tqdm.auto import tqdm
 
+from lisbet.config import ExperimentConfig
+from lisbet.config.models import (
+    BackboneConfig,
+    DataConfig,
+    TaskConfig,
+    TrainingConfig,
+)
 from lisbet.modeling import (
     EmbeddingHead,
     FrameClassificationHead,
@@ -710,3 +717,278 @@ def dump_profiling_results(output_path, run_id, prof):
         f.write(prof.key_averages().table(sort_by="self_cpu_time_total", row_limit=10))
         f.write("\n\nCUDA Profiling Summary:\n")
         f.write(prof.key_averages().table(sort_by="self_cuda_time_total", row_limit=10))
+
+
+def load_config_from_file(config_path: str | Path) -> ExperimentConfig:
+    """Load experiment configuration from a YAML file.
+
+    Parameters
+    ----------
+    config_path : str or Path
+        Path to the configuration YAML file.
+
+    Returns
+    -------
+    ExperimentConfig
+        Loaded experiment configuration.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the configuration file does not exist.
+    ValueError
+        If the configuration file is invalid or cannot be parsed.
+    """
+    config_path = Path(config_path)
+    if not config_path.exists():
+        raise FileNotFoundError(f"Configuration file not found: {config_path}")
+
+    try:
+        with open(config_path, encoding="utf-8") as f:
+            config_dict = yaml.safe_load(f)
+    except yaml.YAMLError as e:
+        raise ValueError(f"Invalid YAML in configuration file: {e}") from e
+
+    try:
+        # Parse data configuration
+        data_config = DataConfig(**config_dict["data"])
+
+        # Parse backbone configuration
+        backbone_config = BackboneConfig(**config_dict["backbone"])
+
+        # Parse task configurations
+        task_configs = [TaskConfig(**task_dict) for task_dict in config_dict["tasks"]]
+
+        # Parse training configuration
+        training_config = TrainingConfig(**config_dict["training"])
+
+        # Create experiment configuration
+        experiment_config = ExperimentConfig(
+            experiment_name=config_dict["experiment_name"],
+            data=data_config,
+            backbone=backbone_config,
+            tasks=task_configs,
+            training=training_config,
+            output_dir=config_dict.get("output_dir", "./experiments"),
+            run_id=config_dict.get("run_id"),
+            seed=config_dict.get("seed"),
+            tags=config_dict.get("tags", []),
+            notes=config_dict.get("notes", ""),
+        )
+
+        # Validate the configuration
+        experiment_config.validate()
+        return experiment_config
+
+    except (KeyError, TypeError) as e:
+        raise ValueError(f"Invalid configuration structure: {e}") from e
+
+
+def save_config_to_file(config: ExperimentConfig, config_path: str | Path) -> None:
+    """Save experiment configuration to a YAML file.
+
+    Parameters
+    ----------
+    config : ExperimentConfig
+        Experiment configuration to save.
+    config_path : str or Path
+        Path where the configuration YAML file will be saved.
+    """
+    config_path = Path(config_path)
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Convert configuration to dictionary
+    config_dict = {
+        "experiment_name": config.experiment_name,
+        "run_id": config.run_id,
+        "seed": config.seed,
+        "tags": config.tags,
+        "notes": config.notes,
+        "output_dir": config.output_dir,
+        "data": {
+            "train_paths": config.data.train_paths,
+            "val_paths": config.data.val_paths,
+            "test_paths": config.data.test_paths,
+            "window_size": config.data.window_size,
+            "window_offset": config.data.window_offset,
+            "input_features": config.data.input_features,
+            "preprocessing": config.data.preprocessing,
+            "batch_size": config.data.batch_size,
+            "num_workers": config.data.num_workers,
+            "pin_memory": config.data.pin_memory,
+        },
+        "backbone": {
+            "type": config.backbone.type,
+            "feature_dim": config.backbone.feature_dim,
+            "embedding_dim": config.backbone.embedding_dim,
+            "hidden_dim": config.backbone.hidden_dim,
+            "num_heads": config.backbone.num_heads,
+            "num_layers": config.backbone.num_layers,
+            "max_length": config.backbone.max_length,
+            "dropout": config.backbone.dropout,
+            "activation": config.backbone.activation,
+        },
+        "tasks": [
+            {
+                "task_id": task.task_id,
+                "task_type": task.task_type,
+                "output_token_idx": task.output_token_idx,
+                "num_classes": task.num_classes,
+                "hidden_dim": task.hidden_dim,
+                "loss_weight": task.loss_weight,
+                "metrics": task.metrics,
+            }
+            for task in config.tasks
+        ],
+        "training": {
+            "epochs": config.training.epochs,
+            "learning_rate": config.training.learning_rate,
+            "batch_size": config.training.batch_size,
+            "seed": config.training.seed,
+            "mixed_precision": config.training.mixed_precision,
+        },
+    }
+
+    with open(config_path, "w", encoding="utf-8") as f:
+        yaml.safe_dump(config_dict, f, default_flow_style=False, sort_keys=False)
+
+
+def create_model_from_config(config: ExperimentConfig) -> MultiTaskModel:
+    """Create a multi-task model from an experiment configuration.
+
+    Parameters
+    ----------
+    config : ExperimentConfig
+        Experiment configuration containing model architecture details.
+
+    Returns
+    -------
+    MultiTaskModel
+        Multi-task model created from the configuration.
+
+    Raises
+    ------
+    ValueError
+        If the configuration specifies an unsupported backbone or task type.
+    """
+    # Create backbone
+    if config.backbone.type == "transformer":
+        backbone = TransformerBackbone(
+            feature_dim=config.backbone.feature_dim,
+            embedding_dim=config.backbone.embedding_dim,
+            hidden_dim=config.backbone.hidden_dim,
+            num_heads=config.backbone.num_heads,
+            num_layers=config.backbone.num_layers,
+            max_length=config.backbone.max_length,
+        )
+    else:
+        raise ValueError(f"Unsupported backbone type: {config.backbone.type}")
+
+    # Create task heads
+    task_heads = {}
+    for task_config in config.tasks:
+        if task_config.task_type == "frame_classification":
+            head = FrameClassificationHead(
+                output_token_idx=task_config.output_token_idx,
+                input_dim=config.backbone.embedding_dim,
+                num_classes=task_config.num_classes,
+                hidden_dim=task_config.hidden_dim,
+            )
+        elif task_config.task_type == "window_classification":
+            head = WindowClassificationHead(
+                input_dim=config.backbone.embedding_dim,
+                num_classes=task_config.num_classes,
+                hidden_dim=task_config.hidden_dim,
+            )
+        elif task_config.task_type == "embedding":
+            head = EmbeddingHead(
+                output_token_idx=task_config.output_token_idx,
+            )
+        else:
+            raise ValueError(f"Unsupported task type: {task_config.task_type}")
+
+        task_heads[task_config.task_id] = head
+
+    return MultiTaskModel(backbone=backbone, task_heads=task_heads)
+
+
+def load_model_from_config(
+    config_path: str | Path, weights_path: str | Path
+) -> MultiTaskModel:
+    """Load a model from configuration and weights files.
+
+    Parameters
+    ----------
+    config_path : str or Path
+        Path to the experiment configuration YAML file.
+    weights_path : str or Path
+        Path to the model weights file.
+
+    Returns
+    -------
+    MultiTaskModel
+        Loaded model with weights.
+    """
+    # Load configuration
+    config = load_config_from_file(config_path)
+
+    # Create model from configuration
+    model = create_model_from_config(config)
+
+    # Load weights
+    incompatible_layers = model.load_state_dict(
+        torch.load(weights_path, weights_only=True, map_location=torch.device("cpu")),
+        strict=False,
+    )
+    logging.info(
+        "Loaded weights from file.\nMissing keys: %s\nUnexpected keys: %s",
+        incompatible_layers.missing_keys,
+        incompatible_layers.unexpected_keys,
+    )
+
+    return model
+
+
+def save_model_with_config(
+    model: MultiTaskModel,
+    config: ExperimentConfig,
+    output_dir: str | Path,
+    run_id: str | None = None,
+) -> None:
+    """Save model weights and configuration together.
+
+    Parameters
+    ----------
+    model : MultiTaskModel
+        Model to save.
+    config : ExperimentConfig
+        Experiment configuration to save alongside the model.
+    output_dir : str or Path
+        Directory to save the model and configuration.
+    run_id : str or None, optional
+        Run identifier. If None, uses config.run_id.
+    """
+    if run_id is None:
+        run_id = config.run_id
+    if run_id is None:
+        raise ValueError("run_id must be provided either as parameter or in config")
+
+    output_dir = Path(output_dir)
+    model_dir = output_dir / "models" / run_id
+    model_dir.mkdir(parents=True, exist_ok=True)
+
+    # Save model weights
+    weights_path = model_dir / "model_weights.pth"
+    torch.save(model.state_dict(), weights_path)
+
+    # Save experiment configuration
+    config_path = model_dir / "experiment_config.yml"
+    save_config_to_file(config, config_path)
+
+    # Save model configuration (for backward compatibility)
+    model_config_path = model_dir / "model_config.yml"
+    model_config = model.get_config()
+    with open(model_config_path, "w", encoding="utf-8") as f:
+        yaml.safe_dump(model_config, f, default_flow_style=False, sort_keys=False)
+
+    logging.info(f"Saved model and configuration to {model_dir}")
