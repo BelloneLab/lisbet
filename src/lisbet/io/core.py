@@ -19,10 +19,10 @@ from torchinfo import summary
 from tqdm.auto import tqdm
 
 from lisbet.modeling import (
-    Backbone,
     EmbeddingHead,
     FrameClassificationHead,
-    LISBETModel,
+    MultiTaskModel,
+    TransformerBackbone,
     WindowClassificationHead,
 )
 
@@ -477,8 +477,8 @@ def load_model(config_path, weights_path):
     model_config["output_token_idx"] = -(model_config["window_offset"] + 1)
 
     # Create backbone
-    backbone_kwargs = _filter_kwargs(model_config, Backbone)
-    backbone = Backbone(**backbone_kwargs)
+    backbone_kwargs = _filter_kwargs(model_config, TransformerBackbone)
+    backbone = TransformerBackbone(**backbone_kwargs)
 
     # Create heads
     heads_map = {
@@ -499,7 +499,7 @@ def load_model(config_path, weights_path):
 
         heads[task_id] = handler(**head_kwargs)
 
-    model = LISBETModel(backbone, heads)
+    model = MultiTaskModel(backbone, heads)
 
     # Load weights
     # NOTE: Setting strict=False allows for partial loading (i.e., dropping
@@ -528,15 +528,15 @@ def export_embedder(model_path, weights_path, output_path=Path(".")):
     model_config["out_heads"] = {"embedding": {}}
 
     # Create behavior embedding model
-    backbone_kwargs = _filter_kwargs(model_config, Backbone)
-    backbone = Backbone(**backbone_kwargs)
+    backbone_kwargs = _filter_kwargs(model_config, TransformerBackbone)
+    backbone = TransformerBackbone(**backbone_kwargs)
 
     head_kwargs = _filter_kwargs(model_config, EmbeddingHead)
     # TODO: Remove this hack when we have a better solution
     head_kwargs["output_token_idx"] = -(model_config["window_offset"] + 1)
     head = {"embedding": EmbeddingHead(**head_kwargs)}
 
-    embedding_model = LISBETModel(backbone, head)
+    embedding_model = MultiTaskModel(backbone, head)
     summary(embedding_model)
 
     # Load weights from pretrained model
