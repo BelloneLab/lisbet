@@ -491,6 +491,9 @@ def load_model(config_path, weights_path):
         "embedding": EmbeddingHead,
     }
     heads = {}
+    # TODO: Remove this hack when we have a better solution to handle the parameters of
+    #       the classification heads
+    model_config["input_dim"] = model_config["embedding_dim"]
     for task_id, extra_kwargs in model_config["out_heads"].items():
         handler = heads_map[task_id]
 
@@ -662,12 +665,12 @@ def dump_model_config(
     run_id,
     window_size,
     window_offset,
-    bp_dim,
-    emb_dim,
+    feature_dim,
+    embedding_dim,
     hidden_dim,
     num_heads,
     num_layers,
-    max_len,
+    max_length,
     tasks,
     input_features,
 ):
@@ -676,13 +679,13 @@ def dump_model_config(
         "model_id": run_id,
         "window_size": window_size,
         "window_offset": window_offset,
-        "bp_dim": bp_dim,
-        "emb_dim": emb_dim,
+        "feature_dim": feature_dim,
+        "embedding_dim": embedding_dim,
         "hidden_dim": hidden_dim,
         "num_heads": num_heads,
         "num_layers": num_layers,
-        "max_len": max_len,
-        "out_heads": {task.task_id: {"out_dim": task.out_dim} for task in tasks},
+        "max_length": max_length,
+        "out_heads": {task.task_id: {"num_classes": task.out_dim} for task in tasks},
         "input_features": input_features,
     }
     model_path = Path(output_path) / "models" / run_id / "model_config.yml"

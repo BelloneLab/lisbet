@@ -70,12 +70,12 @@ def _configure_profiler(steps_multiplier):
 
 
 def _build_model(
-    bp_dim,
-    emb_dim,
+    feature_dim,
+    embedding_dim,
     hidden_dim,
     num_heads,
     num_layers,
-    max_len,
+    max_length,
     tasks,
     load_backbone_weights,
     freeze_backbone_weights,
@@ -83,12 +83,12 @@ def _build_model(
     """Internal helper. Builds the LISBET model."""
     model = modeling.MultiTaskModel(
         modeling.TransformerBackbone(
-            bp_dim=bp_dim,
-            emb_dim=emb_dim,
+            feature_dim=feature_dim,
+            embedding_dim=embedding_dim,
             hidden_dim=hidden_dim,
             num_heads=num_heads,
             num_layers=num_layers,
-            max_len=max_len,
+            max_length=max_length,
         ),
         {task.task_id: task.head for task in tasks},
     )
@@ -288,7 +288,7 @@ def train(
     task_data: Optional[str] = None,
     # Model architecture
     num_layers: int = 4,
-    emb_dim: int = 32,
+    embedding_dim: int = 32,
     num_heads: int = 4,
     hidden_dim: int = 128,
     learning_rate: float = 1e-4,
@@ -358,7 +358,7 @@ def train(
         Task-to-data mapping, e.g., "multiclass:[0],order:[0,1]".
     num_layers : int, default=4
         Number of transformer layers.
-    emb_dim : int, default=32
+    embedding_dim : int, default=32
         Dimension of embedding.
     num_heads : int, default=4
         Number of attention heads.
@@ -430,7 +430,7 @@ def train(
 
     # Determine data shape from first record
     cdim = train_rec[task_ids_list[0]][0].posetracks.coords.sizes
-    bp_dim = cdim["individuals"] * cdim["keypoints"] * cdim["space"]
+    feature_dim = cdim["individuals"] * cdim["keypoints"] * cdim["space"]
 
     # Determine input_features list for config consistency
     first_record = train_rec[task_ids_list[0]][0]
@@ -449,9 +449,9 @@ def train(
         )
 
     # Determine max sequence length
-    # NOTE: We keep the max_len parameter as we may want to use it in the future to
+    # NOTE: We keep the max_length parameter as we may want to use it in the future to
     #       support variable-length sequences.
-    max_len = window_size
+    max_length = window_size
 
     # Compute backbone output token idx
     output_token_idx = -(window_offset + 1)
@@ -469,7 +469,7 @@ def train(
         task_ids_list,
         window_size,
         window_offset,
-        emb_dim,
+        embedding_dim,
         hidden_dim,
         data_augmentation,
         run_seeds,
@@ -479,12 +479,12 @@ def train(
 
     # Build model
     model = _build_model(
-        bp_dim,
-        emb_dim,
+        feature_dim,
+        embedding_dim,
         hidden_dim,
         num_heads,
         num_layers,
-        max_len,
+        max_length,
         tasks,
         load_backbone_weights,
         freeze_backbone_weights,
@@ -501,12 +501,12 @@ def train(
         run_id,
         window_size,
         window_offset,
-        bp_dim,
-        emb_dim,
+        feature_dim,
+        embedding_dim,
         hidden_dim,
         num_heads,
         num_layers,
-        max_len,
+        max_length,
         tasks,
         input_features,
     )

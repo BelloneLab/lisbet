@@ -250,7 +250,7 @@ def configure_train_model_parser(parser: argparse.ArgumentParser) -> None:
         "--num_layers", default=4, type=int, help="Number of transformer layers"
     )
     parser.add_argument(
-        "--emb_dim", default=32, type=int, help="Dimension of embedding"
+        "--embedding_dim", default=32, type=int, help="Dimension of embedding"
     )
     parser.add_argument(
         "--num_heads", default=4, type=int, help="Number of attention heads"
