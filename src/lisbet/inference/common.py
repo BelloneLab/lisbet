@@ -13,9 +13,8 @@ from rich.table import Table
 from torchvision import transforms
 from tqdm.auto import tqdm
 
-from lisbet import modeling
 from lisbet.datasets import WindowDataset
-from lisbet.io import load_records
+from lisbet.io import load_model, load_records
 from lisbet.transforms_extra import PoseToTensor
 
 
@@ -67,7 +66,7 @@ def load_model_and_config(model_path: str, weights_path: str, device: torch.devi
     """
     with open(model_path, encoding="utf-8") as f:
         config = yaml.safe_load(f)
-    model = modeling.load_model(model_path, weights_path)
+    model = load_model(model_path, weights_path)
     model.to(device)
     model.eval()
     return model, config

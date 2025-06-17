@@ -1,5 +1,6 @@
 """IO utilities for LISBET."""
 
+import inspect
 import logging
 import re
 from dataclasses import dataclass
@@ -14,7 +15,16 @@ import xarray as xr
 import yaml
 from movement.io import load_poses
 from movement.transforms import scale
+from torchinfo import summary
 from tqdm.auto import tqdm
+
+from lisbet.modeling import (
+    Backbone,
+    EmbeddingHead,
+    FrameClassificationHead,
+    LISBETModel,
+    WindowClassificationHead,
+)
 
 
 @dataclass
@@ -35,6 +45,12 @@ class Record:
     id: str
     posetracks: xr.Dataset
     annotations: Optional[xr.Dataset] = None
+
+
+def _filter_kwargs(kwargs, handler):
+    """Filter kwargs to match handler's signature."""
+    valid_args = [p.name for p in inspect.signature(handler).parameters.values()]
+    return {k: v for k, v in kwargs.items() if k in valid_args}
 
 
 def _load_posetracks(seq_path, data_format, data_scale, select_coords, rename_coords):
@@ -436,6 +452,114 @@ def load_multi_records(
     return multi_records
 
 
+def load_model(config_path, weights_path):
+    """Load a pretrained model.
+
+    This function extends the behavior of the default model.load_model by wrapping the
+    references to custom layers. Furthermore, it supports weights in the HDF5 format,
+    which we prefer for sharing.
+
+    Parameters
+    ----------
+    config_path : str or path-like
+        Path to the model configuration file (JSON).
+    weights_path : str or path-like
+        Path to the model weights (HDF5).
+
+    Returns
+    -------
+    torch.nn.Module : The loaded model.
+
+    """
+    with open(config_path, encoding="utf-8") as f_yaml:
+        model_config = yaml.safe_load(f_yaml)
+    # TODO: Remove this hack when we have a better solution
+    model_config["output_token_idx"] = -(model_config["window_offset"] + 1)
+
+    # Create backbone
+    backbone_kwargs = _filter_kwargs(model_config, Backbone)
+    backbone = Backbone(**backbone_kwargs)
+
+    # Create heads
+    heads_map = {
+        "multiclass": FrameClassificationHead,
+        "multilabel": FrameClassificationHead,
+        "cons": WindowClassificationHead,
+        "order": WindowClassificationHead,
+        "shift": WindowClassificationHead,
+        "warp": WindowClassificationHead,
+        "embedding": EmbeddingHead,
+    }
+    heads = {}
+    for task_id, extra_kwargs in model_config["out_heads"].items():
+        handler = heads_map[task_id]
+
+        head_kwargs = _filter_kwargs(model_config, handler)
+        head_kwargs.update(extra_kwargs)
+
+        heads[task_id] = handler(**head_kwargs)
+
+    model = LISBETModel(backbone, heads)
+
+    # Load weights
+    # NOTE: Setting strict=False allows for partial loading (i.e., dropping
+    #       self-supervised training heads)
+    incompatible_layers = model.load_state_dict(
+        torch.load(weights_path, weights_only=True, map_location=torch.device("cpu")),
+        strict=False,
+    )
+    logging.info(
+        "Loaded weights from file.\nMissing keys: %s\nUnexpected keys: %s",
+        incompatible_layers.missing_keys,
+        incompatible_layers.unexpected_keys,
+    )
+
+    return model
+
+
+def export_embedder(model_path, weights_path, output_path=Path(".")):
+    # Get hyper-parameters
+    with open(model_path, encoding="utf-8") as f_yaml:
+        model_config = yaml.safe_load(f_yaml)
+    model_id = model_config["model_id"] + "-embedder"
+
+    # Update config
+    model_config["model_id"] = model_id
+    model_config["out_heads"] = {"embedding": {}}
+
+    # Create behavior embedding model
+    backbone_kwargs = _filter_kwargs(model_config, Backbone)
+    backbone = Backbone(**backbone_kwargs)
+
+    head_kwargs = _filter_kwargs(model_config, EmbeddingHead)
+    # TODO: Remove this hack when we have a better solution
+    head_kwargs["output_token_idx"] = -(model_config["window_offset"] + 1)
+    head = {"embedding": EmbeddingHead(**head_kwargs)}
+
+    embedding_model = LISBETModel(backbone, head)
+    summary(embedding_model)
+
+    # Load weights from pretrained model
+    embedding_model.load_state_dict(
+        torch.load(weights_path, weights_only=True, map_location=torch.device("cpu")),
+        strict=False,
+    )
+
+    # Create output directory
+    output_path = output_path / "models" / model_id
+
+    # Store configuration
+    model_path = output_path / "model_config.yml"
+    model_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(model_path, "w", encoding="utf-8") as f_yaml:
+        yaml.safe_dump(model_config, f_yaml)
+
+    # Store weights
+    weights_path = output_path / "weights" / weights_path.name
+    weights_path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(embedding_model.state_dict(), weights_path)
+
+
 def dump_records(data_path, records):
     """
     Dump a list of records to a file.
@@ -538,7 +662,6 @@ def dump_model_config(
     run_id,
     window_size,
     window_offset,
-    output_token_idx,
     bp_dim,
     emb_dim,
     hidden_dim,
@@ -553,14 +676,13 @@ def dump_model_config(
         "model_id": run_id,
         "window_size": window_size,
         "window_offset": window_offset,
-        "output_token_idx": output_token_idx,
         "bp_dim": bp_dim,
         "emb_dim": emb_dim,
         "hidden_dim": hidden_dim,
         "num_heads": num_heads,
         "num_layers": num_layers,
         "max_len": max_len,
-        "out_dim": {task.task_id: task.out_dim for task in tasks},
+        "out_heads": {task.task_id: {"out_dim": task.out_dim} for task in tasks},
         "input_features": input_features,
     }
     model_path = Path(output_path) / "models" / run_id / "model_config.yml"

@@ -543,7 +543,7 @@ def main() -> None:
         },
         "export_embedder": {
             "description": "Export embedding model",
-            "module": ".modeling",
+            "module": ".io",
             "function": "export_embedder",
             "configure": configure_export_embedder_parser,
         },

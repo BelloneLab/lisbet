@@ -81,7 +81,7 @@ def _build_model(
     freeze_backbone_weights,
 ):
     """Internal helper. Builds the LISBET model."""
-    model = modeling.MultiTaskModel(
+    model = modeling.LISBETModel(
         modeling.Backbone(
             bp_dim=bp_dim,
             emb_dim=emb_dim,
@@ -501,7 +501,6 @@ def train(
         run_id,
         window_size,
         window_offset,
-        output_token_idx,
         bp_dim,
         emb_dim,
         hidden_dim,
