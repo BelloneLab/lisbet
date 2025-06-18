@@ -23,15 +23,14 @@ dependencies = [
     "pandas",
     "pooch",
     "pyyaml",
-    "rich",
     "scikit-learn",
     "seaborn",
     "torch",
     "torchinfo",
     "torchvision",
     "tqdm",
-    "typer",
     "umap-learn",
+    "rich",
 ]
 dynamic = ["version"]
 
@@ -50,7 +49,7 @@ tests = ["pytest"]
 dev = ["lisbet[tests,docs]"]
 
 [project.scripts]
-betman = "lisbet.cli.main:app"
+betman = "lisbet.cli:main"
 
 [tool.pytest.ini_options]
 addopts = ["--import-mode=importlib"]
