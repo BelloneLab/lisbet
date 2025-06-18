@@ -1,14 +1,4 @@
 from lisbet.modeling.backbones.transformer import TransformerBackbone
-from lisbet.modeling.factory import (
-    create_backbone_from_config,
-    create_embedding_head,
-    create_frame_classification_head,
-    create_model_from_config,
-    create_task_head_from_config,
-    create_transformer_model,
-    create_window_classification_head,
-    get_model_info,
-)
 from lisbet.modeling.heads.classification import (
     FrameClassificationHead,
     WindowClassificationHead,
@@ -24,15 +14,6 @@ __all__ = [
     "model_info",
     "MultiTaskModel",
     "TransformerBackbone",
-    # Factory functions
-    "create_backbone_from_config",
-    "create_embedding_head",
-    "create_frame_classification_head",
-    "create_model_from_config",
-    "create_task_head_from_config",
-    "create_transformer_model",
-    "create_window_classification_head",
-    "get_model_info",
 ]
 
 __doc__ = """
