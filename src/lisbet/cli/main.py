@@ -82,8 +82,8 @@ def app() -> None:
     commands = {
         "train_model": {
             "description": "Train a new classification model",
-            "module": ".training",
-            "function": "train",
+            "module": ".cli.commands.train",
+            "function": "train_model",
             "configure": configure_train_model_parser,
         },
         "annotate_behavior": {
@@ -187,9 +187,18 @@ def app() -> None:
     # Get command configuration
     cmd_config = commands[args.command]
 
-    # Execute command with lazy loading (always absolute import from lisbet root)
-    lazy_load_handler(
-        module_path=f"lisbet{cmd_config['module']}",
-        function_name=cmd_config["function"],
-        args=vars(args),
-    )
+    # Temporary workaround for new-style commands
+    if cmd_config["function"] == "train_model":
+        module_path = f"lisbet{cmd_config['module']}"
+        function_name = cmd_config["function"]
+        module = importlib.import_module(module_path)
+        handler = getattr(module, function_name)
+        handler(dict(args._get_kwargs()))
+
+    else:
+        # Fallback
+        lazy_load_handler(
+            module_path=f"lisbet{cmd_config['module']}",
+            function_name=cmd_config["function"],
+            args=vars(args),
+        )

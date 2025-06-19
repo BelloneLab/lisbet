@@ -5,6 +5,12 @@ import textwrap
 from pathlib import Path
 
 from lisbet.cli.common import add_data_io_args, add_keypoints_args, add_verbosity_args
+from lisbet.config.schemas import (
+    BackboneConfig,
+    DataConfig,
+    ExperimentConfig,
+    TrainingConfig,
+)
 
 
 def configure_train_model_parser(parser: argparse.ArgumentParser) -> None:
@@ -114,3 +120,68 @@ def configure_export_embedder_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--output_path", type=Path, default=Path("."), help="Output path"
     )
+
+
+def train_model(kwargs):
+    """Train a model for keypoint classification."""
+    from lisbet.training import train
+
+    # Configure backbone
+    backbone_config = BackboneConfig(
+        model_type="transformer",
+        num_layers=kwargs["num_layers"],
+        embedding_dim=kwargs["embedding_dim"],
+        num_heads=kwargs["num_heads"],
+        hidden_dim=kwargs["hidden_dim"],
+    )
+
+    # Configure data
+    data_config = DataConfig(
+        data_path=kwargs["data_path"],
+        data_format=kwargs["data_format"],
+        data_scale=kwargs.get("data_scale"),
+        data_filter=kwargs.get("data_filter"),
+        select_coords=kwargs.get("select_coords"),
+        rename_coords=kwargs.get("rename_coords"),
+        window_size=kwargs["window_size"],
+        window_offset=kwargs["window_offset"],
+        fps_scaling=kwargs["fps_scaling"],
+        dev_ratio=kwargs.get("dev_ratio"),
+        train_sample=kwargs.get("train_sample"),
+        dev_sample=kwargs.get("dev_sample"),
+    )
+
+    # Configure tasks
+    task_ids_list = kwargs["task_ids"].split(",")
+    # NOTE: For now we keep the task_data as a string, but it could be parsed into a
+    #       dict to simplify `split_multi_records`. Or even better, use a TaskConfig
+    #       class to handle task-specific configurations.
+    task_data = kwargs["task_data"]
+
+    # Configure training
+    training_config = TrainingConfig(
+        epochs=kwargs["epochs"],
+        batch_size=kwargs["batch_size"],
+        learning_rate=kwargs["learning_rate"],
+        data_augmentation=kwargs["data_augmentation"],
+        save_weights=kwargs["save_weights"],
+        save_history=kwargs["save_history"],
+        mixed_precision=kwargs["mixed_precision"],
+        freeze_backbone_weights=kwargs["freeze_backbone_weights"],
+        load_backbone_weights=kwargs.get("load_backbone_weights"),
+    )
+
+    # Create experiment configuration
+    experiment_config = ExperimentConfig(
+        run_id=kwargs["run_id"],
+        seed=kwargs["seed"],
+        backbone=backbone_config,
+        training=training_config,
+        data=data_config,
+        task_ids_list=task_ids_list,
+        task_data=task_data,
+        output_path=kwargs["output_path"],
+    )
+
+    # Train the model
+    train(experiment_config)
