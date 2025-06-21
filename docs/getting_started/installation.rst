@@ -11,20 +11,42 @@ We will call this environment ``lisbetenv``, but feel free to use any other name
 
 .. tab-set::
 
-   .. tab-item:: conda
+   .. tab-item:: Linux/macOS
 
-      .. code-block:: console
+      .. tab-set::
 
-         $ conda create -n lisbetenv python=3.12 pip wheel setuptools 
-         $ conda activate lisbetenv
-         $ pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
+         .. tab-item:: conda
 
-   .. tab-item:: venv
+            .. code-block:: console
 
-      .. code-block:: console
+               $ conda create -n lisbetenv python=3.12 pip wheel setuptools
+               $ conda activate lisbetenv
 
-         $ python3 -m venv lisbetenv
-         $ source lisbetenv/bin/activate
+         .. tab-item:: venv
+
+            .. code-block:: console
+
+               $ python3 -m venv lisbetenv
+               $ source lisbetenv/bin/activate
+
+   .. tab-item:: Windows
+
+      .. tab-set::
+
+         .. tab-item:: conda
+
+            .. code-block:: console
+
+               > conda create -n lisbetenv python=3.12 pip wheel setuptools
+               > conda activate lisbetenv
+               > pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
+
+         .. tab-item:: venv
+
+            .. code-block:: console
+
+               > python -m venv lisbetenv
+               > lisbetenv\Scripts\activate
 
 After creating and activating the ``lisbetenv`` environment, we can install the library using pip:
 
