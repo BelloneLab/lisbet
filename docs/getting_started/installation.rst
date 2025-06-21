@@ -7,7 +7,7 @@ Installation
    We suggest using either `conda <https://www.anaconda.com/download>`_ or `venv <https://docs.python.org/3/library/venv.html>`_ to create and manage virtual environments.
 
 Let's start by creating and activating a new virtual environment for LISBET.
-We will call this environment ``lisbet-env``, but feel free to use any other name.
+We will call this environment ``lisbetenv``, but feel free to use any other name.
 
 .. tab-set::
 
@@ -15,17 +15,18 @@ We will call this environment ``lisbet-env``, but feel free to use any other nam
 
       .. code-block:: console
 
-         $ conda create -n lisbet-env
-         $ conda activate lisbet-env
+         $ conda create -n lisbetenv python=3.12 pip wheel setuptools 
+         $ conda activate lisbetenv
+         $ pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
 
    .. tab-item:: venv
 
       .. code-block:: console
 
-         $ python3 -m venv lisbet-env
-         $ source lisbet-env/bin/activate
+         $ python3 -m venv lisbetenv
+         $ source lisbetenv/bin/activate
 
-After creating and activating the ``lisbet-env`` environment, we can install the library using pip:
+After creating and activating the ``lisbetenv`` environment, we can install the library using pip:
 
 .. code-block:: console
 
