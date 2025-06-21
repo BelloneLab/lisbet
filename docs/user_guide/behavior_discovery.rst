@@ -37,7 +37,7 @@ To generate the embedding files for your dataset you can use **betman**, a comma
       MODEL_PATH \                    # Path to pre-trained embedding model config
       MODEL_WEIGHTS                   # Path to pre-trained embedding model weights
 
-where DATAFORMAT indicates the format used to store the keypoints (e.g., **GenericDLC** if your dataset was obtained using DeepLabCut by Mathis et al. 2018), WINDOW_SIZE is the number of past frames the model is allowed to use to compute the embedding of each frame, and FPS_SCALING is the ratio between the frame rate (FPS) of your dataset and the one used by the pre-trained model (e.g., **0.833** if your dataset was acquired at 25 FPS and you are using a model pre-trained on the 30 FPS CalMS21 dataset by Sun et al. 2021).
+where DATAFORMAT indicates the format used to store the keypoints (e.g., **DLC** if your dataset was obtained using DeepLabCut by Mathis et al. 2018), WINDOW_SIZE is the number of past frames the model is allowed to use to compute the embedding of each frame, and FPS_SCALING is the ratio between the frame rate (FPS) of your dataset and the one used by the pre-trained model (e.g., **0.833** if your dataset was acquired at 25 FPS and you are using a model pre-trained on the 30 FPS CalMS21 dataset by Sun et al. 2021).
 
 For example, your ``betman predict`` command might look something like this:
 
@@ -64,6 +64,11 @@ For each embedding sequence of shape (nframes, nfeatures), LISBET generates a CS
 
 As discussed in Chindemi et al. 2023, to avoid choosing the number of behaviors a priori (i.e., the number of hidden states in the HMM), we propose a "scan-and-select" approach.
 This method, described below in **Step 3: Prototype selection**, allows to automatically infer the number of behaviors in the dataset, given only a lower and upper bound.
+
+.. note::
+   The HMM fitting step internally uses the ``hmmlearn`` library, which is a pure Python implementation of HMMs and does not support GPU acceleration.
+   However, since our "select-and-scan" approach requires fitting multiple HMMs, we can parallelize the process using multiple CPU cores.
+   This is the default behavior of the ``betman segment_motifs`` command, which will use all available cores on your machine to run the HMM scan, unless you specify a different number of jobs using the ``--n_jobs`` parameter.
 
 Before proceeding with Step 3, you need to generate multiple sets of HMM annotations for the prototype selection process using ``betman segment_motifs``:
 
