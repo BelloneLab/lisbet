@@ -6,6 +6,12 @@ import torch
 from torch import nn
 
 from lisbet.modeling.backbones.base import BackboneInterface
+from lisbet.modeling.backbones.transformer import TransformerBackbone
+from lisbet.modeling.heads.classification import (
+    FrameClassificationHead,
+    WindowClassificationHead,
+)
+from lisbet.modeling.heads.embedding import EmbeddingHead
 
 
 class MultiTaskModel(nn.Module):
@@ -136,19 +142,11 @@ class MultiTaskModel(nn.Module):
         """
         # Default registries
         if backbone_registry is None:
-            from lisbet.modeling.backbones.transformer import TransformerBackbone
-
             backbone_registry = {
                 "TransformerBackbone": TransformerBackbone,
             }
 
         if head_registry is None:
-            from lisbet.modeling.heads.classification import (
-                FrameClassificationHead,
-                WindowClassificationHead,
-            )
-            from lisbet.modeling.heads.embedding import EmbeddingHead
-
             head_registry = {
                 "FrameClassificationHead": FrameClassificationHead,
                 "WindowClassificationHead": WindowClassificationHead,

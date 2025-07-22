@@ -5,12 +5,6 @@ import textwrap
 from pathlib import Path
 
 from lisbet.cli.common import add_data_io_args, add_keypoints_args, add_verbosity_args
-from lisbet.config.schemas import (
-    BackboneConfig,
-    DataConfig,
-    ExperimentConfig,
-    TrainingConfig,
-)
 
 
 def configure_train_model_parser(parser: argparse.ArgumentParser) -> None:
@@ -21,6 +15,9 @@ def configure_train_model_parser(parser: argparse.ArgumentParser) -> None:
 
     parser.add_argument("--epochs", default=10, type=int, help="Number of epochs")
     parser.add_argument("--batch_size", default=32, type=int, help="Batch size")
+    parser.add_argument(
+        "--learning_rate", default=1e-4, type=float, help="Learning rate"
+    )
     parser.add_argument(
         "--task_ids",
         type=str,
@@ -68,19 +65,13 @@ def configure_train_model_parser(parser: argparse.ArgumentParser) -> None:
 
     # Model architecture
     parser.add_argument(
-        "--num_layers", default=4, type=int, help="Number of transformer layers"
+        "--backbone_preset", default="transformer-base", type=str, help="Backbone type"
     )
     parser.add_argument(
-        "--embedding_dim", default=32, type=int, help="Dimension of embedding"
-    )
-    parser.add_argument(
-        "--num_heads", default=4, type=int, help="Number of attention heads"
-    )
-    parser.add_argument(
-        "--hidden_dim", default=128, type=int, help="Units in dense layers"
-    )
-    parser.add_argument(
-        "--learning_rate", default=1e-4, type=float, help="Learning rate"
+        "--set",
+        metavar="KEY=VALUE",
+        action="append",
+        help="Override config values, e.g. --set backbone.num_layers=4",
     )
 
     # Model weights and saving options
@@ -111,6 +102,9 @@ def configure_train_model_parser(parser: argparse.ArgumentParser) -> None:
         help="Run training in mixed precision mode",
     )
 
+    # Miscellaneous
+    parser.add_argument("--dry_run", action="store_true", help="Print config and exit")
+
 
 def configure_export_embedder_parser(parser: argparse.ArgumentParser) -> None:
     """Configure export_embedder command parser."""
@@ -124,16 +118,33 @@ def configure_export_embedder_parser(parser: argparse.ArgumentParser) -> None:
 
 def train_model(kwargs):
     """Train a model for keypoint classification."""
+    # Lazy imports to avoid unnecessary dependencies when not training
+    from lisbet.config.overrides import apply_overrides
+    from lisbet.config.presets import TRANSFORMER_PRESETS
+    from lisbet.config.schemas import (
+        DataConfig,
+        ExperimentConfig,
+        TrainingConfig,
+    )
     from lisbet.training import train
 
     # Configure backbone
-    backbone_config = BackboneConfig(
-        model_type="transformer",
-        num_layers=kwargs["num_layers"],
-        embedding_dim=kwargs["embedding_dim"],
-        num_heads=kwargs["num_heads"],
-        hidden_dim=kwargs["hidden_dim"],
-    )
+    preset_name = kwargs.get("backbone_preset", "transformer-base")
+    if preset_name not in TRANSFORMER_PRESETS:
+        raise ValueError(f"Unknown backbone preset: {preset_name}")
+    backbone_config = TRANSFORMER_PRESETS[preset_name]
+
+    # Parse overrides from --set backbone.*=...
+    overrides = {}
+    for override in kwargs.get("set", []) or []:
+        if override.startswith("backbone."):
+            keyval = override[len("backbone.") :].split("=", 1)
+            if len(keyval) == 2:
+                key, val = keyval
+                overrides[key] = val
+
+    if overrides:
+        backbone_config = apply_overrides(backbone_config, overrides)
 
     # Configure data
     data_config = DataConfig(
@@ -183,5 +194,10 @@ def train_model(kwargs):
         output_path=kwargs["output_path"],
     )
 
-    # Train the model
-    train(experiment_config)
+    if kwargs.get("dry_run"):
+        # If dry run, just print the configuration
+        print(experiment_config)
+
+    else:
+        # Train the model
+        train(experiment_config)

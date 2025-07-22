@@ -3,7 +3,7 @@
 import inspect
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 from functools import partial
 from itertools import repeat
 from pathlib import Path
@@ -25,6 +25,7 @@ from lisbet.modeling import (
     TransformerBackbone,
     WindowClassificationHead,
 )
+from lisbet.modeling.factory import create_model_from_config
 
 
 @dataclass
@@ -453,60 +454,71 @@ def load_multi_records(
 
 
 def load_model(config_path, weights_path):
-    """Load a pretrained model.
+    """
+    Load a pretrained LISBET model from a configuration file or dataclass.
 
-    This function extends the behavior of the default model.load_model by wrapping the
-    references to custom layers. Furthermore, it supports weights in the HDF5 format,
-    which we prefer for sharing.
+    This function supports loading models from YAML configuration files (as used in
+    LISBET) or directly from configuration dataclasses. It uses the model factory to
+    instantiate the model and loads weights from the specified file.
 
     Parameters
     ----------
-    config_path : str or path-like
-        Path to the model configuration file (JSON).
-    weights_path : str or path-like
-        Path to the model weights (HDF5).
+    config_path : str or Path or dataclass
+        Path to the model configuration YAML file, or a config dataclass instance.
+    weights_path : str or Path
+        Path to the model weights file.
 
     Returns
     -------
-    torch.nn.Module : The loaded model.
-
+    torch.nn.Module
+        The loaded LISBET model.
     """
-    with open(config_path, encoding="utf-8") as f_yaml:
-        model_config = yaml.safe_load(f_yaml)
-    # TODO: Remove this hack when we have a better solution
-    model_config["output_token_idx"] = -(model_config["window_offset"] + 1)
+    # Support both YAML config files and dataclass configs
+    if isinstance(config_path, (str, Path)):
+        with open(config_path, encoding="utf-8") as f_yaml:
+            model_config = yaml.safe_load(f_yaml)
+    else:
+        model_config = config_path
 
-    # Create backbone
-    backbone_kwargs = _filter_kwargs(model_config, TransformerBackbone)
-    backbone = TransformerBackbone(**backbone_kwargs)
+    # If config is a dataclass, use it directly
+    if hasattr(model_config, "__dataclass_fields__"):
+        # Expect out_heads to be provided as attribute or fallback to multiclass
+        out_heads = getattr(model_config, "out_heads", None)
+        if out_heads is None:
+            raise ValueError(
+                "Config dataclass must provide out_heads for model outputs."
+            )
+        model = create_model_from_config(model_config, out_heads=out_heads)
+    else:
+        # Legacy: YAML dict config (as in LISBET 0.3.x)
+        # TODO: Remove this hack when all configs are dataclasses
+        # Compute output_token_idx if not present
+        if "output_token_idx" not in model_config and "window_offset" in model_config:
+            # TODO: Remove this hack when we have a better solution
+            model_config["output_token_idx"] = -(model_config["window_offset"] + 1)
+        # Create backbone
+        backbone_kwargs = _filter_kwargs(model_config, TransformerBackbone)
+        backbone = TransformerBackbone(**backbone_kwargs)
+        # Create heads
+        heads_map = {
+            "multiclass": FrameClassificationHead,
+            "multilabel": FrameClassificationHead,
+            "cons": WindowClassificationHead,
+            "order": WindowClassificationHead,
+            "shift": WindowClassificationHead,
+            "warp": WindowClassificationHead,
+            "embedding": EmbeddingHead,
+        }
+        heads = {}
+        model_config["input_dim"] = model_config.get("embedding_dim", None)
+        for task_id, extra_kwargs in model_config["out_heads"].items():
+            handler = heads_map[task_id]
+            head_kwargs = _filter_kwargs(model_config, handler)
+            head_kwargs.update(extra_kwargs)
+            heads[task_id] = handler(**head_kwargs)
+        model = MultiTaskModel(backbone, heads)
 
-    # Create heads
-    heads_map = {
-        "multiclass": FrameClassificationHead,
-        "multilabel": FrameClassificationHead,
-        "cons": WindowClassificationHead,
-        "order": WindowClassificationHead,
-        "shift": WindowClassificationHead,
-        "warp": WindowClassificationHead,
-        "embedding": EmbeddingHead,
-    }
-    heads = {}
-    # TODO: Remove this hack when we have a better solution to handle the parameters of
-    #       the classification heads
-    model_config["input_dim"] = model_config["embedding_dim"]
-    for task_id, extra_kwargs in model_config["out_heads"].items():
-        handler = heads_map[task_id]
-
-        head_kwargs = _filter_kwargs(model_config, handler)
-        head_kwargs.update(extra_kwargs)
-
-        heads[task_id] = handler(**head_kwargs)
-
-    model = MultiTaskModel(backbone, heads)
-
-    # Load weights
-    # NOTE: Setting strict=False allows for partial loading (i.e., dropping
-    #       self-supervised training heads)
+    # Load weights (strict=False allows for partial loading)
     incompatible_layers = model.load_state_dict(
         torch.load(weights_path, weights_only=True, map_location=torch.device("cpu")),
         strict=False,
@@ -663,35 +675,42 @@ def dump_weights(model, output_path, run_id, filename):
 def dump_model_config(
     output_path,
     run_id,
-    window_size,
-    window_offset,
-    feature_dim,
-    embedding_dim,
-    hidden_dim,
-    num_heads,
-    num_layers,
-    max_length,
-    tasks,
-    input_features,
+    *args,
+    config=None,
+    **kwargs,
 ):
-    """Internal helper. Saves model config."""
-    model_config = {
-        "model_id": run_id,
-        "window_size": window_size,
-        "window_offset": window_offset,
-        "feature_dim": feature_dim,
-        "embedding_dim": embedding_dim,
-        "hidden_dim": hidden_dim,
-        "num_heads": num_heads,
-        "num_layers": num_layers,
-        "max_length": max_length,
-        "out_heads": {task.task_id: {"num_classes": task.out_dim} for task in tasks},
-        "input_features": input_features,
-    }
+    """
+    Save model configuration to YAML file.
+
+    Supports both config dataclasses and legacy dict configs.
+    """
     model_path = Path(output_path) / "models" / run_id / "model_config.yml"
     model_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(model_path, "w", encoding="utf-8") as f_yaml:
-        yaml.safe_dump(model_config, f_yaml)
+
+    if config is not None:
+        # If a config dataclass is provided, serialize it
+        with open(model_path, "w", encoding="utf-8") as f_yaml:
+            yaml.safe_dump(asdict(config) if is_dataclass(config) else config, f_yaml)
+    else:
+        # Fallback to legacy dict config (for backward compatibility)
+        model_config = {
+            "model_id": run_id,
+            "window_size": kwargs.get("window_size"),
+            "window_offset": kwargs.get("window_offset"),
+            "feature_dim": kwargs.get("feature_dim"),
+            "embedding_dim": kwargs.get("embedding_dim"),
+            "hidden_dim": kwargs.get("hidden_dim"),
+            "num_heads": kwargs.get("num_heads"),
+            "num_layers": kwargs.get("num_layers"),
+            "max_length": kwargs.get("max_length"),
+            "out_heads": {
+                task.task_id: {"num_classes": task.out_dim}
+                for task in kwargs.get("tasks", [])
+            },
+            "input_features": kwargs.get("input_features"),
+        }
+        with open(model_path, "w", encoding="utf-8") as f_yaml:
+            yaml.safe_dump(model_config, f_yaml)
 
 
 def dump_profiling_results(output_path, run_id, prof):
