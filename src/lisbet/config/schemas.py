@@ -1,10 +1,33 @@
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Union
+from typing import Annotated, Literal, Optional, Union
+
+from pydantic import BaseModel, Field
 
 
-@dataclass
-class DataConfig:
+class TransformerBackboneConfig(BaseModel):
+    type: Literal["transformer"] = "transformer"
+    feature_dim: Optional[int] = None
+    embedding_dim: int
+    hidden_dim: int
+    num_heads: int
+    num_layers: int
+    max_length: int
+
+
+class LSTMBackboneConfig(BaseModel):
+    type: Literal["lstm"] = "lstm"
+    feature_dim: Optional[int] = None
+    embedding_dim: int
+    hidden_dim: int
+    num_layers: int
+
+
+BackboneConfig = Annotated[
+    Union[TransformerBackboneConfig, LSTMBackboneConfig], Field(discriminator="type")
+]
+
+
+class DataConfig(BaseModel):
     data_path: str
     data_format: str = "DLC"
     data_scale: Optional[str] = None
@@ -19,46 +42,16 @@ class DataConfig:
     dev_sample: Optional[float] = None
 
 
-@dataclass
-class TransformerBackboneConfig:
-    feature_dim: int
-    embedding_dim: int
-    hidden_dim: int
-    num_heads: int
-    num_layers: int
-    max_length: int
-    backbone_type: str = "transformer"
-
-
-@dataclass
-class LSTMBackboneConfig:
-    feature_dim: int
-    embedding_dim: int
-    hidden_dim: int
-    num_layers: int
-    backbone_type: str = "lstm"
-
-
-# Union type for general use
-BackboneConfig = Union[TransformerBackboneConfig, LSTMBackboneConfig]
-BACKBONE_CONFIG_REGISTRY = {
-    "transformer": TransformerBackboneConfig,
-    "lstm": LSTMBackboneConfig,
-}
-
-
-@dataclass
-class ModelConfig:
+class ModelConfig(BaseModel):
     model_id: str
     backbone: BackboneConfig
     out_heads: dict[str, dict]
-    input_features: dict[str, dict]
+    input_features: dict[str, list[str]]
     window_size: int
     window_offset: int
 
 
-@dataclass
-class TrainingConfig:
+class TrainingConfig(BaseModel):
     epochs: int
     batch_size: int
     learning_rate: float
@@ -70,8 +63,7 @@ class TrainingConfig:
     load_backbone_weights: Optional[str] = None
 
 
-@dataclass
-class ExperimentConfig:
+class ExperimentConfig(BaseModel):
     run_id: str
     model: ModelConfig
     training: TrainingConfig

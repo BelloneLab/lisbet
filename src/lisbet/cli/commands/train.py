@@ -119,9 +119,11 @@ def configure_export_embedder_parser(parser: argparse.ArgumentParser) -> None:
 def train_model(kwargs):
     """Train a model for keypoint classification."""
     # Lazy imports to avoid unnecessary dependencies when not training
-    from lisbet.config.overrides import apply_overrides
+    from pydantic import TypeAdapter
+
     from lisbet.config.presets import BACKBONE_PRESETS
     from lisbet.config.schemas import (
+        BackboneConfig,
         DataConfig,
         ExperimentConfig,
         ModelConfig,
@@ -133,7 +135,11 @@ def train_model(kwargs):
     preset_name = kwargs.get("backbone_preset", "transformer-base")
     if preset_name not in BACKBONE_PRESETS:
         raise ValueError(f"Unknown backbone preset: {preset_name}")
-    backbone_config = BACKBONE_PRESETS[preset_name]
+    backbone_config_dict = BACKBONE_PRESETS[preset_name]
+
+    # Set max_length for transformer backbones to window_size
+    if backbone_config_dict.get("type") == "transformer":
+        backbone_config_dict["max_length"] = kwargs.get("window_size")
 
     # Parse overrides from --set backbone.*=...
     overrides = {}
@@ -143,25 +149,14 @@ def train_model(kwargs):
             if len(keyval) == 2:
                 key, val = keyval
                 overrides[key] = val
+    backbone_config_dict.update(overrides)
 
-    if overrides:
-        backbone_config = apply_overrides(backbone_config, overrides)
+    # Create backbone config
+    adapter = TypeAdapter(BackboneConfig)
+    backbone_config = adapter.validate_python(backbone_config_dict)
 
     # Configure data
-    data_config = DataConfig(
-        data_path=kwargs["data_path"],
-        data_format=kwargs["data_format"],
-        data_scale=kwargs.get("data_scale"),
-        data_filter=kwargs.get("data_filter"),
-        select_coords=kwargs.get("select_coords"),
-        rename_coords=kwargs.get("rename_coords"),
-        window_size=kwargs["window_size"],
-        window_offset=kwargs["window_offset"],
-        fps_scaling=kwargs["fps_scaling"],
-        dev_ratio=kwargs.get("dev_ratio"),
-        train_sample=kwargs.get("train_sample"),
-        dev_sample=kwargs.get("dev_sample"),
-    )
+    data_config = DataConfig.model_validate(kwargs)
 
     # Configure tasks
     task_ids_list = kwargs["task_ids"].split(",")
@@ -181,17 +176,7 @@ def train_model(kwargs):
     )
 
     # Configure training
-    training_config = TrainingConfig(
-        epochs=kwargs["epochs"],
-        batch_size=kwargs["batch_size"],
-        learning_rate=kwargs["learning_rate"],
-        data_augmentation=kwargs["data_augmentation"],
-        save_weights=kwargs["save_weights"],
-        save_history=kwargs["save_history"],
-        mixed_precision=kwargs["mixed_precision"],
-        freeze_backbone_weights=kwargs["freeze_backbone_weights"],
-        load_backbone_weights=kwargs.get("load_backbone_weights"),
-    )
+    training_config = TrainingConfig.model_validate(kwargs)
 
     # Create experiment configuration
     experiment_config = ExperimentConfig(

@@ -11,37 +11,32 @@ Presets
 - lstm-base: Standard LSTM backbone.
 """
 
-from lisbet.config.schemas import LSTMBackboneConfig, TransformerBackboneConfig
-
 BACKBONE_PRESETS = {
-    "transformer-small": TransformerBackboneConfig(
-        feature_dim=None,
-        embedding_dim=16,
-        hidden_dim=32,
-        num_heads=2,
-        num_layers=1,
-        max_length=None,
-    ),
-    "transformer-base": TransformerBackboneConfig(
-        feature_dim=None,
-        embedding_dim=32,
-        hidden_dim=128,
-        num_heads=4,
-        num_layers=4,
-        max_length=None,
-    ),
-    "transformer-large": TransformerBackboneConfig(
-        feature_dim=None,
-        embedding_dim=64,
-        hidden_dim=256,
-        num_heads=8,
-        num_layers=8,
-        max_length=None,
-    ),
-    "lstm-base": LSTMBackboneConfig(
-        feature_dim=None,
-        embedding_dim=32,
-        hidden_dim=128,
-        num_layers=2,
-    ),
+    "transformer-small": {
+        "type": "transformer",
+        "embedding_dim": 16,
+        "hidden_dim": 32,
+        "num_heads": 2,
+        "num_layers": 1,
+    },
+    "transformer-base": {
+        "type": "transformer",
+        "embedding_dim": 32,
+        "hidden_dim": 128,
+        "num_heads": 4,
+        "num_layers": 4,
+    },
+    "transformer-large": {
+        "type": "transformer",
+        "embedding_dim": 64,
+        "hidden_dim": 256,
+        "num_heads": 8,
+        "num_layers": 8,
+    },
+    "lstm-base": {
+        "type": "lstm",
+        "embedding_dim": 32,
+        "hidden_dim": 128,
+        "num_layers": 2,
+    },
 }

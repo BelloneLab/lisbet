@@ -2,7 +2,7 @@
 
 Notes
 -----
-[a] The dictionary of RNG seed could be refactored as a dataclass in the future.
+[a] The dictionary of RNG seed could be refactored as a Pydantic model in the future.
 
 [b] The train/dev split is performed here and not in the input_pipeline module to
     emphasize that the test set is frozen and won't be used for hyper-parameters tuning.
@@ -255,7 +255,7 @@ def train(experiment_config: ExperimentConfig) -> torch.nn.Module:
     experiment_config : ExperimentConfig
         Configuration object containing all parameters for the training run.
         It includes data paths, model architecture, training hyperparameters,
-        and task definitions.
+        and task definitions. Must be a Pydantic model.
 
     Returns
     -------
@@ -328,11 +328,6 @@ def train(experiment_config: ExperimentConfig) -> torch.nn.Module:
             training_config.load_backbone_weights,
         )
 
-    # Determine max sequence length
-    # NOTE: We keep the max_length parameter as we may want to use it in the future to
-    #       support variable-length sequences.
-    max_length = data_config.window_size
-
     # Compute backbone output token idx
     output_token_idx = -(data_config.window_offset + 1)
     if not (data_config.window_size > data_config.window_offset >= 0):
@@ -358,17 +353,9 @@ def train(experiment_config: ExperimentConfig) -> torch.nn.Module:
     n_tasks = len(tasks)
 
     # Set dynamic attributes for backbone
-    if backbone_config.backbone_type == "transformer":
-        backbone_config.feature_dim = feature_dim
-        backbone_config.max_length = max_length
-    elif backbone_config.backbone_type == "lstm":
-        backbone_config.feature_dim = feature_dim
-    else:
-        raise ValueError("Unknown backbone config type")
+    backbone_config.feature_dim = feature_dim
 
     # Set dynamic attributes for model config
-    model_config.window_size = data_config.window_size
-    model_config.window_offset = data_config.window_offset
     model_config.input_features = input_features
     model_config.out_heads = {task.task_id: task.head.get_config() for task in tasks}
 

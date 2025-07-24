@@ -3,7 +3,7 @@
 import inspect
 import logging
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from functools import partial
 from itertools import repeat
 from pathlib import Path
@@ -18,15 +18,7 @@ from movement.transforms import scale
 from torchinfo import summary
 from tqdm.auto import tqdm
 
-from lisbet.config.schemas import (
-    BACKBONE_CONFIG_REGISTRY,
-    ModelConfig,
-)
-from lisbet.modeling import (
-    EmbeddingHead,
-    MultiTaskModel,
-    TransformerBackbone,
-)
+from lisbet.config.schemas import ModelConfig
 from lisbet.modeling.factory import create_model_from_config
 
 
@@ -471,17 +463,10 @@ def load_model(config_path, weights_path):
     with open(config_path, encoding="utf-8") as f_yaml:
         model_config_dict = yaml.safe_load(f_yaml)
 
-    # Create backbone configuration to replace the simple dict loaded from YAML
-    backbone_type = model_config_dict["backbone"]["backbone_type"]
-    backbone_config = BACKBONE_CONFIG_REGISTRY[backbone_type](
-        **model_config_dict["backbone"]
-    )
-    model_config_dict["backbone"] = backbone_config
+    # Create model configuration
+    model_config = ModelConfig.model_validate(model_config_dict)
 
-    # Create model configuration dataclass
-    model_config = ModelConfig(**model_config_dict)
-
-    # Load model configuration as a dataclass
+    # Load model from configuration
     model = create_model_from_config(model_config)
 
     # Load weights (strict=False allows for partial loading)
@@ -499,25 +484,23 @@ def load_model(config_path, weights_path):
 
 
 def export_embedder(model_path, weights_path, output_path=Path(".")):
-    # Get hyper-parameters
+    # Get config dictionary
     with open(model_path, encoding="utf-8") as f_yaml:
-        model_config = yaml.safe_load(f_yaml)
-    model_id = model_config["model_id"] + "-embedder"
+        model_config_dict = yaml.safe_load(f_yaml)
+    model_id = model_config_dict["model_id"] + "-embedder"
 
     # Update config
-    model_config["model_id"] = model_id
-    model_config["out_heads"] = {"embedding": {}}
+    model_config_dict["model_id"] = model_id
+    model_config_dict["out_heads"] = {
+        # TODO: Remove this hack when we have a better solution
+        "embedding": {"output_token_idx": -(model_config_dict["window_offset"] + 1)}
+    }
+
+    # Create model configuration
+    model_config = ModelConfig.model_validate(model_config_dict)
 
     # Create behavior embedding model
-    backbone_kwargs = _filter_kwargs(model_config, TransformerBackbone)
-    backbone = TransformerBackbone(**backbone_kwargs)
-
-    head_kwargs = _filter_kwargs(model_config, EmbeddingHead)
-    # TODO: Remove this hack when we have a better solution
-    head_kwargs["output_token_idx"] = -(model_config["window_offset"] + 1)
-    head = {"embedding": EmbeddingHead(**head_kwargs)}
-
-    embedding_model = MultiTaskModel(backbone, head)
+    embedding_model = create_model_from_config(model_config)
     summary(embedding_model)
 
     # Load weights from pretrained model
@@ -526,19 +509,11 @@ def export_embedder(model_path, weights_path, output_path=Path(".")):
         strict=False,
     )
 
-    # Create output directory
-    output_path = output_path / "models" / model_id
-
     # Store configuration
-    model_path = output_path / "model_config.yml"
-    model_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(model_path, "w", encoding="utf-8") as f_yaml:
-        yaml.safe_dump(model_config, f_yaml)
+    dump_model_config(output_path, model_id, model_config)
 
     # Store weights
-    weights_path = output_path / "weights" / weights_path.name
-    weights_path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save(embedding_model.state_dict(), weights_path)
+    dump_weights(embedding_model, output_path, model_id, weights_path.name)
 
 
 def dump_records(data_path, records):
@@ -644,7 +619,7 @@ def dump_model_config(output_path, run_id, model_config):
     model_path.parent.mkdir(parents=True, exist_ok=True)
 
     with open(model_path, "w", encoding="utf-8") as f_yaml:
-        yaml.safe_dump(asdict(model_config), f_yaml)
+        yaml.safe_dump(model_config.model_dump(), f_yaml)
 
 
 def dump_profiling_results(output_path, run_id, prof):
