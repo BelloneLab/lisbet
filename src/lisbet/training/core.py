@@ -26,7 +26,6 @@ from torch.utils.data import DataLoader
 from torchinfo import summary
 from tqdm.auto import trange
 
-from lisbet import modeling
 from lisbet.config.schemas import ExperimentConfig
 from lisbet.io import (
     dump_model_config,
@@ -34,6 +33,7 @@ from lisbet.io import (
     dump_weights,
     load_multi_records,
 )
+from lisbet.modeling.factory import create_model_from_config
 from lisbet.training.preprocessing import split_multi_records
 from lisbet.training.tasks import configure_tasks
 from lisbet.training.utils import estimate_num_workers, generate_seeds, worker_init_fn
@@ -68,33 +68,13 @@ def _configure_profiler(steps_multiplier):
     return profiler
 
 
-def _build_model(
-    feature_dim,
-    embedding_dim,
-    hidden_dim,
-    num_heads,
-    num_layers,
-    max_length,
-    tasks,
-    load_backbone_weights,
-    freeze_backbone_weights,
-):
-    """Internal helper. Builds the LISBET model."""
-    model = modeling.MultiTaskModel(
-        modeling.TransformerBackbone(
-            feature_dim=feature_dim,
-            embedding_dim=embedding_dim,
-            hidden_dim=hidden_dim,
-            num_heads=num_heads,
-            num_layers=num_layers,
-            max_length=max_length,
-        ),
-        {task.task_id: task.head for task in tasks},
-    )
+def _build_model(training_config, model_config):
+    """Internal helper. Builds the LISBET model using the config factory."""
+    model = create_model_from_config(model_config)
 
-    if load_backbone_weights:
+    if training_config.load_backbone_weights:
         incompatible_layers = model.load_state_dict(
-            torch.load(load_backbone_weights, weights_only=True),
+            torch.load(training_config.load_backbone_weights, weights_only=True),
             strict=False,
         )
         logging.info(
@@ -103,7 +83,7 @@ def _build_model(
             incompatible_layers.unexpected_keys,
         )
 
-    if freeze_backbone_weights:
+    if training_config.freeze_backbone_weights:
         for param in model.backbone.parameters():
             param.requires_grad = False
     return model
@@ -288,15 +268,22 @@ def train(experiment_config: ExperimentConfig) -> torch.nn.Module:
     see the LISBET documentation.
     """
     # Create aliases for configuration parameters
-    ec = experiment_config
+    model_config = experiment_config.model
+    backbone_config = model_config.backbone
+    data_config = experiment_config.data
+    training_config = experiment_config.training
 
     # Configure base runtime arguments
-    run_id = datetime.now().strftime("%Y%m%d%H%M%S") if ec.run_id is None else ec.run_id
+    run_id = (
+        datetime.now().strftime("%Y%m%d%H%M%S")
+        if experiment_config.run_id is None
+        else experiment_config.run_id
+    )
 
     # Create Fabric instance
-    precision = "16-mixed" if ec.training.mixed_precision else "32-true"
+    precision = "16-mixed" if experiment_config.training.mixed_precision else "32-true"
     history_logger = CSVLogger(
-        ec.output_path / "models" / run_id,
+        experiment_config.output_path / "models" / run_id,
         name="training_history",
         flush_logs_every_n_steps=1,
     )
@@ -305,60 +292,53 @@ def train(experiment_config: ExperimentConfig) -> torch.nn.Module:
     logging.info("Using %s for training model %s.", fabric.device.type, run_id)
 
     # Configure RNGs
-    run_seeds = generate_seeds(ec.seed, ec.task_ids_list)
+    run_seeds = generate_seeds(experiment_config.seed, experiment_config.task_ids_list)
     torch.manual_seed(run_seeds["torch"])
 
     # Load records
     # TODO: Switch to the DataConfig object
-    multi_records = load_multi_records(
-        data_format=ec.data.data_format,
-        data_path=ec.data.data_path,
-        data_scale=ec.data.data_scale,
-        data_filter=ec.data.data_filter,
-        select_coords=ec.data.select_coords,
-        rename_coords=ec.data.rename_coords,
-    )
+    multi_records = load_multi_records(data_config)
 
     # Split records
     train_rec, dev_rec = split_multi_records(
         multi_records=multi_records,
-        dev_ratio=ec.data.dev_ratio,
+        dev_ratio=data_config.dev_ratio,
         dev_seed=run_seeds.get("dev_split"),
-        task_ids=ec.task_ids_list,
-        task_data=ec.task_data,
+        task_ids=experiment_config.task_ids_list,
+        task_data=experiment_config.task_data,
     )
 
     # Determine data shape from first record
-    cdim = train_rec[ec.task_ids_list[0]][0].posetracks.coords.sizes
+    cdim = train_rec[experiment_config.task_ids_list[0]][0].posetracks.coords.sizes
     feature_dim = cdim["individuals"] * cdim["keypoints"] * cdim["space"]
 
     # Determine input_features list for config consistency
-    first_record = train_rec[ec.task_ids_list[0]][0]
+    first_record = train_rec[experiment_config.task_ids_list[0]][0]
     input_features = {
         dim: first_record.posetracks.coords[dim].values.tolist()
         for dim in ("individuals", "keypoints", "space")
     }
 
-    if ec.training.load_backbone_weights is not None:
+    if training_config.load_backbone_weights is not None:
         logging.warning(
             "Loading backbone weights from %s. If you are not experimenting with "
             "transfer learning, please verify that the input features of the "
             "pre-trained model match those of your data. In the future, this warning "
             "could become a requirement to load the backbone weights.",
-            ec.training.load_backbone_weights,
+            training_config.load_backbone_weights,
         )
 
     # Determine max sequence length
     # NOTE: We keep the max_length parameter as we may want to use it in the future to
     #       support variable-length sequences.
-    max_length = ec.data.window_size
+    max_length = data_config.window_size
 
     # Compute backbone output token idx
-    output_token_idx = -(ec.data.window_offset + 1)
-    if not (ec.data.window_size > ec.data.window_offset >= 0):
+    output_token_idx = -(data_config.window_offset + 1)
+    if not (data_config.window_size > data_config.window_offset >= 0):
         raise RuntimeError(
             "Window offset must be a positive integer smaller than the window size"
-            f" or zero, got {ec.data.window_offset}."
+            f" or zero, got {data_config.window_offset}."
         )
     logging.debug("Output token IDX = %d", output_token_idx)
 
@@ -366,79 +346,73 @@ def train(experiment_config: ExperimentConfig) -> torch.nn.Module:
     tasks = configure_tasks(
         train_rec,
         dev_rec,
-        ec.task_ids_list,
-        ec.data.window_size,
-        ec.data.window_offset,
-        ec.backbone.embedding_dim,
-        ec.backbone.hidden_dim,
-        ec.training.data_augmentation,
+        experiment_config.task_ids_list,
+        data_config.window_size,
+        data_config.window_offset,
+        backbone_config.embedding_dim,
+        backbone_config.hidden_dim,
+        training_config.data_augmentation,
         run_seeds,
         fabric.device,
     )
     n_tasks = len(tasks)
 
+    # Set dynamic attributes for backbone
+    if backbone_config.backbone_type == "transformer":
+        backbone_config.feature_dim = feature_dim
+        backbone_config.max_length = max_length
+    elif backbone_config.backbone_type == "lstm":
+        backbone_config.feature_dim = feature_dim
+    else:
+        raise ValueError("Unknown backbone config type")
+
+    # Set dynamic attributes for model config
+    model_config.window_size = data_config.window_size
+    model_config.window_offset = data_config.window_offset
+    model_config.input_features = input_features
+    model_config.out_heads = {task.task_id: task.head.get_config() for task in tasks}
+
     # Build model
-    model = _build_model(
-        feature_dim,
-        ec.backbone.embedding_dim,
-        ec.backbone.hidden_dim,
-        ec.backbone.num_heads,
-        ec.backbone.num_layers,
-        max_length,
-        tasks,
-        ec.training.load_backbone_weights,
-        ec.training.freeze_backbone_weights,
-    )
+    model = _build_model(training_config, model_config)
     model_stats = summary(model, verbose=0)
     logging.info("Model summary\n" + str(model_stats))
 
     # Optimizer and scheduler
     optimizer, scheduler = _configure_optimizer_and_scheduler(
-        model, ec.training.learning_rate
+        model, training_config.learning_rate
     )
 
     # Save model config
     dump_model_config(
-        ec.output_path,
-        run_id,
-        ec.data.window_size,
-        ec.data.window_offset,
-        feature_dim,
-        ec.backbone.embedding_dim,
-        ec.backbone.hidden_dim,
-        ec.backbone.num_heads,
-        ec.backbone.num_layers,
-        max_length,
-        tasks,
-        input_features,
+        experiment_config.output_path, experiment_config.run_id, model_config
     )
 
     # Configure dataloaders
     train_dataloaders, train_n_batches = _configure_dataloaders(
         tasks,
         "train",
-        ec.training.batch_size,
-        ec.data.train_sample,
+        training_config.batch_size,
+        data_config.train_sample,
         fabric.device.type == "cuda",
     )
-    if ec.data.dev_ratio is not None:
+    if data_config.dev_ratio is not None:
         dev_dataloaders, dev_n_batches = _configure_dataloaders(
             tasks,
             "dev",
-            ec.training.batch_size,
-            ec.data.dev_sample,
+            training_config.batch_size,
+            data_config.dev_sample,
             fabric.device.type == "cuda",
         )
 
     # Configure Fabric
     model, optimizer = fabric.setup(model, optimizer)
     train_dataloaders = [fabric.setup_dataloaders(dl) for dl in train_dataloaders]
-    if ec.data.dev_ratio is not None:
+    if data_config.dev_ratio is not None:
         dev_dataloaders = [fabric.setup_dataloaders(dl) for dl in dev_dataloaders]
 
     # Training loop
     with _configure_profiler(steps_multiplier=n_tasks) as prof:
-        for epoch in range(ec.training.epochs):
+        for epoch in range(training_config.epochs):
             history_entry = {"epoch": epoch}
             print(f"Epoch {epoch}")
             logging.info("Current LR = %f", scheduler.get_last_lr()[0])
@@ -459,10 +433,15 @@ def train(experiment_config: ExperimentConfig) -> torch.nn.Module:
             history_entry.update(_compute_epoch_logs("train", tasks))
 
             # Save weights, if requested
-            if ec.training.save_weights == "all":
-                dump_weights(model, ec.output_path, run_id, f"weights_epoch{epoch}.pt")
+            if training_config.save_weights == "all":
+                dump_weights(
+                    model,
+                    experiment_config.output_path,
+                    run_id,
+                    f"weights_epoch{epoch}.pt",
+                )
 
-            if ec.data.dev_ratio is not None:
+            if data_config.dev_ratio is not None:
                 # Run dev epoch
                 _evaluate(model, dev_dataloaders, dev_n_batches, tasks)
 
@@ -475,10 +454,10 @@ def train(experiment_config: ExperimentConfig) -> torch.nn.Module:
 
     # Save profiling results, if requested
     if prof is not None:
-        dump_profiling_results(ec.output_path, run_id, prof)
+        dump_profiling_results(experiment_config.output_path, run_id, prof)
 
     # Save final weights, if requested
-    if ec.training.save_weights == "last":
-        dump_weights(model, ec.output_path, run_id, "weights_last.pt")
+    if training_config.save_weights == "last":
+        dump_weights(model, experiment_config.output_path, run_id, "weights_last.pt")
 
     return model

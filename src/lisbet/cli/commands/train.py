@@ -120,19 +120,20 @@ def train_model(kwargs):
     """Train a model for keypoint classification."""
     # Lazy imports to avoid unnecessary dependencies when not training
     from lisbet.config.overrides import apply_overrides
-    from lisbet.config.presets import TRANSFORMER_PRESETS
+    from lisbet.config.presets import BACKBONE_PRESETS
     from lisbet.config.schemas import (
         DataConfig,
         ExperimentConfig,
+        ModelConfig,
         TrainingConfig,
     )
     from lisbet.training import train
 
     # Configure backbone
     preset_name = kwargs.get("backbone_preset", "transformer-base")
-    if preset_name not in TRANSFORMER_PRESETS:
+    if preset_name not in BACKBONE_PRESETS:
         raise ValueError(f"Unknown backbone preset: {preset_name}")
-    backbone_config = TRANSFORMER_PRESETS[preset_name]
+    backbone_config = BACKBONE_PRESETS[preset_name]
 
     # Parse overrides from --set backbone.*=...
     overrides = {}
@@ -169,6 +170,16 @@ def train_model(kwargs):
     #       class to handle task-specific configurations.
     task_data = kwargs["task_data"]
 
+    # Configure model
+    model_config = ModelConfig(
+        model_id=kwargs["run_id"],
+        backbone=backbone_config,
+        out_heads={task_id: {} for task_id in task_ids_list},
+        input_features={},
+        window_size=kwargs["window_size"],
+        window_offset=kwargs["window_offset"],
+    )
+
     # Configure training
     training_config = TrainingConfig(
         epochs=kwargs["epochs"],
@@ -186,7 +197,7 @@ def train_model(kwargs):
     experiment_config = ExperimentConfig(
         run_id=kwargs["run_id"],
         seed=kwargs["seed"],
-        backbone=backbone_config,
+        model=model_config,
         training=training_config,
         data=data_config,
         task_ids_list=task_ids_list,

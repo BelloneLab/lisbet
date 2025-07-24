@@ -6,6 +6,7 @@ import torch
 from torch import nn
 
 from lisbet.modeling.backbones.base import BackboneInterface
+from lisbet.modeling.backbones.lstm import LSTMBackbone
 from lisbet.modeling.backbones.transformer import TransformerBackbone
 from lisbet.modeling.heads.classification import (
     FrameClassificationHead,
@@ -35,16 +36,21 @@ class MultiTaskModel(nn.Module):
         The shared backbone model.
     task_heads : nn.ModuleDict
         Dictionary of task-specific heads.
+    model_id : str
+        Identifier for the model instance, useful for logging or saving. Defaults to
+        "lisbet_model".
     """
 
     def __init__(
         self,
         backbone: BackboneInterface,
         task_heads: dict[str, nn.Module],
+        model_id: str = "lisbet_model",
     ) -> None:
         super().__init__()
         self.backbone = backbone
         self.task_heads = nn.ModuleDict(task_heads)
+        self.model_id = model_id
 
     def forward(self, x: torch.Tensor, task_id: str) -> torch.Tensor:
         """Forward pass through the model for a specific task.
@@ -108,6 +114,7 @@ class MultiTaskModel(nn.Module):
                 "config": self.backbone.get_config(),
             },
             "task_heads": task_head_configs,
+            "model_id": self.model_id,
         }
 
     @classmethod
@@ -144,6 +151,7 @@ class MultiTaskModel(nn.Module):
         if backbone_registry is None:
             backbone_registry = {
                 "TransformerBackbone": TransformerBackbone,
+                "LSTMBackbone": LSTMBackbone,
             }
 
         if head_registry is None:
@@ -172,4 +180,8 @@ class MultiTaskModel(nn.Module):
             head_cls = head_registry[head_type]
             task_heads[task_id] = head_cls.from_config(head_config["config"])
 
-        return cls(backbone=backbone, task_heads=task_heads)
+        return cls(
+            backbone=backbone,
+            task_heads=task_heads,
+            model_id=config.get("model_id", "lisbet_model"),
+        )

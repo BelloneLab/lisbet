@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 
 @dataclass
@@ -20,12 +20,41 @@ class DataConfig:
 
 
 @dataclass
-class BackboneConfig:
-    model_type: str
+class TransformerBackboneConfig:
+    feature_dim: int
     embedding_dim: int
-    num_layers: int
-    num_heads: int
     hidden_dim: int
+    num_heads: int
+    num_layers: int
+    max_length: int
+    backbone_type: str = "transformer"
+
+
+@dataclass
+class LSTMBackboneConfig:
+    feature_dim: int
+    embedding_dim: int
+    hidden_dim: int
+    num_layers: int
+    backbone_type: str = "lstm"
+
+
+# Union type for general use
+BackboneConfig = Union[TransformerBackboneConfig, LSTMBackboneConfig]
+BACKBONE_CONFIG_REGISTRY = {
+    "transformer": TransformerBackboneConfig,
+    "lstm": LSTMBackboneConfig,
+}
+
+
+@dataclass
+class ModelConfig:
+    model_id: str
+    backbone: BackboneConfig
+    out_heads: dict[str, dict]
+    input_features: dict[str, dict]
+    window_size: int
+    window_offset: int
 
 
 @dataclass
@@ -44,7 +73,7 @@ class TrainingConfig:
 @dataclass
 class ExperimentConfig:
     run_id: str
-    backbone: BackboneConfig
+    model: ModelConfig
     training: TrainingConfig
     data: DataConfig
     task_ids_list: list[str]

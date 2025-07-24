@@ -16,7 +16,6 @@ model = create_model_from_config(cfg)
 """
 
 from dataclasses import asdict, is_dataclass
-from typing import Any
 
 from lisbet.modeling import (
     EmbeddingHead,
@@ -25,10 +24,12 @@ from lisbet.modeling import (
     TransformerBackbone,
     WindowClassificationHead,
 )
+from lisbet.modeling.backbones.lstm import LSTMBackbone
 
 # Registry for backbone types (future extensibility)
 BACKBONE_REGISTRY: dict[str, type] = {
     "transformer": TransformerBackbone,
+    "lstm": LSTMBackbone,
 }
 
 # Registry for head types (future extensibility)
@@ -39,23 +40,14 @@ HEAD_REGISTRY: dict[str, type] = {
 }
 
 
-def create_model_from_config(
-    config: Any,
-    out_heads: dict[str, dict] = None,
-    backbone_type: str = "transformer",
-) -> MultiTaskModel:
+def create_model_from_config(model_config) -> MultiTaskModel:
     """
     Create a LISBET model from a configuration dataclass and head definitions.
 
     Parameters
     ----------
-    config : dataclass
-        Configuration dataclass instance (e.g., TransformerBaseConfig).
-    out_heads : dict, optional
-        Dictionary mapping task IDs to head configuration dicts.
-        Example: {"multiclass": {"num_classes": 4}, "embedding": {}}
-    backbone_type : str, default="transformer"
-        Backbone type to use (currently only "transformer" is supported).
+    model_config : dataclass
+        Configuration dataclass instance
 
     Returns
     -------
@@ -65,30 +57,31 @@ def create_model_from_config(
     Raises
     ------
     ValueError
-        If the config is not a dataclass or backbone_type is unknown.
+        If the config is not a dataclass.
 
     Notes
     -----
     - The config must be a dataclass with fields matching the backbone constructor.
-    - out_heads must be provided for all tasks; each value is passed as kwargs to the
-      head.
     """
-    if not is_dataclass(config):
+    if not is_dataclass(model_config):
         raise ValueError("Config must be a dataclass instance.")
 
+    # Extract backbone configuration
+    backbone_type = model_config.backbone.backbone_type
     backbone_cls = BACKBONE_REGISTRY.get(backbone_type)
     if backbone_cls is None:
         raise ValueError(f"Unknown backbone type: {backbone_type}")
+    backbone_kwargs = asdict(model_config.backbone)
 
-    backbone_kwargs = asdict(config)
+    # Remove backbone type from kwargs
+    backbone_kwargs.pop("backbone_type", None)
+
+    # Create backbone instance
     backbone = backbone_cls(**backbone_kwargs)
-
-    if out_heads is None:
-        raise ValueError("out_heads must be provided to define model outputs.")
 
     # Build heads for each task
     heads = {}
-    for task_id, head_cfg in out_heads.items():
+    for task_id, head_cfg in model_config.out_heads.items():
         if task_id == "embedding":
             head_cls = EmbeddingHead
             # output_token_idx is typically -1 (last token)

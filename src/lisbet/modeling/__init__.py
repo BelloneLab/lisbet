@@ -1,3 +1,4 @@
+from lisbet.modeling.backbones.lstm import LSTMBackbone
 from lisbet.modeling.backbones.transformer import TransformerBackbone
 from lisbet.modeling.heads.classification import (
     FrameClassificationHead,
@@ -13,6 +14,7 @@ __all__ = [
     "EmbeddingHead",
     "model_info",
     "MultiTaskModel",
+    "LSTMBackbone",
     "TransformerBackbone",
 ]
 
