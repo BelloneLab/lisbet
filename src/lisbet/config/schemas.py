@@ -60,7 +60,7 @@ class TrainingConfig(BaseModel):
     save_history: bool = False
     mixed_precision: bool = False
     freeze_backbone_weights: bool = False
-    load_backbone_weights: Optional[str] = None
+    load_backbone_weights: Optional[Union[str, Path]] = None
 
 
 class ExperimentConfig(BaseModel):
