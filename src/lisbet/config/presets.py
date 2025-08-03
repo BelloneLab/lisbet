@@ -39,4 +39,13 @@ BACKBONE_PRESETS = {
         "hidden_dim": 128,
         "num_layers": 2,
     },
+    "tcn-base": {
+        "type": "tcn",
+        "embedding_dim": 32,
+        "hidden_dim": 64,
+        "num_layers": 4,
+        "kernel_size": 16,
+        "dilation_base": 2,
+        "dropout": 0.1,
+    },
 }

@@ -14,6 +14,17 @@ class TransformerBackboneConfig(BaseModel):
     max_length: int
 
 
+class TCNBackboneConfig(BaseModel):
+    type: Literal["tcn"] = "tcn"
+    feature_dim: Optional[int] = None
+    embedding_dim: int
+    hidden_dim: int
+    num_layers: int
+    kernel_size: int = 3
+    dilation_base: int = 2
+    dropout: float = 0.0
+
+
 class LSTMBackboneConfig(BaseModel):
     type: Literal["lstm"] = "lstm"
     feature_dim: Optional[int] = None
@@ -23,7 +34,8 @@ class LSTMBackboneConfig(BaseModel):
 
 
 BackboneConfig = Annotated[
-    Union[TransformerBackboneConfig, LSTMBackboneConfig], Field(discriminator="type")
+    Union[TransformerBackboneConfig, LSTMBackboneConfig, TCNBackboneConfig],
+    Field(discriminator="type"),
 ]
 
 
@@ -43,7 +55,7 @@ class DataConfig(BaseModel):
 
 
 class ModelConfig(BaseModel):
-    model_id: str
+    model_id: Optional[str] = None
     backbone: BackboneConfig
     out_heads: dict[str, dict]
     input_features: dict[str, list[str]]
@@ -64,7 +76,7 @@ class TrainingConfig(BaseModel):
 
 
 class ExperimentConfig(BaseModel):
-    run_id: str
+    run_id: Optional[str] = None
     model: ModelConfig
     training: TrainingConfig
     data: DataConfig

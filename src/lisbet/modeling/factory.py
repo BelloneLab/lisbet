@@ -24,11 +24,13 @@ from lisbet.modeling import (
     WindowClassificationHead,
 )
 from lisbet.modeling.backbones.lstm import LSTMBackbone
+from lisbet.modeling.backbones.tcn import TCNBackbone
 
 # Registry for backbone types (future extensibility)
 BACKBONE_REGISTRY = {
     "transformer": TransformerBackbone,
     "lstm": LSTMBackbone,
+    "tcn": TCNBackbone,
 }
 
 # Registry for head types (future extensibility)

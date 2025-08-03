@@ -370,9 +370,7 @@ def train(experiment_config: ExperimentConfig) -> torch.nn.Module:
     )
 
     # Save model config
-    dump_model_config(
-        experiment_config.output_path, experiment_config.run_id, model_config
-    )
+    dump_model_config(experiment_config.output_path, run_id, model_config)
 
     # Configure dataloaders
     train_dataloaders, train_n_batches = _configure_dataloaders(
