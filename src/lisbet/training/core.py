@@ -337,6 +337,12 @@ def train(experiment_config: ExperimentConfig) -> torch.nn.Module:
         )
     logging.debug("Output token IDX = %d", output_token_idx)
 
+    # Select head hidden dimension based on head type
+    head_hidden_dim = (
+        None if training_config.head_type == "linear" else backbone_config.hidden_dim
+    )
+    logging.debug("Head(s) hidden dimension = %s", head_hidden_dim)
+
     # Configure tasks
     tasks = configure_tasks(
         train_rec,
@@ -345,7 +351,7 @@ def train(experiment_config: ExperimentConfig) -> torch.nn.Module:
         data_config.window_size,
         data_config.window_offset,
         backbone_config.embedding_dim,
-        backbone_config.hidden_dim,
+        head_hidden_dim,
         training_config.data_augmentation,
         run_seeds,
         fabric.device,

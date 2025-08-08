@@ -68,6 +68,13 @@ def configure_train_model_parser(parser: argparse.ArgumentParser) -> None:
         "--backbone_preset", default="transformer-base", type=str, help="Backbone type"
     )
     parser.add_argument(
+        "--head_type",
+        type=str,
+        choices=["mlp", "linear"],
+        default="mlp",
+        help="Classification head type",
+    )
+    parser.add_argument(
         "--set",
         metavar="KEY=VALUE",
         action="append",

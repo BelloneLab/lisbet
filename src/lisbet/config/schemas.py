@@ -71,6 +71,7 @@ class TrainingConfig(BaseModel):
     save_weights: Optional[str] = None
     save_history: bool = False
     mixed_precision: bool = False
+    head_type: Literal["mlp", "linear"] = "mlp"
     freeze_backbone_weights: bool = False
     load_backbone_weights: Optional[Union[str, Path]] = None
 
