@@ -47,6 +47,9 @@ class WindowSelector:
         self.window_size = window_size
         self.window_offset = window_offset
         self.fps_scaling = fps_scaling
+        self.rel_time_coords = np.linspace(
+            0, self.window_size - 1, self.window_size, dtype=int
+        )
 
         # NOTE: Using torch tensors to trigger proper initialization of multiprocessing
         #       workers on MacOS. This is a workaround, but it does not affect the
@@ -79,7 +82,7 @@ class WindowSelector:
 
         return rec_idx, local_idx
 
-    def select(self, rec_idx, frame_idx, window_size=None):
+    def select(self, rec_idx, frame_idx, fps_scaling=None):
         """
         Select a window from the dataset, applying padding and interpolation as needed.
 
@@ -93,8 +96,9 @@ class WindowSelector:
             Index of the record from which to select the window.
         frame_idx : int
             Index of the central frame within the record.
-        window_size : int, optional
-            Size of the window in frames. If None, uses the default window_size.
+        fps_scaling : float, optional
+            Override the default fps scaling factor for this selection. If None, uses
+            the default fps_scaling set during initialization.
 
         Returns
         -------
@@ -108,37 +112,46 @@ class WindowSelector:
            Furthermore, even during training, it is useful to only iterate over the
            original frames, rather than artificially inflating or deflating the dataset.
         """
-        if window_size is None:
-            window_size = self.window_size
-        if window_size <= 1:
-            raise ValueError(
-                "LISBET requires window_size to be greater than 1 to avoid degenerate "
-                "interpolation."
-            )
+        if fps_scaling is None:
+            fps_scaling = self.fps_scaling
 
         x = self.records[rec_idx].posetracks
 
-        # Compute scaled time coordinates
-        scaled_window_size = int(np.rint(self.fps_scaling * window_size))
-        scaled_window_offset = int(np.rint(self.fps_scaling * self.window_offset))
-        scaled_start_idx = frame_idx - scaled_window_size + scaled_window_offset + 1
-        scaled_stop_idx = frame_idx + scaled_window_offset
-        scaled_time_coords = np.linspace(
-            scaled_start_idx, scaled_stop_idx, scaled_window_size, dtype=int
-        )
+        if fps_scaling == 1.0:
+            # NOTE: If no fps scaling is applied, we can directly select the window
+            #       from the posetrack data without (expensive) interpolation
+            # Compute scaled time coordinates
+            start_idx = frame_idx - self.window_size + self.window_offset + 1
+            stop_idx = frame_idx + self.window_offset
+            time_coords = np.linspace(start_idx, stop_idx, self.window_size, dtype=int)
 
-        # Compute interpolation time coordinates
-        interp_time_coords = np.linspace(scaled_start_idx, scaled_stop_idx, window_size)
+            x = x.reindex(time=time_coords, fill_value=0).assign_coords(
+                time=self.rel_time_coords
+            )
 
-        # Compute relative time coordinates
-        rel_time_coords = np.linspace(0, window_size - 1, window_size, dtype=int)
+        else:
+            # NOTE: If fps scaling is applied, we need to interpolate the posetrack and
+            #       then select the window from the interpolated data
+            # Compute scaled time coordinates
+            scaled_window_size = int(np.rint(fps_scaling * self.window_size))
+            scaled_window_offset = int(np.rint(fps_scaling * self.window_offset))
+            scaled_start_idx = frame_idx - scaled_window_size + scaled_window_offset + 1
+            scaled_stop_idx = frame_idx + scaled_window_offset
+            scaled_time_coords = np.linspace(
+                scaled_start_idx, scaled_stop_idx, scaled_window_size, dtype=int
+            )
 
-        # Select, pad (reindex) and interpolate data
-        x = (
-            x.reindex(time=scaled_time_coords, fill_value=0)
-            .interp(time=interp_time_coords)
-            .assign_coords(time=rel_time_coords)
-        )
+            # Compute interpolation time coordinates
+            interp_time_coords = np.linspace(
+                scaled_start_idx, scaled_stop_idx, self.window_size
+            )
+
+            # Select, pad (reindex) and interpolate data
+            x = (
+                x.reindex(time=scaled_time_coords, fill_value=0)
+                .interp(time=interp_time_coords)
+                .assign_coords(time=self.rel_time_coords)
+            )
 
         return x
 
@@ -191,7 +204,7 @@ class AnnotatedWindowSelector(WindowSelector):
 
         self.annot_format = annot_format
 
-    def select(self, rec_idx, frame_idx, window_size=None):
+    def select(self, rec_idx, frame_idx, fps_scaling=None):
         """
         Select a window and its corresponding annotation target.
 
@@ -201,8 +214,9 @@ class AnnotatedWindowSelector(WindowSelector):
             Index of the record from which to select the window.
         frame_idx : int
             Index of the central frame within the record.
-        window_size : int, optional
-            Size of the window in frames. If None, uses the default window_size.
+        fps_scaling : float, optional
+            Override the default fps scaling factor for this selection. If None, uses
+            the default fps_scaling set during initialization.
 
         Returns
         -------
@@ -212,7 +226,7 @@ class AnnotatedWindowSelector(WindowSelector):
             The annotation target(s) for the selected window, format depends on
             annot_format.
         """
-        x = super().select(rec_idx, frame_idx, window_size)
+        x = super().select(rec_idx, frame_idx, fps_scaling)
 
         if self.annot_format == "binary":
             y = self.records[rec_idx].annotations.target_cls.isel(time=frame_idx).values

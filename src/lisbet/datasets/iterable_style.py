@@ -377,26 +377,20 @@ class TemporalOrderDataset(IterableDataset):
                 y = np.array(0, ndmin=1, dtype=np.float32)
 
             # Extract corresponding window
-            x_pre = self.window_selector.select(
-                rec_idx_pre,
-                frame_idx_pre,
-                np.ceil(self.window_selector.window_size / 2).astype(int),
-            )
+            x_pre = self.window_selector.select(rec_idx_pre, frame_idx_pre)
 
             # Extract next window
-            x_post = self.window_selector.select(
-                rec_idx_post,
-                frame_idx_post,
-                np.floor(self.window_selector.window_size / 2).astype(int),
-            )
-
-            # Shift the time coordinates of x_post so that it follows x_pre in time
-            x_post = x_post.assign_coords(
-                time=x_post.coords["time"] + x_pre.coords["time"][-1] + 1
-            )
+            x_post = self.window_selector.select(rec_idx_post, frame_idx_post)
 
             # Concatenate pre and post half-windows
-            x = xr.concat((x_pre, x_post), dim="time")
+            split_idx = np.ceil(self.window_selector.window_size / 2).astype(int)
+            x = xr.concat(
+                (
+                    x_pre.isel(time=slice(0, split_idx)),
+                    x_post.isel(time=slice(split_idx, None)),
+                ),
+                dim="time",
+            )
 
             # Add debugging information
             x.attrs["pre_coords"] = [rec_idx_pre, frame_idx_pre]
@@ -633,9 +627,9 @@ class TemporalWarpDataset(IterableDataset):
             random seed).
         """
         # Validate input parameters
-        if not (0 < max_warp <= 100):
+        if not (0 <= max_warp < 100):
             raise ValueError(
-                "LISBET requires max_warp to be a positive value between 0 and 100."
+                "LISBET requires max_warp to be a positive value between 0 and 99."
             )
 
         super().__init__()
@@ -646,7 +640,7 @@ class TemporalWarpDataset(IterableDataset):
         self.n_frames = self.window_selector.n_frames
         self.transform = transform
 
-        self.min_speed = max_warp / 100.0
+        self.min_speed = 1 - max_warp / 100.0
         self.max_speed = 1.0 + max_warp / 100.0
         self.regression = regression
 
@@ -673,28 +667,8 @@ class TemporalWarpDataset(IterableDataset):
             rel_speed = torch.rand((1,), generator=self.g).item()
             speed = rel_speed * (self.max_speed - self.min_speed) + self.min_speed
 
-            # Compute actual window size (i.e. the actual frames required to generate
-            # the window)
-            window_size_act = np.round(speed * self.window_selector.window_size).astype(
-                int
-            )
-
-            # Extract corresponding window
-            x = self.window_selector.select(rec_idx, frame_idx, window_size_act)
-
-            # Compute interpolation and relative time coordinates
-            interp_time_coords = np.linspace(
-                0, window_size_act - 1, self.window_selector.window_size
-            )
-            rel_time_coords = np.linspace(
-                0,
-                self.window_selector.window_size - 1,
-                self.window_selector.window_size,
-                dtype=int,
-            )
-
-            # Interpolate data
-            x = x.interp(time=interp_time_coords).assign_coords(time=rel_time_coords)
+            # Extract corresponding window, resampling at the specified speed
+            x = self.window_selector.select(rec_idx, frame_idx, speed)
 
             if self.regression:
                 # Set relative speed as label
