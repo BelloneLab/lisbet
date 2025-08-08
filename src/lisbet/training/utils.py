@@ -53,7 +53,7 @@ def estimate_num_workers(n_tasks, batch_size, batch_size_per_worker=8):
     # Estimate number of workers
     local_world_size = 1  # torch.distributed.get_world_size() in distributed training
 
-    max_workers = suggested_max_num_workers(local_world_size)
+    max_workers = suggested_max_num_workers(local_world_size) + 1
     fair_share = max_workers // max(1, n_tasks)
     batch_cap = max(1, batch_size // batch_size_per_worker)
 
