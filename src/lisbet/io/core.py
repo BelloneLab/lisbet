@@ -69,7 +69,7 @@ def _load_posetracks(seq_path, data_format, data_scale, select_coords, rename_co
     # Valid filenames and their corresponding loading functions
     # TODO: Test re matching for all supported formats.
     data_readers = {
-        "DLC": (r"(?i)(DLC.*?shuffle\d+|tracking).*\.csv$", load_poses.from_dlc_file),
+        "DLC": (r"(?i)(DLC.*?shuffle\d+|tracking).*\.(csv|h5)$", load_poses.from_dlc_file),
         "SLEAP": (r"(?i)SLEAP.*\.h5$", load_poses.from_sleap_file),
         "movement": (r"(?i)tracking.*\.nc$", partial(xr.open_dataset, engine="scipy")),
     }
