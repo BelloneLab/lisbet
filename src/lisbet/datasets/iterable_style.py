@@ -382,8 +382,10 @@ class TemporalOrderDataset(IterableDataset):
             # Extract next window
             x_post = self.window_selector.select(rec_idx_post, frame_idx_post)
 
-            # Concatenate pre and post half-windows
-            split_idx = np.ceil(self.window_selector.window_size / 2).astype(int)
+            # Concatenate pre and post partial-windows
+            split_idx = torch.randint(
+                1, self.window_selector.window_size, (1,), generator=self.g
+            ).item()
             x = xr.concat(
                 (
                     x_pre.isel(time=slice(0, split_idx)),
