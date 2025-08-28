@@ -40,7 +40,7 @@ def _configure_supervised_multilabel_task(
     dev_rec,
     window_size,
     window_offset,
-    emb_dim,
+    embedding_dim,
     hidden_dim,
     data_augmentation,
     run_seeds,
@@ -62,8 +62,8 @@ def _configure_supervised_multilabel_task(
     # Create classification head
     head = modeling.FrameClassificationHead(
         output_token_idx=-(window_offset + 1),
-        emb_dim=emb_dim,
-        out_dim=num_labels,
+        input_dim=embedding_dim,
+        num_classes=num_labels,
         hidden_dim=hidden_dim,
     )
 
@@ -124,7 +124,7 @@ def _configure_supervised_multiclass_task(
     dev_rec,
     window_size,
     window_offset,
-    emb_dim,
+    embedding_dim,
     hidden_dim,
     data_augmentation,
     run_seeds,
@@ -148,8 +148,8 @@ def _configure_supervised_multiclass_task(
     # Create classification head
     head = modeling.FrameClassificationHead(
         output_token_idx=-(window_offset + 1),
-        emb_dim=emb_dim,
-        out_dim=num_classes,
+        input_dim=embedding_dim,
+        num_classes=num_classes,
         hidden_dim=hidden_dim,
     )
 
@@ -210,7 +210,7 @@ def _configure_selfsupervised_task(
     dev_rec,
     window_size,
     window_offset,
-    emb_dim,
+    embedding_dim,
     hidden_dim,
     data_augmentation,
     run_seeds,
@@ -219,7 +219,7 @@ def _configure_selfsupervised_task(
     """Internal helper. Configures a self-supervised task."""
     # Create classification head
     head = modeling.WindowClassificationHead(
-        emb_dim=emb_dim, out_dim=1, hidden_dim=hidden_dim
+        input_dim=embedding_dim, num_classes=1, hidden_dim=hidden_dim
     )
 
     # Create data transformers
@@ -279,7 +279,7 @@ def configure_tasks(
     task_ids,
     window_size,
     window_offset,
-    emb_dim,
+    embedding_dim,
     hidden_dim,
     data_augmentation,
     run_seeds,
@@ -295,7 +295,7 @@ def configure_tasks(
                     dev_rec,
                     window_size,
                     window_offset,
-                    emb_dim,
+                    embedding_dim,
                     hidden_dim,
                     data_augmentation,
                     run_seeds,
@@ -309,7 +309,7 @@ def configure_tasks(
                     dev_rec,
                     window_size,
                     window_offset,
-                    emb_dim,
+                    embedding_dim,
                     hidden_dim,
                     data_augmentation,
                     run_seeds,
@@ -324,7 +324,7 @@ def configure_tasks(
                     dev_rec,
                     window_size,
                     window_offset,
-                    emb_dim,
+                    embedding_dim,
                     hidden_dim,
                     data_augmentation,
                     run_seeds,

@@ -1,5 +1,6 @@
 """IO utilities for LISBET."""
 
+import inspect
 import logging
 import re
 from dataclasses import dataclass
@@ -14,7 +15,11 @@ import xarray as xr
 import yaml
 from movement.io import load_poses
 from movement.transforms import scale
+from torchinfo import summary
 from tqdm.auto import tqdm
+
+from lisbet.config.schemas import ModelConfig
+from lisbet.modeling.factory import create_model_from_config
 
 
 @dataclass
@@ -35,6 +40,12 @@ class Record:
     id: str
     posetracks: xr.Dataset
     annotations: Optional[xr.Dataset] = None
+
+
+def _filter_kwargs(kwargs, handler):
+    """Filter kwargs to match handler's signature."""
+    valid_args = [p.name for p in inspect.signature(handler).parameters.values()]
+    return {k: v for k, v in kwargs.items() if k in valid_args}
 
 
 def _load_posetracks(seq_path, data_format, data_scale, select_coords, rename_coords):
@@ -376,17 +387,10 @@ def load_records(
     return records
 
 
-def load_multi_records(
-    data_format,
-    data_path,
-    data_scale,
-    data_filter,
-    select_coords,
-    rename_coords,
-):
+def load_multi_records(data_config):
     """Internal helper. Loads and splits records for all tasks."""
-    datasets = data_format.split(",")
-    datapaths = data_path.split(",")
+    datasets = data_config.data_format.split(",")
+    datapaths = data_config.data_path.split(",")
     if len(datasets) == len(datapaths):
         datasources = list(zip(datasets, datapaths))
     elif len(datapaths) == 1:
@@ -403,10 +407,10 @@ def load_multi_records(
         load_records(
             dataset,
             datapath,
-            data_scale=data_scale,
-            data_filter=data_filter,
-            select_coords=select_coords,
-            rename_coords=rename_coords,
+            data_scale=data_config.data_scale,
+            data_filter=data_config.data_filter,
+            select_coords=data_config.select_coords,
+            rename_coords=data_config.rename_coords,
         )
         for dataset, datapath in datasources
     ]
@@ -434,6 +438,82 @@ def load_multi_records(
                 )
 
     return multi_records
+
+
+def load_model(config_path, weights_path):
+    """
+    Load a pretrained LISBET model from a configuration file.
+
+    This function supports loading models from YAML configuration files (as used in
+    LISBET). It uses the model factory to instantiate the model and loads weights from
+    the specified file.
+
+    Parameters
+    ----------
+    config_path : str or Path or dataclass
+        Path to the model configuration YAML file.
+    weights_path : str or Path
+        Path to the model weights file.
+
+    Returns
+    -------
+    torch.nn.Module
+        The loaded LISBET model.
+    """
+    with open(config_path, encoding="utf-8") as f_yaml:
+        model_config_dict = yaml.safe_load(f_yaml)
+
+    # Create model configuration
+    model_config = ModelConfig.model_validate(model_config_dict)
+
+    # Load model from configuration
+    model = create_model_from_config(model_config)
+
+    # Load weights (strict=False allows for partial loading)
+    incompatible_layers = model.load_state_dict(
+        torch.load(weights_path, weights_only=True, map_location=torch.device("cpu")),
+        strict=False,
+    )
+    logging.info(
+        "Loaded weights from file.\nMissing keys: %s\nUnexpected keys: %s",
+        incompatible_layers.missing_keys,
+        incompatible_layers.unexpected_keys,
+    )
+
+    return model
+
+
+def export_embedder(model_path, weights_path, output_path=Path(".")):
+    # Get config dictionary
+    with open(model_path, encoding="utf-8") as f_yaml:
+        model_config_dict = yaml.safe_load(f_yaml)
+    model_id = model_config_dict["model_id"] + "-embedder"
+
+    # Update config
+    model_config_dict["model_id"] = model_id
+    model_config_dict["out_heads"] = {
+        # TODO: Remove this hack when we have a better solution
+        "embedding": {"output_token_idx": -(model_config_dict["window_offset"] + 1)}
+    }
+
+    # Create model configuration
+    model_config = ModelConfig.model_validate(model_config_dict)
+
+    # Create behavior embedding model
+    embedding_model = create_model_from_config(model_config)
+    summary(embedding_model)
+
+    # Load weights from pretrained model
+    embedding_model.load_state_dict(
+        torch.load(weights_path, weights_only=True, map_location=torch.device("cpu")),
+        strict=False,
+    )
+
+    # Store configuration
+    dump_model_config(output_path, model_id, model_config)
+
+    # Store weights
+    dump_weights(embedding_model, output_path, model_id, weights_path.name)
 
 
 def dump_records(data_path, records):
@@ -533,40 +613,13 @@ def dump_weights(model, output_path, run_id, filename):
     torch.save(model.state_dict(), weights_path)
 
 
-def dump_model_config(
-    output_path,
-    run_id,
-    window_size,
-    window_offset,
-    output_token_idx,
-    bp_dim,
-    emb_dim,
-    hidden_dim,
-    num_heads,
-    num_layers,
-    max_len,
-    tasks,
-    input_features,
-):
-    """Internal helper. Saves model config."""
-    model_config = {
-        "model_id": run_id,
-        "window_size": window_size,
-        "window_offset": window_offset,
-        "output_token_idx": output_token_idx,
-        "bp_dim": bp_dim,
-        "emb_dim": emb_dim,
-        "hidden_dim": hidden_dim,
-        "num_heads": num_heads,
-        "num_layers": num_layers,
-        "max_len": max_len,
-        "out_dim": {task.task_id: task.out_dim for task in tasks},
-        "input_features": input_features,
-    }
+def dump_model_config(output_path, run_id, model_config):
+    """Save model configuration to YAML file."""
     model_path = Path(output_path) / "models" / run_id / "model_config.yml"
     model_path.parent.mkdir(parents=True, exist_ok=True)
+
     with open(model_path, "w", encoding="utf-8") as f_yaml:
-        yaml.safe_dump(model_config, f_yaml)
+        yaml.safe_dump(model_config.model_dump(), f_yaml)
 
 
 def dump_profiling_results(output_path, run_id, prof):

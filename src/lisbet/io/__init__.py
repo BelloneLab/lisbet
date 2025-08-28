@@ -7,6 +7,8 @@ from lisbet.io.core import (
     dump_profiling_results,
     dump_records,
     dump_weights,
+    export_embedder,
+    load_model,
     load_multi_records,
     load_records,
 )
@@ -20,6 +22,8 @@ __all__ = [
     "dump_profiling_results",
     "dump_records",
     "dump_weights",
+    "export_embedder",
+    "load_model",
     "load_multi_records",
     "load_records",
 ]

@@ -22,6 +22,7 @@ dependencies = [
     "numpy",
     "pandas",
     "pooch",
+    "pydantic",
     "pyyaml",
     "scikit-learn",
     "seaborn",
@@ -49,7 +50,7 @@ tests = ["pytest"]
 dev = ["lisbet[tests,docs]"]
 
 [project.scripts]
-betman = "lisbet.cli:main"
+betman = "lisbet.cli:app"
 
 [tool.pytest.ini_options]
 addopts = ["--import-mode=importlib"]

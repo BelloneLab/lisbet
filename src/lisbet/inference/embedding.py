@@ -13,7 +13,7 @@ from lisbet.io import dump_embeddings
 
 def _embedding_forward(model: torch.nn.Module, data: torch.Tensor) -> torch.Tensor:
     """Forward function for extracting embeddings from the model."""
-    return model(data).squeeze(dim=1)
+    return model(data, "embedding").squeeze(dim=1)
 
 
 def compute_embeddings(
