@@ -560,7 +560,7 @@ def dump_annotations(results, output_path):
             Path(output_path) / "annotations" / key / "machineAnnotation_lisbet.csv"
         )
         dst_path.parent.mkdir(parents=True, exist_ok=True)
-        pd.DataFrame(model_output).to_csv(dst_path, index=False)
+        pd.DataFrame(model_output).to_csv(dst_path, index=True)
 
 
 def dump_embeddings(results, output_path):
@@ -580,7 +580,7 @@ def dump_embeddings(results, output_path):
             Path(output_path) / "embeddings" / key / "features_lisbet_embedding.csv"
         )
         dst_path.parent.mkdir(parents=True, exist_ok=True)
-        pd.DataFrame(model_output).to_csv(dst_path, index=False)
+        pd.DataFrame(model_output).to_csv(dst_path, index=True)
 
 
 def dump_evaluation_results(report: dict, output_path: str, model_path: str):
