@@ -2,7 +2,6 @@
 
 import logging
 from dataclasses import dataclass
-from typing import Optional
 
 import numpy as np
 import torch
@@ -18,7 +17,7 @@ from torchmetrics.classification import (
 from torchvision import transforms
 
 from lisbet import datasets, modeling
-from lisbet.transforms_extra import PoseToTensor, RandomXYSwap
+from lisbet.transforms_extra import PoseToTensor, RandomPermutation
 
 
 @dataclass
@@ -30,9 +29,9 @@ class Task:
     train_dataset: Dataset
     train_loss: Metric
     train_score: Metric
-    dev_dataset: Optional[Dataset] = None
-    dev_loss: Optional[Metric] = None
-    dev_score: Optional[Metric] = None
+    dev_dataset: Dataset | None = None
+    dev_loss: Metric | None = None
+    dev_score: Metric | None = None
 
 
 def _configure_supervised_multilabel_task(
@@ -75,7 +74,12 @@ def _configure_supervised_multilabel_task(
     # Create data transformers
     train_transform = (
         transforms.Compose(
-            [RandomXYSwap(run_seeds["transform_multilabel"]), PoseToTensor()]
+            [
+                RandomPermutation(
+                    run_seeds["transform_multilabel"], coordinate="space"
+                ),
+                PoseToTensor(),
+            ]
         )
         if data_augmentation
         else transforms.Compose([PoseToTensor()])
@@ -162,7 +166,12 @@ def _configure_supervised_multiclass_task(
     # Create data transformers
     train_transform = (
         transforms.Compose(
-            [RandomXYSwap(run_seeds["transform_multiclass"]), PoseToTensor()]
+            [
+                RandomPermutation(
+                    run_seeds["transform_multiclass"], coordinate="space"
+                ),
+                PoseToTensor(),
+            ]
         )
         if data_augmentation
         else transforms.Compose([PoseToTensor()])
@@ -225,7 +234,12 @@ def _configure_selfsupervised_task(
     # Create data transformers
     train_transform = (
         transforms.Compose(
-            [RandomXYSwap(run_seeds[f"transform_{task_id}"]), PoseToTensor()]
+            [
+                RandomPermutation(
+                    run_seeds[f"transform_{task_id}"], coordinate="space"
+                ),
+                PoseToTensor(),
+            ]
         )
         if data_augmentation
         else transforms.Compose([PoseToTensor()])

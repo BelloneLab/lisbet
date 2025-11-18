@@ -3,86 +3,37 @@
 import cv2
 import numpy as np
 import torch
+import xarray as xr
 
 from lisbet.drawing import BodySpecs, body_specs_registry, color_to_bgr
-
-
-class RandomXYSwap:
-    """
-    Randomly swaps the x and y coordinates in the 'position' variable of an
-    xarray.Dataset.
-
-    With probability 0.5, the 'space' dimension (typically ['x', 'y']) is swapped to
-    ['y', 'x'] for all timepoints and individuals in the dataset. This augmentation
-    can be used to increase invariance to axis orientation.
-
-    Parameters
-    ----------
-    seed : int
-        Random seed for reproducibility.
-
-    Methods
-    -------
-    __call__(posetracks)
-        Applies the random swap to the 'position' variable of the input xarray.Dataset.
-
-    Examples
-    --------
-    >>> swap = RandomXYSwap(seed=42)
-    >>> posetracks_swapped = swap(posetracks)
-    """
-
-    def __init__(self, seed):
-        self.seed = seed
-        self.g = torch.Generator().manual_seed(seed)
-
-    def __call__(self, posetracks):
-        """
-        Randomly swaps the x and y coordinates in the 'position' variable of the input
-        xarray.Dataset.
-
-        With probability 0.5, the 'space' dimension is swapped from ['x', 'y'] to
-        ['y', 'x'].
-
-        Parameters
-        ----------
-        posetracks : xarray.Dataset
-            Pose tracks dataset with a 'position' variable of shape
-            (time, individuals, keypoints, space).
-
-        Returns
-        -------
-        xarray.Dataset
-            The input dataset, with the 'position' variable's 'space' dimension
-            possibly swapped to ['y', 'x'].
-        """
-        # Randomly decide whether to swap
-        if torch.rand((1,), generator=self.g).item() < 0.5:
-            posetracks = posetracks.sel(space=["y", "x"])
-        return posetracks
 
 
 class RandomPermutation:
     """
     Randomly permutes the order of a specified coordinate (e.g., 'individuals') in an
-    xarray.Dataset, along with its coordinate labels.
+    xarray.Dataset, reordering both the coordinate labels and their associated data
+    together.
 
-    With probability 0.5, the coordinate is permuted; otherwise, the order is left
-    unchanged. This augmentation can be used to increase invariance to coordinate order
-    (e.g., individual identity).
+    This augmentation can be used to increase invariance to coordinate order (e.g.,
+    fixed identity, axis orientation). The permutation is applied to the entire dataset.
 
     Parameters
     ----------
     seed : int
         Random seed for reproducibility.
     coordinate : str
-        Name of the coordinate to permute (e.g., 'individuals', 'keypoints').
+        Name of the coordinate to permute (e.g., 'individuals', 'keypoints', 'space').
 
     Methods
     -------
     __call__(posetracks)
         Applies the random permutation to the specified coordinate of the input
         xarray.Dataset.
+
+    Examples
+    --------
+    >>> permute = RandomPermutation(seed=42, coordinate='individuals')
+    >>> permuted_ds = permute(posetracks)
     """
 
     def __init__(self, seed, coordinate="individuals"):
@@ -91,11 +42,130 @@ class RandomPermutation:
         self.g = torch.Generator().manual_seed(seed)
 
     def __call__(self, posetracks):
-        if torch.rand((1,), generator=self.g).item() < 0.5:
-            coord_vals = list(posetracks.coords[self.coordinate].values)
-            perm = torch.randperm(len(coord_vals), generator=self.g).tolist()
-            new_order = [coord_vals[i] for i in perm]
-            posetracks = posetracks.sel({self.coordinate: new_order})
+        """
+        Apply random permutation to the specified coordinate.
+
+        Parameters
+        ----------
+        posetracks : xarray.Dataset
+            Pose tracks dataset with a 'position' variable.
+
+        Returns
+        -------
+        xarray.Dataset
+            Dataset with permuted coordinate and data.
+        """
+        # Get current coordinate values
+        coord_vals = list(posetracks.coords[self.coordinate].values)
+
+        # Generate a random permutation
+        perm = torch.randperm(len(coord_vals), generator=self.g).tolist()
+
+        # Apply permutation to the entire dataset
+        # NOTE: This reorders both coordinates and data together
+        posetracks = posetracks.isel({self.coordinate: perm})
+
+        return posetracks
+
+
+class RandomBlockPermutation:
+    """
+    Randomly permutes the data (but not coordinate labels) of a specified coordinate
+    within a random contiguous block of frames in an xarray.Dataset.
+
+    This augmentation is useful to create identity swaps within a portion of the time
+    series, mimiking the effects of a tracking error, while maintaining consistent
+    coordinate labels throughout.
+
+    Parameters
+    ----------
+    seed : int
+        Random seed for reproducibility.
+    coordinate : str
+        Name of the coordinate to permute (e.g., 'individuals', 'keypoints').
+    permute_fraction : float
+        Fraction of the time window to which the permutation is applied.
+        Must be between 0 (exclusive) and 1 (exclusive). A continuous block of frames
+        of this relative size will be selected at random, and the permutation will be
+        applied only to the data within this block, keeping coordinate labels unchanged.
+
+    Methods
+    -------
+    __call__(posetracks)
+        Applies the random block permutation to the specified coordinate of the input
+        xarray.Dataset.
+
+    Examples
+    --------
+    >>> permute = RandomBlockPermutation(seed=42, coordinate='individuals',
+    ...                                   permute_fraction=0.3)
+    >>> permuted_ds = permute(posetracks)
+    """
+
+    def __init__(self, seed, coordinate="individuals", permute_fraction=0.5):
+        self.seed = seed
+        self.coordinate = coordinate
+        if not 0 < permute_fraction < 1:
+            raise ValueError("permute_fraction must be a float between 0 and 1.")
+        self.permute_fraction = permute_fraction
+        self.g = torch.Generator().manual_seed(seed)
+
+    def __call__(self, posetracks):
+        """
+        Apply random block permutation to the specified coordinate.
+
+        Parameters
+        ----------
+        posetracks : xarray.Dataset
+            Pose tracks dataset with a 'position' variable.
+
+        Returns
+        -------
+        xarray.Dataset
+            Dataset with permuted data in a random block, coordinates unchanged.
+        """
+        # Get current coordinate values
+        coord_vals = list(posetracks.coords[self.coordinate].values)
+
+        # Generate a random permutation
+        perm = torch.randperm(len(coord_vals), generator=self.g).tolist()
+
+        window_size = posetracks.sizes["time"]
+        block_size = int(self.permute_fraction * window_size)
+
+        if block_size == 0:
+            # No permutation needed
+            return posetracks
+
+        start_idx = torch.randint(
+            0, window_size - block_size + 1, (1,), generator=self.g
+        ).item()
+        end_idx = start_idx + block_size
+
+        # For block permutation, we permute only the data
+        # while keeping coordinates unchanged across the full time series
+        block_to_permute = posetracks.isel(time=slice(start_idx, end_idx))
+
+        # Get the dimension index for the coordinate
+        coord_dim = list(posetracks["position"].dims).index(self.coordinate)
+
+        # Permute the data along the coordinate dimension
+        permuted_data = np.take(
+            block_to_permute["position"].values, perm, axis=coord_dim
+        )
+
+        # Create a new block with permuted data but original coordinates
+        permuted_block = block_to_permute.copy(deep=True)
+        permuted_block["position"].values[:] = permuted_data
+
+        # Split and concatenate
+        before_block = posetracks.isel(time=slice(None, start_idx))
+        after_block = posetracks.isel(time=slice(end_idx, None))
+
+        posetracks = xr.concat(
+            [before_block, permuted_block, after_block], dim="time", join="outer"
+        )
+
         return posetracks
 
 
