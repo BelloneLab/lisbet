@@ -8,6 +8,7 @@ import xarray as xr
 from torch.utils.data import IterableDataset
 
 from lisbet.datasets.common import AnnotatedWindowSelector, WindowSelector
+from lisbet.transforms_extra import RandomMirrorX, RandomTranslate, RandomZoom
 
 
 class SocialBehaviorDataset(IterableDataset):
@@ -688,3 +689,162 @@ class TemporalWarpDataset(IterableDataset):
                 x = self.transform(x)
 
             yield x, y
+
+
+class GeometricInvarianceDataset(IterableDataset):
+    """
+    Iterable dataset for the Geometric Invariance self-supervised task.
+
+    Generates pairs of windows for contrastive learning, where the model learns that
+    geometric transformations (rotation, flip) preserve the semantic identity of the
+    scene. Each sample consists of an original window and a geometrically transformed
+    version of the same window.
+
+    Unlike binary classification tasks, this dataset yields pairs (x_orig, x_transform)
+    for contrastive learning with InfoNCE loss. The model learns to produce similar
+    embeddings for different views of the same scene.
+
+    Geometric transformations applied:
+    - Rotation: Random angle in [-180, 180] degrees
+    - Flip: Random horizontal and/or vertical flip
+
+    Notes
+    -----
+    1. This is a contrastive learning task, NOT a classification task. The dataset
+       returns pairs of views without explicit labels.
+    2. The transformations are applied in the keypoint space (before the general
+       augmentation pipeline).
+    3. The same geometric transformation is applied to all individuals in the group
+       to preserve relative spatial relationships.
+    4. The transform parameter should only contain the standard augmentation pipeline
+       (normalization, missing data handling, etc.), NOT the geometric transformations
+       which are handled internally.
+    5. Both views (original and transformed) go through the same augmentation pipeline
+       for consistency.
+    """
+
+    def __init__(
+        self,
+        records,
+        window_size,
+        window_offset=0,
+        fps_scaling=1.0,
+        transform=None,
+        base_seed=None,
+    ):
+        """
+        Initialize the GeometricInvarianceDataset.
+
+        Parameters
+        ----------
+        records : list
+            List of records containing the data.
+        window_size : int
+            Size of the window in frames.
+        window_offset : int, optional
+            Offset for the window in frames (default is 0).
+        fps_scaling : float, optional
+            Scaling factor for the frames per second (default is 1.0).
+        transform : callable, optional
+            A function/transform to apply to BOTH views (default is None).
+            This should contain the standard augmentation pipeline, NOT geometric
+            transformations.
+        base_seed : int, optional
+            Base seed for random number generation (default is None, which generates a
+            random seed).
+        """
+        super().__init__()
+
+        self.window_selector = WindowSelector(
+            records, window_size, window_offset, fps_scaling
+        )
+        self.n_frames = self.window_selector.n_frames
+        self.transform = transform
+
+        self.base_seed = (
+            base_seed
+            if base_seed is not None
+            else torch.randint(0, 2**31 - 1, (1,)).item()
+        )
+
+        # Set random generator for reproducibility
+        # NOTE: This could be overridden by the worker_init_fn to ensure each worker
+        #       has a different seed for data shuffling.
+        self.g = torch.Generator().manual_seed(self.base_seed)
+        
+        # Create geometric transformation functions
+        # Use a different seed for each transformation to ensure variety
+        self.translate = RandomTranslate(seed=self.base_seed)
+        self.mirror_x = RandomMirrorX(seed=self.base_seed + 1)
+        self.zoom = RandomZoom(seed=self.base_seed + 2)
+
+    def _apply_geometric_transform(self, x):
+        """
+        Apply random geometric transformations to the window.
+
+        Uses the existing data augmentation methods from transforms_extra.py
+        for consistency with the rest of the codebase.
+        
+        Randomly selects 1 to 3 transformations and applies them in random order.
+
+        Parameters
+        ----------
+        x : xr.Dataset
+            Window dataset with "position" variable.
+
+        Returns
+        -------
+        xr.Dataset
+            Transformed window with the same shape.
+        """
+        # x is already a Dataset from window_selector.select()
+        x_ds = x.copy(deep=True)
+        
+        # Available transformations
+        available_transforms = [
+            ('translate', self.translate),
+            ('mirror_x', self.mirror_x),
+            ('zoom', self.zoom),
+        ]
+        
+        # Randomly select how many transformations to apply (1 to 3)
+        num_transforms = torch.randint(1, 4, (1,), generator=self.g).item()
+        
+        # Randomly shuffle and select transformations
+        indices = torch.randperm(len(available_transforms), generator=self.g)[:num_transforms]
+        selected_transforms = [available_transforms[i] for i in indices]
+        
+        # Apply selected transformations in random order
+        for name, transform in selected_transforms:
+            x_ds = transform(x_ds)
+        
+        # Store transformation info for debugging
+        x_ds.attrs["geometric_transforms_applied"] = [name for name, _ in selected_transforms]
+
+        return x_ds
+
+    def __iter__(self):
+        while True:
+            # Select a random window (global frame index)
+            global_idx = torch.randint(0, self.n_frames, (1,), generator=self.g).item()
+
+            # Map global index to (record_index, frame_index)
+            rec_idx, frame_idx = self.window_selector.global_to_local(global_idx)
+
+            # Extract corresponding window
+            x_orig = self.window_selector.select(rec_idx, frame_idx)
+
+            # Apply geometric transformation
+            x_transform = self._apply_geometric_transform(x_orig)
+
+            # Add debugging information
+            x_orig.attrs["orig_coords"] = [rec_idx, frame_idx]
+            x_transform.attrs["orig_coords"] = [rec_idx, frame_idx]
+
+            # Apply standard augmentation pipeline to BOTH views
+            if self.transform:
+                x_orig = self.transform(x_orig)
+                x_transform = self.transform(x_transform)
+
+            # Yield pair of views (NOT x, y like classification tasks)
+            yield x_orig, x_transform

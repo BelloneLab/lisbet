@@ -7,6 +7,62 @@ from pathlib import Path
 from lisbet.cli.common import add_data_io_args, add_keypoints_args, add_verbosity_args
 
 
+def parse_data_augmentation(aug_string):
+    """Parse data augmentation string into list of DataAugmentationConfig objects.
+
+    Parameters
+    ----------
+    aug_string : str or None
+        Comma-separated augmentation specifications, each with optional parameters.
+        Format: name:p=value:frac=value
+        Example: "all_perm_id:p=0.5,blk_perm_id:p=0.3:frac=0.2"
+
+    Returns
+    -------
+    list[dict] or None
+        List of dictionaries with augmentation configs, or None if None/empty.
+
+    Examples
+    --------
+    >>> parse_data_augmentation("all_perm_id")
+    [{'name': 'all_perm_id', 'p': 1.0}]
+
+    >>> parse_data_augmentation("all_perm_id:p=0.5,blk_perm_id:frac=0.3")
+    [{'name': 'all_perm_id', 'p': 0.5}, {'name': 'blk_perm_id', 'p': 1.0, 'frac': 0.3}]
+    """
+    if not aug_string:
+        return None
+
+    augmentations = []
+    for aug_spec in aug_string.split(","):
+        aug_spec = aug_spec.strip()
+        if not aug_spec:
+            continue
+
+        parts = aug_spec.split(":")
+        aug_config = {"name": parts[0].strip(), "p": 1.0}
+
+        # Parse parameters
+        for param in parts[1:]:
+            key, _, value = param.partition("=")
+            key = key.strip()
+            value = value.strip()
+
+            if not key or not value:
+                raise ValueError(f"Invalid parameter format in '{aug_spec}': {param}")
+
+            try:
+                aug_config[key] = float(value)
+            except ValueError as e:
+                raise ValueError(
+                    f"Invalid parameter value in '{aug_spec}': {key}={value}"
+                ) from e
+
+        augmentations.append(aug_config)
+
+    return augmentations if augmentations else None
+
+
 def configure_train_model_parser(parser: argparse.ArgumentParser) -> None:
     """Configure train_model command parser."""
     add_verbosity_args(parser)
@@ -49,7 +105,86 @@ def configure_train_model_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--seed", default=1991, type=int, help="Base RNG seed")
     parser.add_argument("--run_id", type=str, help="ID of the run")
     parser.add_argument(
-        "--data_augmentation", action="store_true", help="Enable data augmentation"
+        "--data_augmentation",
+        type=str,
+        help=textwrap.dedent(
+            """\
+            Data augmentation techniques to apply, comma-separated.
+            Each augmentation can have optional parameters specified with colons.
+
+            NOTE: Use the --data_augmentation= format (with equals sign) to clearly
+                  separate the argument from its value. This makes the syntax
+                  unambiguous and prevents shell interpretation of special characters.
+
+            Valid options are:
+                - all_perm_id: Randomly permute identities of individuals, applied
+                               consistently across all frames in a window.
+                - all_perm_ax: Randomly permute x, y (and z) axes, applied consistently
+                               across all frames in a window.
+                - blk_perm_id: Randomly permute identities of individuals, applied
+                               to a contiguous block of frames within a window.
+
+                - gauss_jitter: Randomly add N(0,sigma) noise, applied using per-element
+                                Bernoulli(p) over (frame,keypoint,individual).
+                - blk_gauss_jitter: Randomly add N(0,sigma) noise.
+                                    Bernoulli(p) over (frame,keypoint,individual)
+                                    selects start elements.
+                                    Each start activates a block of length
+                                    int(frac*window) adding N(0,sigma)
+                                    noise only for that (keypoint,individual).
+                                    Blocks may overlap and merge.
+
+                - kp_ablation: Randomly set keypoint coordinates to NaN (missing data).
+                               Bernoulli(p) over (frame,keypoint,individual) selects
+                               elements to ablate.
+                               Simulates sporadic occlusions or tracking failures.
+                - blk_kp_ablation: Set keypoint coordinates to NaN in temporal blocks.
+                                   Bernoulli(p) over (frame,keypoint,individual)
+                                   selects start elements.
+                                   Each start activates a block of length
+                                   int(frac*window) setting coordinates
+                                   to NaN only for that (keypoint,individual).
+                                   Simulates sustained occlusion. Blocks may overlap and merge.
+
+                - all_translate: Randomly translate all individuals together in x,y.
+                             Bernoulli(p) over frames selects frames to translate.
+                             Translation computed to keep all keypoints in [0,1] bounds.
+                             Provides invariance to location within frame.
+
+                - all_mirror_x: Randomly mirror horizontally around x=0.5.
+                            Bernoulli(p) over frames selects frames to mirror.
+                            Provides invariance to lateral orientation.
+
+                - all_zoom: Randomly zoom/dezoom around center (0.5, 0.5).
+                        Bernoulli(p) over frames selects frames to scale.
+                        Scale computed to keep all keypoints in [0,1] bounds.
+                        Provides invariance to depth/distance.
+
+            Parameters (optional):
+                - p=<float>: Probability of applying the transformation (default: 1.0)
+                - frac=<float>: For block-based augmentations (blk_perm_id, blk_gauss_jitter,
+                                blk_kp_ablation).
+                                Block size fraction (defaults: 0.5 / 0.05 / 0.1)
+                - sigma=<float>: Jitter noise std for gauss_jitter and
+                                 blk_gauss_jitter (default 0.01).
+
+            Examples:
+                --data_augmentation="all_perm_id"
+                --data_augmentation="all_perm_id:p=0.5"
+                --data_augmentation="all_perm_id:p=0.5,blk_perm_id:p=0.3:frac=0.2"
+                --data_augmentation="all_perm_ax:p=0.7,blk_perm_id:frac=0.3"
+                --data_augmentation="gauss_jitter:p=0.02:sigma=0.01"
+                --data_augmentation="blk_gauss_jitter:p=0.05:sigma=0.02:frac=0.1"
+                --data_augmentation="kp_ablation:p=0.05"
+                --data_augmentation="blk_kp_ablation:p=0.03:frac=0.15"
+                --data_augmentation="all_translate:p=0.5"
+                --data_augmentation="all_mirror_x:p=0.5"
+                --data_augmentation="all_zoom:p=0.4"
+                --data_augmentation="all_perm_id:p=0.5,kp_ablation:p=0.03,blk_kp_ablation:p=0.02:frac=0.1"
+                --data_augmentation="all_translate:p=0.5,all_mirror_x:p=0.5,all_zoom:p=0.3"
+
+            """
+        ),
     )
     parser.add_argument(
         "--train_sample", type=float, help="Fraction of samples from the train set"
@@ -182,8 +317,25 @@ def train_model(kwargs):
         window_offset=kwargs["window_offset"],
     )
 
+    # Parse and configure data augmentation
+    aug_string = kwargs.get("data_augmentation")
+    parsed_augmentation = parse_data_augmentation(aug_string)
+
+    # Validate augmentation combinations
+    if parsed_augmentation:
+        aug_names = [aug["name"] for aug in parsed_augmentation]
+        if "all_perm_ax" in aug_names and ("all_mirror_x" in aug_names):
+            raise ValueError(
+                "Cannot use 'all_perm_ax' together with 'all_mirror_x'. "
+                "Both manipulate x-axis orientation and would conflict. "
+                "Please choose either axis permutation or mirroring, not both."
+            )
+
+    # Update kwargs with parsed augmentation
+    kwargs_for_training = {**kwargs, "data_augmentation": parsed_augmentation}
+
     # Configure training
-    training_config = TrainingConfig.model_validate(kwargs)
+    training_config = TrainingConfig.model_validate(kwargs_for_training)
 
     # Create experiment configuration
     experiment_config = ExperimentConfig(

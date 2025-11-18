@@ -1,4 +1,5 @@
 from lisbet.datasets.iterable_style import (
+    GeometricInvarianceDataset,
     GroupConsistencyDataset,
     SocialBehaviorDataset,
     TemporalOrderDataset,
@@ -8,6 +9,7 @@ from lisbet.datasets.iterable_style import (
 from lisbet.datasets.map_style import AnnotatedWindowDataset, WindowDataset
 
 __all__ = [
+    "GeometricInvarianceDataset",
     "GroupConsistencyDataset",
     "SocialBehaviorDataset",
     "TemporalOrderDataset",

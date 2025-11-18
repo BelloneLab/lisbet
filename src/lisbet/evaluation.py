@@ -4,8 +4,6 @@ This module provides functions to evaluate classification models on labeled data
 using the new LISBET inference API, torchmetrics, and improved output handling.
 """
 
-from typing import Optional
-
 import torch
 from lightning.fabric.utilities.data import suggested_max_num_workers
 from rich import print as rprint
@@ -29,18 +27,18 @@ def evaluate(
     weights_path: str,
     data_format: str,
     data_path: str,
-    data_scale: Optional[str] = None,
-    data_filter: Optional[str] = None,
+    data_scale: str | None = None,
+    data_filter: str | None = None,
     window_size: int = 200,
     window_offset: int = 0,
     fps_scaling: float = 1.0,
     batch_size: int = 128,
-    select_coords: Optional[str] = None,
-    rename_coords: Optional[str] = None,
-    ignore_index: Optional[int] = None,
+    select_coords: str | None = None,
+    rename_coords: str | None = None,
+    ignore_index: int | None = None,
     mode: str = "multiclass",
     threshold: float = 0.5,
-    output_path: Optional[str] = None,
+    output_path: str | None = None,
 ) -> dict:
     """
     Evaluate a classification model on a labeled dataset and print/save metrics.
@@ -189,6 +187,7 @@ def evaluate(
             report["per_class"]["f1"],
             report["per_class"]["precision"],
             report["per_class"]["recall"],
+            strict=True,
         )
     ):
         rprint(

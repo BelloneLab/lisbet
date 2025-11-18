@@ -202,3 +202,5 @@ def app() -> None:
             function_name=cmd_config["function"],
             args=vars(args),
         )
+
+

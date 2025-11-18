@@ -176,20 +176,46 @@ def _train_one_epoch(
         optimizer.zero_grad(set_to_none=True)
 
         # Iterate over all tasks
-        for task, dataloader in zip(tasks, dl_iter):
-            data, target = next(dataloader)
+        # NOTE: strict=False to allow for different iterable lengths
+        for task, dataloader in zip(tasks, dl_iter, strict=False):
+            batch = next(dataloader)
 
-            # Forward pass
-            output = model(data, task.task_id)
-            loss = task.loss_function(output, target)
+            # Contrastive tasks return pairs of views instead of (data, target)
+            if task.task_id == "geom":
+                data_orig, data_transform = batch
+                
+                # Forward pass for both views
+                output_orig = model(data_orig, task.task_id)
+                output_transform = model(data_transform, task.task_id)
+                
+                # InfoNCE loss expects both projections
+                loss = task.loss_function(output_orig, output_transform)
+
+                #TODO code only for debuging purpose : save output_orig and output_transform
+                # orig_path = r"C:\Users\chataint\Documents\projet\humanlisbet2\output\debug2"
+                # np.save(rf"{orig_path}\output_orig_{batch_idx}.npy", output_orig.detach().cpu().numpy())
+                # np.save(rf"{orig_path}\output_transform_{batch_idx}.npy", output_transform.detach().cpu().numpy())
+                
+                # Store loss value and metrics for stats
+                if batch_idx % 10 == 0:
+                    task.train_loss.update(loss)
+                    # Alignment metric expects both projections
+                    task.train_score.update(output_orig, output_transform)
+            else:
+                # Classification tasks return (data, target)
+                data, target = batch
+                
+                # Forward pass
+                output = model(data, task.task_id)
+                loss = task.loss_function(output, target)
+                
+                # Store loss value and metrics for stats
+                if batch_idx % 10 == 0:
+                    task.train_loss.update(loss)
+                    task.train_score.update(output, target)
 
             # Backward pass
             fabric.backward(loss)
-
-            # Store loss value and metrics for stats
-            if batch_idx % 10 == 0:
-                task.train_loss.update(loss)
-                task.train_score.update(output, target)
 
             # Step profiler
             if prof is not None:
@@ -212,17 +238,38 @@ def _evaluate(model, dataloaders, n_batches, tasks):
         # Iterate over all batches
         for batch_idx in trange(n_batches, desc="Evaluation batches", leave=False):
             # Iterate over all tasks
-            for task, dataloader in zip(tasks, dl_iter):
-                data, target = next(dataloader)
+            # NOTE: strict=False to allow for different iterable lengths
+            for task, dataloader in zip(tasks, dl_iter, strict=False):
+                batch = next(dataloader)
 
-                # Forward pass
-                output = model(data, task.task_id)
-                loss = task.loss_function(output, target)
-
-                # Store loss value and metrics for stats
-                if batch_idx % 10 == 0:
-                    task.dev_loss.update(loss)
-                    task.dev_score.update(output, target)
+                # Contrastive tasks return pairs of views instead of (data, target)
+                if task.task_id == "geom":
+                    data_orig, data_transform = batch
+                    
+                    # Forward pass for both views
+                    output_orig = model(data_orig, task.task_id)
+                    output_transform = model(data_transform, task.task_id)
+                    
+                    # InfoNCE loss expects both projections
+                    loss = task.loss_function(output_orig, output_transform)
+                    
+                    # Store loss value and metrics for stats
+                    if batch_idx % 10 == 0:
+                        task.dev_loss.update(loss)
+                        # Alignment metric expects both projections
+                        task.dev_score.update(output_orig, output_transform)
+                else:
+                    # Classification tasks return (data, target)
+                    data, target = batch
+                    
+                    # Forward pass
+                    output = model(data, task.task_id)
+                    loss = task.loss_function(output, target)
+                    
+                    # Store loss value and metrics for stats
+                    if batch_idx % 10 == 0:
+                        task.dev_loss.update(loss)
+                        task.dev_score.update(output, target)
 
 
 def _compute_epoch_logs(group_id, tasks):

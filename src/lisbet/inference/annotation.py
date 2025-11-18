@@ -3,7 +3,6 @@ Behavior annotation (classification and multi-label) for LISBET.
 """
 
 from functools import partial
-from typing import Optional
 
 import numpy as np
 import torch
@@ -36,17 +35,17 @@ def annotate_behavior(
     weights_path: str,
     data_format: str,
     data_path: str,
-    data_scale: Optional[str] = None,
-    data_filter: Optional[str] = None,
+    data_scale: str | None = None,
+    data_filter: str | None = None,
     mode: str = "multiclass",
     threshold: float = 0.5,
     window_size: int = 200,
     window_offset: int = 0,
     fps_scaling: float = 1.0,
     batch_size: int = 128,
-    output_path: Optional[str] = None,
-    select_coords: Optional[str] = None,
-    rename_coords: Optional[str] = None,
+    output_path: str | None = None,
+    select_coords: str | None = None,
+    rename_coords: str | None = None,
 ) -> list[tuple[str, np.ndarray]]:
     """
     Run LISBET behavior classification for every record in a dataset.

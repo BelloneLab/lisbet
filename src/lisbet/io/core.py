@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from functools import partial
 from itertools import repeat
 from pathlib import Path
-from typing import Optional
 
 import pandas as pd
 import torch
@@ -39,7 +38,7 @@ class Record:
 
     id: str
     posetracks: xr.Dataset
-    annotations: Optional[xr.Dataset] = None
+    annotations: xr.Dataset | None = None
 
 
 def _filter_kwargs(kwargs, handler):
@@ -134,7 +133,7 @@ def _load_posetracks(seq_path, data_format, data_scale, select_coords, rename_co
         sel_keys = ["individuals", "space", "keypoints"]
         sel_dict = {
             key: [item.strip() for item in field.split(",") if item.strip()]
-            for key, field in zip(sel_keys, fields)
+            for key, field in zip(sel_keys, fields, strict=True)
             if field.strip() and field.strip() != "*"
         }
         if sel_dict:
@@ -156,7 +155,7 @@ def _load_posetracks(seq_path, data_format, data_scale, select_coords, rename_co
             )
         rename_keys = ["individuals", "space", "keypoints"]
         remap_dict = {}
-        for key, field in zip(rename_keys, fields):
+        for key, field in zip(rename_keys, fields, strict=True):
             if field.strip() != "*":
                 mapping = {}
                 for pair in field.split(","):
@@ -392,7 +391,7 @@ def load_multi_records(data_config):
     datasets = data_config.data_format.split(",")
     datapaths = data_config.data_path.split(",")
     if len(datasets) == len(datapaths):
-        datasources = list(zip(datasets, datapaths))
+        datasources = list(zip(datasets, datapaths, strict=True))
     elif len(datapaths) == 1:
         datasources = list(zip(datasets, repeat(datapaths[0])))
     else:
