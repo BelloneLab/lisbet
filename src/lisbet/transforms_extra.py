@@ -1,4 +1,67 @@
-"""Augmentation module for transforming samples in a dataset."""
+"""Augmentation module for transforming samples in a dataset.
+
+This module provides data augmentation and preprocessing transforms for pose tracking
+datasets stored as xarray.Dataset objects. The transforms can be used in training
+pipelines to improve model robustness and generalization.
+
+Available Transforms
+--------------------
+RandomPermutation
+    Randomly permutes both coordinate labels and their associated data together across
+    the entire time window. Useful for making models invariant to coordinate ordering
+    (e.g., individual identities, spatial axes).
+
+RandomBlockPermutation
+    Randomly permutes data within a contiguous block of frames while keeping coordinate
+    labels unchanged. Creates temporal identity confusion within part of the window.
+    Useful for more challenging augmentation scenarios.
+
+PoseToTensor
+    Converts pose tracking data from xarray.Dataset format to PyTorch tensors by
+    stacking spatial dimensions into a single feature dimension.
+
+PoseToVideo
+    Renders pose tracking data as video frames (RGB images) using OpenCV, with
+    customizable body specifications for visualization.
+
+VideoToTensor
+    Converts video frames from NumPy arrays to PyTorch tensors with optional
+    normalization for video model inputs.
+
+Usage Examples
+--------------
+>>> from lisbet.transforms_extra import RandomPermutation, PoseToTensor
+>>> from torchvision import transforms
+>>>
+>>> # Simple augmentation pipeline
+>>> transform = transforms.Compose([
+...     RandomPermutation(seed=42, coordinate='individuals'),
+...     PoseToTensor(),
+... ])
+>>>
+>>> # Apply with probability using torchvision.transforms.RandomApply
+>>> transform = transforms.Compose([
+...     transforms.RandomApply([
+...         RandomPermutation(seed=42, coordinate='individuals')
+...     ], p=0.5),
+...     PoseToTensor(),
+... ])
+>>>
+>>> # Block permutation for temporal identity confusion
+>>> from lisbet.transforms_extra import RandomBlockPermutation
+>>> transform = transforms.Compose([
+...     RandomBlockPermutation(seed=42, coordinate='individuals', permute_fraction=0.3),
+...     PoseToTensor(),
+... ])
+
+Notes
+-----
+- Augmentations should be applied thoughtfully based on dataset characteristics
+- Spatial axis permutation (coordinate='space') is only suitable for top-down view
+  datasets where axes are symmetric
+- Identity permutations work best for datasets where individual labels are
+  interchangeable
+"""
 
 import cv2
 import numpy as np

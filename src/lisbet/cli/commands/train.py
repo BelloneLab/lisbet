@@ -112,6 +112,10 @@ def configure_train_model_parser(parser: argparse.ArgumentParser) -> None:
             Data augmentation techniques to apply, comma-separated.
             Each augmentation can have optional parameters specified with colons.
 
+            NOTE: Use the --data_augmentation= format (with equals sign) to clearly
+                  separate the argument from its value. This makes the syntax
+                  unambiguous and prevents shell interpretation of special characters.
+
             Valid options are:
                 - all_perm_id: Randomly permute identities of individuals, applied
                                consistently across all frames in a window.
@@ -126,10 +130,10 @@ def configure_train_model_parser(parser: argparse.ArgumentParser) -> None:
                                 (default: 0.5)
 
             Examples:
-                --data_augmentation all_perm_id
-                --data_augmentation all_perm_id:p=0.5
-                --data_augmentation all_perm_id:p=0.5,blk_perm_id:p=0.3:frac=0.2
-                --data_augmentation all_perm_ax:p=0.7,blk_perm_id:frac=0.3
+                --data_augmentation="all_perm_id"
+                --data_augmentation="all_perm_id:p=0.5"
+                --data_augmentation="all_perm_id:p=0.5,blk_perm_id:p=0.3:frac=0.2"
+                --data_augmentation="all_perm_ax:p=0.7,blk_perm_id:frac=0.3"
             """
         ),
     )
