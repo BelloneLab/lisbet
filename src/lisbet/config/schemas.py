@@ -1,12 +1,12 @@
 from pathlib import Path
-from typing import Annotated, Literal, Optional, Union
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class TransformerBackboneConfig(BaseModel):
     type: Literal["transformer"] = "transformer"
-    feature_dim: Optional[int] = None
+    feature_dim: int | None = None
     embedding_dim: int
     hidden_dim: int
     num_heads: int
@@ -16,7 +16,7 @@ class TransformerBackboneConfig(BaseModel):
 
 class TCNBackboneConfig(BaseModel):
     type: Literal["tcn"] = "tcn"
-    feature_dim: Optional[int] = None
+    feature_dim: int | None = None
     embedding_dim: int
     hidden_dim: int
     num_layers: int
@@ -27,14 +27,14 @@ class TCNBackboneConfig(BaseModel):
 
 class LSTMBackboneConfig(BaseModel):
     type: Literal["lstm"] = "lstm"
-    feature_dim: Optional[int] = None
+    feature_dim: int | None = None
     embedding_dim: int
     hidden_dim: int
     num_layers: int
 
 
 BackboneConfig = Annotated[
-    Union[TransformerBackboneConfig, LSTMBackboneConfig, TCNBackboneConfig],
+    TransformerBackboneConfig | LSTMBackboneConfig | TCNBackboneConfig,
     Field(discriminator="type"),
 ]
 
@@ -42,20 +42,58 @@ BackboneConfig = Annotated[
 class DataConfig(BaseModel):
     data_path: str
     data_format: str = "DLC"
-    data_scale: Optional[str] = None
-    data_filter: Optional[str] = None
-    select_coords: Optional[str] = None
-    rename_coords: Optional[str] = None
+    data_scale: str | None = None
+    data_filter: str | None = None
+    select_coords: str | None = None
+    rename_coords: str | None = None
     window_size: int = 200
     window_offset: int = 0
     fps_scaling: float = 1.0
-    dev_ratio: Optional[float] = None
-    train_sample: Optional[float] = None
-    dev_sample: Optional[float] = None
+    dev_ratio: float | None = None
+    train_sample: float | None = None
+    dev_sample: float | None = None
+
+
+class DataAugmentationConfig(BaseModel):
+    """Configuration for a single data augmentation technique.
+
+    Attributes:
+        name: Name of the augmentation technique (all_perm_id, all_perm_ax, blk_perm_id)
+        p: Probability of applying this transformation (0.0 to 1.0)
+        frac: Fraction of frames to permute (only for blk_perm_id, 0.0 to 1.0 exclusive)
+    """
+
+    name: Literal["all_perm_id", "all_perm_ax", "blk_perm_id"]
+    p: float = 1.0
+    frac: float | None = None
+
+    @field_validator("p")
+    @classmethod
+    def validate_probability(cls, v):
+        if not 0.0 <= v <= 1.0:
+            raise ValueError("Probability p must be between 0.0 and 1.0")
+        return v
+
+    @field_validator("frac")
+    @classmethod
+    def validate_fraction(cls, v, info):
+        if v is not None and not 0.0 < v < 1.0:
+            raise ValueError("Fraction frac must be between 0.0 and 1.0 (exclusive)")
+        return v
+
+    def model_post_init(self, __context):
+        """Validate that frac is only set for blk_perm_id."""
+        if self.name == "blk_perm_id" and self.frac is None:
+            # Set default fraction for blk_perm_id
+            self.frac = 0.5
+        elif self.name != "blk_perm_id" and self.frac is not None:
+            raise ValueError(
+                f"frac parameter is only valid for blk_perm_id, not {self.name}"
+            )
 
 
 class ModelConfig(BaseModel):
-    model_id: Optional[str] = None
+    model_id: str | None = None
     backbone: BackboneConfig
     out_heads: dict[str, dict]
     input_features: dict[str, list[str]]
@@ -67,21 +105,21 @@ class TrainingConfig(BaseModel):
     epochs: int
     batch_size: int
     learning_rate: float
-    data_augmentation: bool = False
-    save_weights: Optional[str] = None
+    data_augmentation: bool | list[DataAugmentationConfig] | None = False
+    save_weights: str | None = None
     save_history: bool = False
     mixed_precision: bool = False
     head_type: Literal["mlp", "linear"] = "mlp"
     freeze_backbone_weights: bool = False
-    load_backbone_weights: Optional[Union[str, Path]] = None
+    load_backbone_weights: str | Path | None = None
 
 
 class ExperimentConfig(BaseModel):
-    run_id: Optional[str] = None
+    run_id: str | None = None
     model: ModelConfig
     training: TrainingConfig
     data: DataConfig
     task_ids_list: list[str]
-    task_data: Optional[str] = None
+    task_data: str | None = None
     seed: int = 1991
     output_path: Path = Path(".")

@@ -7,6 +7,62 @@ from pathlib import Path
 from lisbet.cli.common import add_data_io_args, add_keypoints_args, add_verbosity_args
 
 
+def parse_data_augmentation(aug_string):
+    """Parse data augmentation string into list of DataAugmentationConfig objects.
+
+    Parameters
+    ----------
+    aug_string : str or None
+        Comma-separated augmentation specifications, each with optional parameters.
+        Format: name:p=value:frac=value
+        Example: "all_perm_id:p=0.5,blk_perm_id:p=0.3:frac=0.2"
+
+    Returns
+    -------
+    list[dict] or bool
+        List of dictionaries with augmentation configs, or False if None/empty.
+
+    Examples
+    --------
+    >>> parse_data_augmentation("all_perm_id")
+    [{'name': 'all_perm_id', 'p': 1.0}]
+
+    >>> parse_data_augmentation("all_perm_id:p=0.5,blk_perm_id:frac=0.3")
+    [{'name': 'all_perm_id', 'p': 0.5}, {'name': 'blk_perm_id', 'p': 1.0, 'frac': 0.3}]
+    """
+    if not aug_string:
+        return False
+
+    augmentations = []
+    for aug_spec in aug_string.split(","):
+        parts = aug_spec.strip().split(":")
+        if not parts[0]:
+            continue
+
+        aug_config = {"name": parts[0].strip()}
+
+        # Parse parameters
+        for param in parts[1:]:
+            if "=" in param:
+                key, value = param.split("=", 1)
+                key = key.strip()
+                value = value.strip()
+                try:
+                    aug_config[key] = float(value)
+                except ValueError as exc:
+                    raise ValueError from exc(
+                        f"Invalid parameter value in '{aug_spec}': {key}={value}"
+                    )
+
+        # Set defaults if not specified
+        if "p" not in aug_config:
+            aug_config["p"] = 1.0
+
+        augmentations.append(aug_config)
+
+    return augmentations if augmentations else False
+
+
 def configure_train_model_parser(parser: argparse.ArgumentParser) -> None:
     """Configure train_model command parser."""
     add_verbosity_args(parser)
@@ -49,7 +105,33 @@ def configure_train_model_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--seed", default=1991, type=int, help="Base RNG seed")
     parser.add_argument("--run_id", type=str, help="ID of the run")
     parser.add_argument(
-        "--data_augmentation", action="store_true", help="Enable data augmentation"
+        "--data_augmentation",
+        type=str,
+        help=textwrap.dedent(
+            """\
+            Data augmentation techniques to apply, comma-separated.
+            Each augmentation can have optional parameters specified with colons.
+
+            Valid options are:
+                - all_perm_id: Randomly permute identities of individuals, applied
+                               consistently across all frames in a window.
+                - all_perm_ax: Randomly permute x, y (and z) axes, applied consistently
+                               across all frames in a window.
+                - blk_perm_id: Randomly permute identities of individuals, applied
+                               to a contiguous block of frames within a window.
+
+            Parameters (optional):
+                - p=<float>: Probability of applying the transformation (default: 1.0)
+                - frac=<float>: For blk_perm_id only, fraction of frames to permute
+                                (default: 0.5)
+
+            Examples:
+                --data_augmentation all_perm_id
+                --data_augmentation all_perm_id:p=0.5
+                --data_augmentation all_perm_id:p=0.5,blk_perm_id:p=0.3:frac=0.2
+                --data_augmentation all_perm_ax:p=0.7,blk_perm_id:frac=0.3
+            """
+        ),
     )
     parser.add_argument(
         "--train_sample", type=float, help="Fraction of samples from the train set"
@@ -182,8 +264,15 @@ def train_model(kwargs):
         window_offset=kwargs["window_offset"],
     )
 
+    # Parse and configure data augmentation
+    aug_string = kwargs.get("data_augmentation")
+    parsed_augmentation = parse_data_augmentation(aug_string)
+
+    # Update kwargs with parsed augmentation
+    kwargs_for_training = {**kwargs, "data_augmentation": parsed_augmentation}
+
     # Configure training
-    training_config = TrainingConfig.model_validate(kwargs)
+    training_config = TrainingConfig.model_validate(kwargs_for_training)
 
     # Create experiment configuration
     experiment_config = ExperimentConfig(
