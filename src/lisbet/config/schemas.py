@@ -105,7 +105,7 @@ class TrainingConfig(BaseModel):
     epochs: int
     batch_size: int
     learning_rate: float
-    data_augmentation: bool | list[DataAugmentationConfig] | None = False
+    data_augmentation: list[DataAugmentationConfig] | None = None
     save_weights: str | None = None
     save_history: bool = False
     mixed_precision: bool = False

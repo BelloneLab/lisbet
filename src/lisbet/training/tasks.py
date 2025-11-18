@@ -17,7 +17,11 @@ from torchmetrics.classification import (
 from torchvision import transforms
 
 from lisbet import datasets, modeling
-from lisbet.transforms_extra import PoseToTensor, RandomPermutation
+from lisbet.transforms_extra import (
+    PoseToTensor,
+    RandomBlockPermutation,
+    RandomPermutation,
+)
 
 
 @dataclass
@@ -32,6 +36,57 @@ class Task:
     dev_dataset: Dataset | None = None
     dev_loss: Metric | None = None
     dev_score: Metric | None = None
+
+
+def _build_augmentation_transforms(data_augmentation, seed):
+    """Build transformation pipeline from data augmentation configuration.
+
+    Parameters
+    ----------
+    data_augmentation : list[DataAugmentationConfig] or None
+        Data augmentation configuration. If None or empty list, returns only
+        PoseToTensor. If list of DataAugmentationConfig, builds transforms
+        according to specifications.
+    seed : int
+        Random seed for the transformations.
+
+    Returns
+    -------
+    transforms.Compose
+        Composed transformation pipeline.
+    """
+    transform_list = []
+
+    # Build transforms from DataAugmentationConfig objects
+    if data_augmentation:
+        for idx, aug_config in enumerate(data_augmentation):
+            # Create a unique seed for each augmentation
+            aug_seed = seed + idx
+
+            # Build the transform based on augmentation name
+            if aug_config.name == "all_perm_id":
+                transform = RandomPermutation(aug_seed, coordinate="individuals")
+            elif aug_config.name == "all_perm_ax":
+                transform = RandomPermutation(aug_seed, coordinate="space")
+            elif aug_config.name == "blk_perm_id":
+                transform = RandomBlockPermutation(
+                    aug_seed,
+                    coordinate="individuals",
+                    permute_fraction=aug_config.frac,
+                )
+            else:
+                raise ValueError(f"Unknown augmentation type: {aug_config.name}")
+
+            # Wrap in RandomApply if probability < 1.0
+            if aug_config.p < 1.0:
+                transform = transforms.RandomApply([transform], p=aug_config.p)
+
+            transform_list.append(transform)
+
+    # Always add PoseToTensor at the end
+    transform_list.append(PoseToTensor())
+
+    return transforms.Compose(transform_list)
 
 
 def _configure_supervised_multilabel_task(
@@ -72,17 +127,8 @@ def _configure_supervised_multilabel_task(
     logging.debug("Label weights: %s", label_weight)
 
     # Create data transformers
-    train_transform = (
-        transforms.Compose(
-            [
-                RandomPermutation(
-                    run_seeds["transform_multilabel"], coordinate="space"
-                ),
-                PoseToTensor(),
-            ]
-        )
-        if data_augmentation
-        else transforms.Compose([PoseToTensor()])
+    train_transform = _build_augmentation_transforms(
+        data_augmentation, run_seeds["transform_multilabel"]
     )
 
     # Create dataloaders
@@ -164,17 +210,8 @@ def _configure_supervised_multiclass_task(
     logging.debug("Class weights: %s", class_weight)
 
     # Create data transformers
-    train_transform = (
-        transforms.Compose(
-            [
-                RandomPermutation(
-                    run_seeds["transform_multiclass"], coordinate="space"
-                ),
-                PoseToTensor(),
-            ]
-        )
-        if data_augmentation
-        else transforms.Compose([PoseToTensor()])
+    train_transform = _build_augmentation_transforms(
+        data_augmentation, run_seeds["transform_multiclass"]
     )
 
     # Create dataloaders
@@ -232,17 +269,8 @@ def _configure_selfsupervised_task(
     )
 
     # Create data transformers
-    train_transform = (
-        transforms.Compose(
-            [
-                RandomPermutation(
-                    run_seeds[f"transform_{task_id}"], coordinate="space"
-                ),
-                PoseToTensor(),
-            ]
-        )
-        if data_augmentation
-        else transforms.Compose([PoseToTensor()])
+    train_transform = _build_augmentation_transforms(
+        data_augmentation, run_seeds[f"transform_{task_id}"]
     )
 
     # Create dataloaders

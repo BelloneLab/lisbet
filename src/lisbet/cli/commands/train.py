@@ -19,8 +19,8 @@ def parse_data_augmentation(aug_string):
 
     Returns
     -------
-    list[dict] or bool
-        List of dictionaries with augmentation configs, or False if None/empty.
+    list[dict] or None
+        List of dictionaries with augmentation configs, or None if None/empty.
 
     Examples
     --------
@@ -31,36 +31,36 @@ def parse_data_augmentation(aug_string):
     [{'name': 'all_perm_id', 'p': 0.5}, {'name': 'blk_perm_id', 'p': 1.0, 'frac': 0.3}]
     """
     if not aug_string:
-        return False
+        return None
 
     augmentations = []
     for aug_spec in aug_string.split(","):
-        parts = aug_spec.strip().split(":")
-        if not parts[0]:
+        aug_spec = aug_spec.strip()
+        if not aug_spec:
             continue
 
-        aug_config = {"name": parts[0].strip()}
+        parts = aug_spec.split(":")
+        aug_config = {"name": parts[0].strip(), "p": 1.0}
 
         # Parse parameters
         for param in parts[1:]:
-            if "=" in param:
-                key, value = param.split("=", 1)
-                key = key.strip()
-                value = value.strip()
-                try:
-                    aug_config[key] = float(value)
-                except ValueError as exc:
-                    raise ValueError from exc(
-                        f"Invalid parameter value in '{aug_spec}': {key}={value}"
-                    )
+            key, _, value = param.partition("=")
+            key = key.strip()
+            value = value.strip()
 
-        # Set defaults if not specified
-        if "p" not in aug_config:
-            aug_config["p"] = 1.0
+            if not key or not value:
+                raise ValueError(f"Invalid parameter format in '{aug_spec}': {param}")
+
+            try:
+                aug_config[key] = float(value)
+            except ValueError as e:
+                raise ValueError from e(
+                    f"Invalid parameter value in '{aug_spec}': {key}={value}"
+                )
 
         augmentations.append(aug_config)
 
-    return augmentations if augmentations else False
+    return augmentations if augmentations else None
 
 
 def configure_train_model_parser(parser: argparse.ArgumentParser) -> None:

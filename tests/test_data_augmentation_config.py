@@ -5,13 +5,13 @@ from lisbet.config.schemas import DataAugmentationConfig
 
 
 def test_parse_data_augmentation_none():
-    """Test parsing None returns False."""
-    assert parse_data_augmentation(None) is False
+    """Test parsing None returns None."""
+    assert parse_data_augmentation(None) is None
 
 
 def test_parse_data_augmentation_empty():
-    """Test parsing empty string returns False."""
-    assert parse_data_augmentation("") is False
+    """Test parsing empty string returns None."""
+    assert parse_data_augmentation("") is None
 
 
 def test_parse_data_augmentation_single():
