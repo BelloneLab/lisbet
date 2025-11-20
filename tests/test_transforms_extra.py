@@ -3,7 +3,12 @@ import pytest
 import torch
 import xarray as xr
 
-from lisbet.transforms_extra import RandomBlockPermutation, RandomPermutation
+from lisbet.transforms_extra import (
+    RandomBlockPermutation,
+    RandomPermutation,
+    GaussianJitter,
+    GaussianWindowJitter,
+)
 
 
 def make_posetracks(n_individuals=2, n_time=10):
@@ -421,3 +426,95 @@ def test_randompermutation_large_permutation(monkeypatch):
         ds_permuted["position"].values[..., 9],
         ds["position"].values[..., 0],
     )
+
+
+def test_gaussian_jitter_basic_mask_properties():
+    """GaussianJitter should approximately modify p proportion of elements (excluding space)."""
+    T, S, K, I = 50, 2, 4, 3
+    arr = np.random.rand(T, S, K, I).astype(np.float32)
+    ds = xr.Dataset(
+        {"position": (("time", "space", "keypoints", "individuals"), arr)},
+        coords={
+            "time": np.arange(T),
+            "space": ["x", "y"],
+            "keypoints": [f"kp{k}" for k in range(K)],
+            "individuals": [f"ind{i}" for i in range(I)],
+        },
+    )
+    p = 0.1
+    sigma = 0.05
+    gj = GaussianJitter(seed=123, p=p, sigma=sigma)
+    ds_j = gj(ds)
+    diff = ds_j["position"].values - ds["position"].values
+    # Collapse space by max abs to detect any change per element
+    changed = np.any(np.abs(diff) > 1e-9, axis=1)  # shape (T, K, I)
+    proportion_changed = changed.mean()
+    assert 0.05 < proportion_changed < 0.2  # loose bounds around p=0.1
+    # Check noise statistics roughly
+    if changed.sum() > 0:
+        observed = diff[:, :, :, :][np.abs(diff) > 1e-9]
+        # Mean near 0
+        assert abs(observed.mean()) < sigma * 0.2
+
+
+def test_gaussian_jitter_determinism():
+    T, S, K, I = 20, 2, 3, 2
+    arr = np.random.rand(T, S, K, I).astype(np.float32)
+    ds = xr.Dataset(
+        {"position": (("time", "space", "keypoints", "individuals"), arr)},
+        coords={
+            "time": np.arange(T),
+            "space": ["x", "y"],
+            "keypoints": [f"kp{k}" for k in range(K)],
+            "individuals": [f"ind{i}" for i in range(I)],
+        },
+    )
+    gj1 = GaussianJitter(seed=999, p=0.2, sigma=0.01)
+    gj2 = GaussianJitter(seed=999, p=0.2, sigma=0.01)
+    out1 = gj1(ds)
+    out2 = gj2(ds)
+    xr.testing.assert_equal(out1, out2)
+
+
+def test_gaussian_window_jitter_basic():
+    T, S, K, I = 60, 2, 4, 3
+    arr = np.random.rand(T, S, K, I).astype(np.float32)
+    ds = xr.Dataset(
+        {"position": (("time", "space", "keypoints", "individuals"), arr)},
+        coords={
+            "time": np.arange(T),
+            "space": ["x", "y"],
+            "keypoints": [f"kp{k}" for k in range(K)],
+            "individuals": [f"ind{i}" for i in range(I)],
+        },
+    )
+    p = 0.03
+    window = 8
+    gwj = GaussianWindowJitter(seed=7, p=p, sigma=0.02, window=window)
+    out = gwj(ds)
+    diff = out["position"].values - ds["position"].values
+    # Collapse space dimension for change detection
+    changed = np.any(np.abs(diff) > 1e-9, axis=1)  # shape (T,K,I)
+    proportion_changed_elements = changed.mean()
+    # With small p and window, expect low proportion
+    assert proportion_changed_elements < 0.5
+    # If any changes, ensure locality: for each changed (t,k,i), earlier frames outside window start not all changed
+    # (Heuristic: there should exist at least one untouched element)
+    assert np.any(~changed)
+
+
+def test_gaussian_window_jitter_no_change_when_p_zero():
+    T, S, K, I = 30, 2, 2, 2
+    arr = np.random.rand(T, S, K, I).astype(np.float32)
+    ds = xr.Dataset(
+        {"position": (("time", "space", "keypoints", "individuals"), arr)},
+        coords={
+            "time": np.arange(T),
+            "space": ["x", "y"],
+            "keypoints": [f"kp{k}" for k in range(K)],
+            "individuals": [f"ind{i}" for i in range(I)],
+        },
+    )
+    gwj = GaussianWindowJitter(seed=1, p=0.0, sigma=0.02, window=5)
+    out = gwj(ds)
+    xr.testing.assert_equal(out, ds)

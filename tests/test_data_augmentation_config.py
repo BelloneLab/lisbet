@@ -75,6 +75,22 @@ def test_data_augmentation_config_valid():
     assert cfg3.frac == 0.3
     assert cfg3.p == 1.0
 
+    # gauss_jitter with defaults (sigma auto-set)
+    cfg4 = DataAugmentationConfig(name="gauss_jitter", p=0.02)
+    assert cfg4.name == "gauss_jitter"
+    assert cfg4.sigma == 0.01  # default
+    assert cfg4.window is None
+
+    # gauss_window_jitter with defaults (sigma & window auto-set)
+    cfg5 = DataAugmentationConfig(name="gauss_window_jitter", p=0.05)
+    assert cfg5.sigma == 0.01
+    assert cfg5.window == 10
+
+    # gauss_window_jitter custom parameters
+    cfg6 = DataAugmentationConfig(name="gauss_window_jitter", p=0.1, sigma=0.02, window=25)
+    assert cfg6.sigma == 0.02
+    assert cfg6.window == 25
+
 
 def test_data_augmentation_config_blk_perm_id_default_fraction():
     """Test that blk_perm_id gets default fraction of 0.5."""
@@ -101,6 +117,20 @@ def test_data_augmentation_config_invalid_fraction():
 
     with pytest.raises(ValueError, match="Fraction frac must be between 0.0 and 1.0"):
         DataAugmentationConfig(name="blk_perm_id", frac=1.5)
+
+
+def test_data_augmentation_config_invalid_sigma_usage():
+    with pytest.raises(ValueError, match="sigma parameter only valid"):
+        DataAugmentationConfig(name="all_perm_id", sigma=0.01)
+    with pytest.raises(ValueError, match="sigma must be > 0.0"):
+        DataAugmentationConfig(name="gauss_jitter", sigma=0.0)
+
+
+def test_data_augmentation_config_invalid_window_usage():
+    with pytest.raises(ValueError, match="window parameter only valid"):
+        DataAugmentationConfig(name="gauss_jitter", window=5)
+    with pytest.raises(ValueError, match="window must be a positive integer"):
+        DataAugmentationConfig(name="gauss_window_jitter", window=0)
 
 
 def test_data_augmentation_config_frac_only_for_blk_perm_id():
@@ -145,3 +175,13 @@ def test_parse_data_augmentation_with_spaces():
     # Our current implementation uses strip() on parts but not on param key/value
     # Let's verify it still works or add better handling
     assert len(result) == 2
+
+
+def test_parse_data_augmentation_with_jitter_params():
+    result = parse_data_augmentation(
+        "gauss_jitter:p=0.02:sigma=0.01,gauss_window_jitter:p=0.05:sigma=0.02:window=15"
+    )
+    assert result[0]["name"] == "gauss_jitter"
+    assert result[0]["p"] == 0.02
+    assert result[0]["sigma"] == 0.01
+    assert result[1]["window"] == 15
