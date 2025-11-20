@@ -54,9 +54,9 @@ def parse_data_augmentation(aug_string):
             try:
                 aug_config[key] = float(value)
             except ValueError as e:
-                raise ValueError from e(
+                raise ValueError(
                     f"Invalid parameter value in '{aug_spec}': {key}={value}"
-                )
+                ) from e
 
         augmentations.append(aug_config)
 
