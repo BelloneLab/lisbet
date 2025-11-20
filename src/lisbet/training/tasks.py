@@ -21,6 +21,8 @@ from lisbet.transforms_extra import (
     PoseToTensor,
     RandomBlockPermutation,
     RandomPermutation,
+    GaussianJitter,
+    GaussianWindowJitter,
 )
 
 
@@ -66,20 +68,35 @@ def _build_augmentation_transforms(data_augmentation, seed):
             # Build the transform based on augmentation name
             if aug_config.name == "all_perm_id":
                 transform = RandomPermutation(aug_seed, coordinate="individuals")
+                if aug_config.p < 1.0:
+                    transform = transforms.RandomApply([transform], p=aug_config.p)
             elif aug_config.name == "all_perm_ax":
                 transform = RandomPermutation(aug_seed, coordinate="space")
+                if aug_config.p < 1.0:
+                    transform = transforms.RandomApply([transform], p=aug_config.p)
             elif aug_config.name == "blk_perm_id":
                 transform = RandomBlockPermutation(
                     aug_seed,
                     coordinate="individuals",
                     permute_fraction=aug_config.frac,
                 )
+                if aug_config.p < 1.0:
+                    transform = transforms.RandomApply([transform], p=aug_config.p)
+            elif aug_config.name == "gauss_jitter":
+                transform = GaussianJitter(
+                    seed=aug_seed,
+                    p=aug_config.p,
+                    sigma=aug_config.sigma,
+                )
+            elif aug_config.name == "gauss_window_jitter":
+                transform = GaussianWindowJitter(
+                    seed=aug_seed,
+                    p=aug_config.p,
+                    sigma=aug_config.sigma,
+                    window=aug_config.window,
+                )
             else:
                 raise ValueError(f"Unknown augmentation type: {aug_config.name}")
-
-            # Wrap in RandomApply if probability < 1.0
-            if aug_config.p < 1.0:
-                transform = transforms.RandomApply([transform], p=aug_config.p)
 
             transform_list.append(transform)
 

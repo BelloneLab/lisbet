@@ -57,15 +57,45 @@ class DataConfig(BaseModel):
 class DataAugmentationConfig(BaseModel):
     """Configuration for a single data augmentation technique.
 
+    Augmentation families and parameter semantics:
+
+    Permutation-based (legacy):
+        - all_perm_id: Full-window permutation of individual identities.
+        - all_perm_ax: Full-window permutation of spatial axes.
+        - blk_perm_id: Block (contiguous frames) permutation of individual identities.
+          Uses ``frac`` for relative block length.
+        For these, ``p`` is the probability of applying the *entire* transform
+        (implemented via ``RandomApply`` in the pipeline).
+
+        Jitter-based (new):
+                - gauss_jitter: Per-element Bernoulli(p) mask over (time, keypoints, individuals),
+                    adds N(0, sigma) noise to selected elements (broadcast over space dims).
+                - gauss_window_jitter: Bernoulli(p) over (time, keypoints, individuals) selects
+                    start elements. Each start activates a temporal window of length ``window``
+                    for that (keypoint, individual) only (all space dims). Overlapping windows
+                    merge; noise applied once per affected element-frame.
+        For jitter transforms, ``p`` is *internal* (not wrapped by RandomApply) and
+        drives the element/window sampling process.
+
     Attributes:
-        name: Name of the augmentation technique (all_perm_id, all_perm_ax, blk_perm_id)
-        p: Probability of applying this transformation (0.0 to 1.0)
-        frac: Fraction of frames to permute (only for blk_perm_id, 0.0 to 1.0 exclusive)
+        name: Augmentation identifier.
+        p: Probability parameter (semantics depend on family, see above).
+        frac: Fraction of frames for block permutation (blk_perm_id only).
+        sigma: Standard deviation of Gaussian noise (jitter types only).
+        window: Window length (frames) for gauss_window_jitter only.
     """
 
-    name: Literal["all_perm_id", "all_perm_ax", "blk_perm_id"]
+    name: Literal[
+        "all_perm_id",
+        "all_perm_ax",
+        "blk_perm_id",
+        "gauss_jitter",
+        "gauss_window_jitter",
+    ]
     p: float = 1.0
     frac: float | None = None
+    sigma: float | None = None
+    window: int | None = None
 
     @field_validator("p")
     @classmethod
@@ -81,15 +111,56 @@ class DataAugmentationConfig(BaseModel):
             raise ValueError("Fraction frac must be between 0.0 and 1.0 (exclusive)")
         return v
 
+    @field_validator("sigma")
+    @classmethod
+    def validate_sigma(cls, v, info):
+        if info.data.get("name") in ("gauss_jitter", "gauss_window_jitter"):
+            # Required (will default later if None), must be positive
+            if v is not None and v <= 0.0:
+                raise ValueError("sigma must be > 0.0 for jitter augmentations")
+        else:
+            # Disallow sigma for non-jitter types to avoid silent misuse
+            if v is not None:
+                raise ValueError("sigma parameter only valid for jitter augmentations")
+        return v
+
+    @field_validator("window")
+    @classmethod
+    def validate_window(cls, v, info):
+        name = info.data.get("name")
+        if name == "gauss_window_jitter":
+            if v is not None and v <= 0:
+                raise ValueError("window must be a positive integer for gauss_window_jitter")
+        else:
+            if v is not None:
+                raise ValueError("window parameter only valid for gauss_window_jitter")
+        return v
+
     def model_post_init(self, __context):
-        """Validate that frac is only set for blk_perm_id."""
-        if self.name == "blk_perm_id" and self.frac is None:
-            # Set default fraction for blk_perm_id
-            self.frac = 0.5
-        elif self.name != "blk_perm_id" and self.frac is not None:
-            raise ValueError(
-                f"frac parameter is only valid for blk_perm_id, not {self.name}"
-            )
+        """Post-init normalization & cross-field validation."""
+        # blk_perm_id: assign default frac if missing
+        if self.name == "blk_perm_id":
+            if self.frac is None:
+                self.frac = 0.5
+        else:
+            if self.frac is not None:
+                raise ValueError(
+                    f"frac parameter is only valid for blk_perm_id, not {self.name}"
+                )
+
+        # Jitter defaults & requirements
+        if self.name in ("gauss_jitter", "gauss_window_jitter"):
+            if self.sigma is None:
+                self.sigma = 0.01  # default sigma
+            if self.name == "gauss_window_jitter":
+                if self.window is None:
+                    self.window = 10  # default window length
+        else:
+            # Non-jitter types must not have sigma/window
+            if self.sigma is not None:
+                raise ValueError("sigma parameter only valid for jitter augmentations")
+            if self.window is not None:
+                raise ValueError("window parameter only valid for gauss_window_jitter")
 
 
 class ModelConfig(BaseModel):

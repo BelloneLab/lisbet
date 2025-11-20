@@ -20,6 +20,7 @@ from lisbet.cli.commands import (
     configure_select_prototypes_parser,
     configure_train_model_parser,
 )
+import torch
 
 
 class RawDefaultsHelpFormatter(
@@ -202,3 +203,5 @@ def app() -> None:
             function_name=cmd_config["function"],
             args=vars(args),
         )
+
+torch.set_float32_matmul_precision('medium')

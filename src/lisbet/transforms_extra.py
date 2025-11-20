@@ -64,11 +64,168 @@ Notes
 """
 
 import cv2
+import logging
 import numpy as np
 import torch
 import xarray as xr
 
 from lisbet.drawing import BodySpecs, body_specs_registry, color_to_bgr
+
+
+class GaussianJitter:
+    """Apply Gaussian jitter with per-element Bernoulli sampling.
+
+    Probability ``p`` is applied independently over (time, keypoints, individuals).
+    For every selected element, Gaussian noise N(0, sigma^2) is added *broadcast*
+    across the space dimension(s). Coordinates are assumed normalized in [0, 1] and
+    are clamped to that range post-perturbation.
+
+    Parameters
+    ----------
+    seed : int
+        RNG seed for reproducibility.
+    p : float
+        Bernoulli probability for each (frame,keypoint,individual) element.
+    sigma : float
+        Standard deviation of the Gaussian noise.
+    """
+
+    def __init__(self, seed: int, p: float, sigma: float):
+        self.seed = seed
+        self.p = float(p)
+        self.sigma = float(sigma)
+        self.g = torch.Generator().manual_seed(seed)
+
+    def __call__(self, posetracks: xr.Dataset) -> xr.Dataset:
+        ds = posetracks.copy(deep=True)
+        pos_var = ds["position"]
+        dims = list(pos_var.dims)
+        # Identify dimension indices
+        try:
+            t_idx = dims.index("time")
+            k_idx = dims.index("keypoints")
+            i_idx = dims.index("individuals")
+        except ValueError as e:
+            raise ValueError("position variable must contain 'time','keypoints','individuals' dimensions") from e
+
+        shape = pos_var.shape
+        # Mask shape excludes space dimension(s) for independence semantics.
+        mask_shape = [shape[d] for d in range(len(shape))]
+        # Replace space dimension size(s) by 1 for broadcasting (space may be before keypoints as per dataset examples)
+        for s_name in ["space"]:
+            if s_name in dims:
+                s_idx = dims.index(s_name)
+                mask_shape[s_idx] = 1
+        # Ensure independence only over time,keypoints,individuals by collapsing non listed dims to 1
+        for d_name in dims:
+            if d_name not in ("time", "keypoints", "individuals", "space"):
+                mask_shape[dims.index(d_name)] = 1
+
+        bern = torch.rand(mask_shape, generator=self.g) < self.p
+        # Broadcast mask to full position shape
+        mask = bern
+        # Create noise tensor same full shape
+        noise = torch.randn(shape, generator=self.g) * self.sigma
+        # Apply
+        pos = torch.from_numpy(pos_var.values)
+        pos = pos + noise * mask
+        # Clamp to [0,1]
+        pos.clamp_(0.0, 1.0)
+        pos_var.values[:] = pos.numpy()
+        return ds
+
+
+class GaussianWindowJitter:
+    """Apply Gaussian jitter to element-specific temporal windows.
+
+    Bernoulli(p) is sampled independently over (time, keypoints, individuals) to
+    select *start* elements. For each positive start at (t0, k, i), a window of length
+    ``window`` frames [t0, t0+window) (clipped at sequence end) receives Gaussian noise
+    N(0, sigma^2) only for that (keypoint, individual) pair across all space dims.
+    Overlapping windows (either same or different start elements covering same frame
+    and (k,i)) merge naturally; noise is applied once per affected element-frame.
+    A debug log reports overlap when merged coverage < raw expected coverage.
+
+    Parameters
+    ----------
+    seed : int
+        RNG seed.
+    p : float
+        Bernoulli probability for each frame to be a window start.
+    sigma : float
+        Noise standard deviation.
+    window : int
+        Window length in frames (must be > 0).
+    """
+
+    def __init__(self, seed: int, p: float, sigma: float, window: int):
+        if window <= 0:
+            raise ValueError("window must be a positive integer")
+        self.seed = seed
+        self.p = float(p)
+        self.sigma = float(sigma)
+        self.window = int(window)
+        self.g = torch.Generator().manual_seed(seed)
+
+    def __call__(self, posetracks: xr.Dataset) -> xr.Dataset:
+        ds = posetracks.copy(deep=True)
+        pos_var = ds["position"]
+        dims = list(pos_var.dims)
+        if "time" not in dims:
+            raise ValueError("position variable must have 'time' dimension")
+        t_idx = dims.index("time")
+        shape = pos_var.shape
+        T = shape[t_idx]
+        if T == 0:
+            return ds
+        # Identify keypoints & individuals dims
+        try:
+            k_idx = dims.index("keypoints")
+            i_idx = dims.index("individuals")
+        except ValueError as e:
+            raise ValueError("position variable must contain 'keypoints' and 'individuals' dimensions") from e
+
+        K = shape[k_idx]
+        I = shape[i_idx]
+
+        # Sample start mask over (time, keypoints, individuals)
+        start_mask = (torch.rand(T, K, I, generator=self.g) < self.p)
+
+        # Build window mask of same shape (T, K, I)
+        window_mask = torch.zeros(T, K, I, dtype=torch.bool)
+        starts = torch.nonzero(start_mask, as_tuple=False)
+        for idx_row in starts:
+            t0, k, ind = idx_row.tolist()
+            end = min(t0 + self.window, T)
+            window_mask[t0:end, k, ind] = True
+
+        if starts.numel() > 0:
+            expected_cover = starts.size(0) * self.window
+            actual_cover = int(window_mask.sum().item())
+            if actual_cover < expected_cover:
+                logging.debug(
+                    "gauss_window_jitter: overlapping element windows detected (expected raw=%d, merged=%d)",
+                    expected_cover,
+                    actual_cover,
+                )
+
+        if not window_mask.any():
+            return ds
+
+        # Expand window_mask to full position shape via broadcasting over space dim(s)
+        # Build broadcast shape aligned with pos_var dims
+        broadcast_shape = [1] * len(shape)
+        broadcast_shape[t_idx] = T
+        broadcast_shape[k_idx] = K
+        broadcast_shape[i_idx] = I
+        window_mask_b = window_mask.view(broadcast_shape)
+
+        noise = torch.randn(shape, generator=self.g) * self.sigma
+        pos = torch.from_numpy(pos_var.values)
+        pos = pos + noise * window_mask_b
+        pos.clamp_(0.0, 1.0)
+        pos_var.values[:] = pos.numpy()
+        return ds
 
 
 class RandomPermutation:
