@@ -59,15 +59,15 @@ class DataAugmentationConfig(BaseModel):
 
     Augmentation families and parameter semantics:
 
-    Permutation-based (legacy):
-        - all_perm_id: Full-window permutation of individual identities.
-        - all_perm_ax: Full-window permutation of spatial axes.
-        - blk_perm_id: Block (contiguous frames) permutation of individual identities.
-          Uses ``frac`` for relative block length.
-        For these, ``p`` is the probability of applying the *entire* transform
-        (implemented via ``RandomApply`` in the pipeline).
+        Permutation-based :
+            - all_perm_id: Full-window permutation of individual identities.
+            - all_perm_ax: Full-window permutation of spatial axes.
+            - blk_perm_id: Block (contiguous frames) permutation of individual identities.
+            Uses ``frac`` for relative block length.
+            For these, ``p`` is the probability of applying the *entire* transform
+            (implemented via ``RandomApply`` in the pipeline).
 
-        Jitter-based (new):
+        Jitter-based :
                 - gauss_jitter: Per-element Bernoulli(p) mask over (time, keypoints, individuals),
                     adds N(0, sigma) noise to selected elements (broadcast over space dims).
                 - gauss_window_jitter: Bernoulli(p) over (time, keypoints, individuals) selects
@@ -78,9 +78,9 @@ class DataAugmentationConfig(BaseModel):
         drives the element/window sampling process.
 
     Attributes:
-        name: Augmentation identifier.
-        p: Probability parameter (semantics depend on family, see above).
-        frac: Fraction of frames for block permutation (blk_perm_id only).
+        name: Name of the augmentation technique (all_perm_id, all_perm_ax, blk_perm_id)
+        p: Probability of applying this transformation (0.0 to 1.0)
+        frac: Fraction of frames to permute (only for blk_perm_id, 0.0 to 1.0 exclusive)
         sigma: Standard deviation of Gaussian noise (jitter types only).
         window: Window length (frames) for gauss_window_jitter only.
     """
@@ -137,16 +137,14 @@ class DataAugmentationConfig(BaseModel):
         return v
 
     def model_post_init(self, __context):
-        """Post-init normalization & cross-field validation."""
-        # blk_perm_id: assign default frac if missing
-        if self.name == "blk_perm_id":
-            if self.frac is None:
-                self.frac = 0.5
-        else:
-            if self.frac is not None:
-                raise ValueError(
-                    f"frac parameter is only valid for blk_perm_id, not {self.name}"
-                )
+        """Validate that frac is only set for blk_perm_id."""
+        if self.name == "blk_perm_id" and self.frac is None:
+            # Set default fraction for blk_perm_id
+            self.frac = 0.5
+        elif self.name != "blk_perm_id" and self.frac is not None:
+            raise ValueError(
+                f"frac parameter is only valid for blk_perm_id, not {self.name}"
+            )
 
         # Jitter defaults & requirements
         if self.name in ("gauss_jitter", "gauss_window_jitter"):
