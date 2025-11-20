@@ -23,6 +23,18 @@ Available augmentation techniques
     - More challenging augmentation than ``all_perm_id``
     - Requires ``frac`` parameter to specify the fraction of frames to permute
 
+* **gauss_jitter**: Inject sparse Gaussian coordinate noise
+    - Per-element Bernoulli(p) over (frame, keypoint, individual) selects positions to jitter
+    - Adds zero-mean Gaussian noise with standard deviation ``sigma`` (default 0.01)
+    - Robustifies against sporadic tracking jitter / keypoint mislocalization
+    - Coordinates are clamped to [0, 1] after noise
+
+* **gauss_window_jitter**: Inject temporally clustered Gaussian noise (element windows)
+    - Bernoulli(p) over (frame, keypoint, individual) selects *start elements*; each start activates a window of length ``window`` (default 10) for that keypoint & individual only
+    - Noise confined to selected element across subsequent frames; overlapping windows (same element or different) merge naturally
+    - Simulates localized bursts of degraded tracking quality (e.g., one limb jittering)
+    - Debug log emitted when overlapping element windows are detected
+
 Usage examples
 --------------
 
@@ -53,6 +65,30 @@ This applies identity permutation to 50% of training samples.
 
     $ betman train_model \
         --data_augmentation="all_perm_id:p=0.5,all_perm_ax:p=0.7" \
+        ... # other parameters
+
+**Gaussian jitter (sparse) + permutation:**
+
+.. code-block:: console
+
+    $ betman train_model \
+        --data_augmentation="all_perm_id:p=0.5,gauss_jitter:p=0.02:sigma=0.01" \
+        ... # other parameters
+
+**Window jitter (bursts) example:**
+
+.. code-block:: console
+
+    $ betman train_model \
+        --data_augmentation="gauss_window_jitter:p=0.05:sigma=0.02:window=25" \
+        ... # other parameters
+
+**Combined full pipeline:**
+
+.. code-block:: console
+
+    $ betman train_model \
+        --data_augmentation="all_perm_id:p=0.5,blk_perm_id:p=0.3:frac=0.2,gauss_jitter:p=0.02:sigma=0.01,gauss_window_jitter:p=0.05:sigma=0.02:window=25" \
         ... # other parameters
 
 **Block permutation with fraction:**
@@ -93,5 +129,8 @@ Important considerations
 * **Task compatibility**: Identity permutations (``all_perm_id``, ``blk_perm_id``) are most beneficial for self-supervised tasks and datasets where individual identities are interchangeable.
 
 * **Probability tuning**: Start with moderate probabilities (0.3-0.7) and adjust based on validation performance. Higher probabilities increase variability but may make training less stable.
+    - For jitter augmentations, recommended initial values: ``gauss_jitter`` p≈0.01–0.05, ``gauss_window_jitter`` p≈0.02 with window≈10–30.
+    - Increase ``sigma`` gradually (e.g., 0.005 → 0.02) monitoring degradation in dev metrics.
 
 * **Computational cost**: Augmentations are applied on-the-fly during training and add minimal overhead. Block permutations (``blk_perm_id``) are slightly more expensive than full permutations.
+    - Jitter augmentations add negligible overhead (vectorized operations). Window jitter scales linearly with number of sampled starts; low p keeps cost minimal.
