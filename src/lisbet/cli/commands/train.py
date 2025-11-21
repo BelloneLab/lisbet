@@ -124,12 +124,11 @@ def configure_train_model_parser(parser: argparse.ArgumentParser) -> None:
                 - blk_perm_id: Randomly permute identities of individuals, applied
                                to a contiguous block of frames within a window.
 
-                - gauss_jitter: Randomly add N(0,sigma) noise, applied to per-element
+                - gauss_jitter: Randomly add N(0,sigma) noise, applied using per-element
                                 Bernoulli(p) over (frame,keypoint,individual).
-                - gauss_window_jitter: Randomly add N(0,sigma) noise, applied to
-                                       Bernoulli(p) over (frame,keypoint,individual)
-                                       selects start elements; each start activates a
-                                       window of length 'window' adding N(0,sigma)
+                - gauss_window_jitter: Randomly add N(0,sigma) noise.
+                                       Bernoulli(p) over (frame,keypoint,individual) selects start elements.
+                                       Each start activates a window of length 'window' adding N(0,sigma)
                                        noise only for that (keypoint,individual).
                                        Windows may overlap and merge.
 
