@@ -6,22 +6,32 @@ Data augmentation
 Data augmentation can improve model robustness and generalization by introducing variations during training.
 LISBET supports several augmentation techniques that can be combined and applied with configurable probabilities.
 
+.. figure:: ../_static/comparison_augmentations.gif
+   :alt: Comparison of data augmentation effects
+   :align: center
+   :width: 100%
+
+   **Visual comparison of data augmentation effects.** From left to right: Original sequence, RandomPermutation (individuals) showing identity swapping with color changes, RandomPermutation (space) showing x/y coordinate swapping, and RandomBlockPermutation showing identity swapping within a temporal block.
+
 Available augmentation techniques
 ---------------------------------
 
 * **all_perm_id**: Randomly permute individual identities across all frames in a window
     - Use this to make the model invariant to individual labels (e.g., "mouse1" vs "mouse2")
     - Particularly useful for self-supervised tasks where identity labels are arbitrary
+    - See the visualization above (second panel) for an example of identity permutation
 
 * **all_perm_ax**: Randomly permute spatial axes (x, y, z) across all frames in a window
     - Use this to make the model invariant to coordinate system orientation
     - **⚠️ Important**: Only suitable for top-down view datasets (typical laboratory setups)
     - **Not recommended** for front-view, side-view, or 3D datasets where axes have semantic meaning
+    - See the visualization above (third panel) for an example of spatial axis permutation
 
 * **blk_perm_id**: Randomly permute individual identities within a contiguous block of frames
     - Creates temporal identity confusion within part of the window
     - More challenging augmentation than ``all_perm_id``
     - Requires ``frac`` parameter to specify the fraction of frames to permute
+    - See the visualization above (fourth panel) for an example of block permutation
 
 * **gauss_jitter**: Inject sparse Gaussian coordinate noise
     - Per-element Bernoulli(p) over (frame, keypoint, individual) selects positions to jitter
