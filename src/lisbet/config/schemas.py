@@ -62,18 +62,22 @@ class DataAugmentationConfig(BaseModel):
         Permutation-based :
             - all_perm_id: Full-window permutation of individual identities.
             - all_perm_ax: Full-window permutation of spatial axes.
-            - blk_perm_id: Block (contiguous frames) permutation of individual identities.
-            Uses ``frac`` for relative block length.
-            For these, ``p`` is the probability of applying the *entire* transform
-            (implemented via ``RandomApply`` in the pipeline).
+            - blk_perm_id: Block (contiguous frames) permutation of individual
+                identities. Uses ``frac`` for relative block length.
+
+        For these, ``p`` is the probability of applying the *entire* transform
+        (implemented via ``RandomApply`` in the pipeline).
 
         Jitter-based :
-                - gauss_jitter: Per-element Bernoulli(p) mask over (time, keypoints, individuals),
-                    adds N(0, sigma) noise to selected elements (broadcast over space dims).
-                - gauss_window_jitter: Bernoulli(p) over (time, keypoints, individuals) selects
-                    start elements. Each start activates a temporal window of length ``window``
-                    for that (keypoint, individual) only (all space dims). Overlapping windows
-                    merge; noise applied once per affected element-frame.
+            - gauss_jitter: Per-element Bernoulli(p) mask over (time, keypoints,
+                individuals), adds N(0, sigma) noise to selected elements (broadcast
+                over space dims).
+            - gauss_window_jitter: Bernoulli(p) over (time, keypoints, individuals)
+                selects start elements. Each start activates a temporal window of
+                length ``window`` for that (keypoint, individual) only (all space dims).
+                Overlapping windows merge; noise applied once per affected
+                element-frame.
+
         For jitter transforms, ``p`` is *internal* (not wrapped by RandomApply) and
         drives the element/window sampling process.
 
@@ -130,7 +134,9 @@ class DataAugmentationConfig(BaseModel):
         name = info.data.get("name")
         if name == "gauss_window_jitter":
             if v is not None and v <= 0:
-                raise ValueError("window must be a positive integer for gauss_window_jitter")
+                raise ValueError(
+                    "Window must be a positive integer for gauss_window_jitter."
+                )
         else:
             if v is not None:
                 raise ValueError("window parameter only valid for gauss_window_jitter")
@@ -150,9 +156,8 @@ class DataAugmentationConfig(BaseModel):
         if self.name in ("gauss_jitter", "gauss_window_jitter"):
             if self.sigma is None:
                 self.sigma = 0.01  # default sigma
-            if self.name == "gauss_window_jitter":
-                if self.window is None:
-                    self.window = 10  # default window length
+            if self.name == "gauss_window_jitter" and self.window is None:
+                self.window = 10  # default window length
         else:
             # Non-jitter types must not have sigma/window
             if self.sigma is not None:

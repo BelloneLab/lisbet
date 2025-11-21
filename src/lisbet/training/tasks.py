@@ -18,11 +18,11 @@ from torchvision import transforms
 
 from lisbet import datasets, modeling
 from lisbet.transforms_extra import (
+    GaussianJitter,
+    GaussianWindowJitter,
     PoseToTensor,
     RandomBlockPermutation,
     RandomPermutation,
-    GaussianJitter,
-    GaussianWindowJitter,
 )
 
 

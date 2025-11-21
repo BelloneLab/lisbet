@@ -63,8 +63,9 @@ Notes
   interchangeable
 """
 
-import cv2
 import logging
+
+import cv2
 import numpy as np
 import torch
 import xarray as xr
@@ -100,23 +101,27 @@ class GaussianJitter:
         ds = posetracks.copy(deep=True)
         pos_var = ds["position"]
         dims = list(pos_var.dims)
-        # Identify dimension indices
-        try:
-            t_idx = dims.index("time")
-            k_idx = dims.index("keypoints")
-            i_idx = dims.index("individuals")
-        except ValueError as e:
-            raise ValueError("position variable must contain 'time','keypoints','individuals' dimensions") from e
+
+        # Validate dataset dimensions
+        required_dims = {"time", "keypoints", "individuals"}
+        missing_dims = required_dims - set(dims)
+        if missing_dims:
+            raise ValueError(
+                f"Position variable must contain {required_dims} dimensions. "
+                f"Missing: {missing_dims}"
+            )
 
         shape = pos_var.shape
         # Mask shape excludes space dimension(s) for independence semantics.
         mask_shape = [shape[d] for d in range(len(shape))]
-        # Replace space dimension size(s) by 1 for broadcasting (space may be before keypoints as per dataset examples)
+        # Replace space dimension size(s) by 1 for broadcasting (space may be before
+        # keypoints as per dataset examples)
         for s_name in ["space"]:
             if s_name in dims:
                 s_idx = dims.index(s_name)
                 mask_shape[s_idx] = 1
-        # Ensure independence only over time,keypoints,individuals by collapsing non listed dims to 1
+        # Ensure independence only over time,keypoints,individuals by collapsing non
+        # listed dims to 1
         for d_name in dims:
             if d_name not in ("time", "keypoints", "individuals", "space"):
                 mask_shape[dims.index(d_name)] = 1
@@ -160,7 +165,7 @@ class GaussianWindowJitter:
 
     def __init__(self, seed: int, p: float, sigma: float, window: int):
         if window <= 0:
-            raise ValueError("window must be a positive integer")
+            raise ValueError("Window must be a positive integer")
         self.seed = seed
         self.p = float(p)
         self.sigma = float(sigma)
@@ -172,7 +177,7 @@ class GaussianWindowJitter:
         pos_var = ds["position"]
         dims = list(pos_var.dims)
         if "time" not in dims:
-            raise ValueError("position variable must have 'time' dimension")
+            raise ValueError("Position variable must have 'time' dimension.")
         t_idx = dims.index("time")
         shape = pos_var.shape
         T = shape[t_idx]
@@ -183,13 +188,16 @@ class GaussianWindowJitter:
             k_idx = dims.index("keypoints")
             i_idx = dims.index("individuals")
         except ValueError as e:
-            raise ValueError("position variable must contain 'keypoints' and 'individuals' dimensions") from e
+            raise ValueError(
+                "Position variable must contain 'keypoints' and 'individuals' "
+                "dimensions."
+            ) from e
 
         K = shape[k_idx]
-        I = shape[i_idx]
+        I = shape[i_idx]  # noqa: E741
 
         # Sample start mask over (time, keypoints, individuals)
-        start_mask = (torch.rand(T, K, I, generator=self.g) < self.p)
+        start_mask = torch.rand(T, K, I, generator=self.g) < self.p
 
         # Build window mask of same shape (T, K, I)
         window_mask = torch.zeros(T, K, I, dtype=torch.bool)
@@ -204,7 +212,8 @@ class GaussianWindowJitter:
             actual_cover = int(window_mask.sum().item())
             if actual_cover < expected_cover:
                 logging.debug(
-                    "gauss_window_jitter: overlapping element windows detected (expected raw=%d, merged=%d)",
+                    "Overlapping element windows detected in gauss_window_jitter "
+                    "(expected raw=%d, merged=%d).",
                     expected_cover,
                     actual_cover,
                 )

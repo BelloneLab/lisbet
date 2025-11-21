@@ -87,7 +87,9 @@ def test_data_augmentation_config_valid():
     assert cfg5.window == 10
 
     # gauss_window_jitter custom parameters
-    cfg6 = DataAugmentationConfig(name="gauss_window_jitter", p=0.1, sigma=0.02, window=25)
+    cfg6 = DataAugmentationConfig(
+        name="gauss_window_jitter", p=0.1, sigma=0.02, window=25
+    )
     assert cfg6.sigma == 0.02
     assert cfg6.window == 25
 

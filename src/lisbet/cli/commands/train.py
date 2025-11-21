@@ -123,17 +123,24 @@ def configure_train_model_parser(parser: argparse.ArgumentParser) -> None:
                                across all frames in a window.
                 - blk_perm_id: Randomly permute identities of individuals, applied
                                to a contiguous block of frames within a window.
-Gaussian jitter augmentations (internal probability semantics):
-                - gauss_jitter: Randomly add N(0,sigma) noise, applied to per-element Bernoulli(p) over (frame,keypoint,individual).
-                - gauss_window_jitter: Randomly add N(0,sigma) noise, applied to : Bernoulli(p) over (frame,keypoint,individual) selects start elements; each start activates a window of length 'window' adding N(0,sigma) noise only for that (keypoint,individual). Windows may overlap and merge.
+
+                - gauss_jitter: Randomly add N(0,sigma) noise, applied to per-element
+                                Bernoulli(p) over (frame,keypoint,individual).
+                - gauss_window_jitter: Randomly add N(0,sigma) noise, applied to
+                                       Bernoulli(p) over (frame,keypoint,individual)
+                                       selects start elements; each start activates a
+                                       window of length 'window' adding N(0,sigma)
+                                       noise only for that (keypoint,individual).
+                                       Windows may overlap and merge.
 
             Parameters (optional):
                 - p=<float>: Probability of applying the transformation (default: 1.0)
                 - frac=<float>: For blk_perm_id only, fraction of frames to permute
                                 (default: 0.5)
-                - sigma=<float>: Jitter noise std (default 0.01) for gauss_jitter / gauss_window_jitter.
-                - window=<int>: Window length (frames) for gauss_window_jitter (default 10).
-
+                - sigma=<float>: Jitter noise std for gauss_jitter and
+                                 gauss_window_jitter (default 0.01).
+                - window=<int>: Window length (frames) for gauss_window_jitter
+                                (default 10).
 
             Examples:
                 --data_augmentation="all_perm_id"

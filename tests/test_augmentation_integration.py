@@ -242,7 +242,9 @@ def test_train_with_multiple_augmentations(tmp_path):
         DataAugmentationConfig(name="all_perm_ax", p=0.7),
         DataAugmentationConfig(name="blk_perm_id", p=0.3, frac=0.2),
         DataAugmentationConfig(name="gauss_jitter", p=0.4, sigma=0.01),
-        DataAugmentationConfig(name="gauss_window_jitter", p=0.1, sigma=0.02, window=15),
+        DataAugmentationConfig(
+            name="gauss_window_jitter", p=0.1, sigma=0.02, window=15
+        ),
     ]
 
     training_config = TrainingConfig(

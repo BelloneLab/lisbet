@@ -4,10 +4,10 @@ import torch
 import xarray as xr
 
 from lisbet.transforms_extra import (
-    RandomBlockPermutation,
-    RandomPermutation,
     GaussianJitter,
     GaussianWindowJitter,
+    RandomBlockPermutation,
+    RandomPermutation,
 )
 
 
@@ -429,8 +429,11 @@ def test_randompermutation_large_permutation(monkeypatch):
 
 
 def test_gaussian_jitter_basic_mask_properties():
-    """GaussianJitter should approximately modify p proportion of elements (excluding space)."""
-    T, S, K, I = 50, 2, 4, 3
+    """
+    GaussianJitter should approximately modify p proportion of elements (excluding
+    space).
+    """
+    T, S, K, I = 50, 2, 4, 3  # noqa: E741
     arr = np.random.rand(T, S, K, I).astype(np.float32)
     ds = xr.Dataset(
         {"position": (("time", "space", "keypoints", "individuals"), arr)},
@@ -458,7 +461,7 @@ def test_gaussian_jitter_basic_mask_properties():
 
 
 def test_gaussian_jitter_determinism():
-    T, S, K, I = 20, 2, 3, 2
+    T, S, K, I = 20, 2, 3, 2  # noqa: E741
     arr = np.random.rand(T, S, K, I).astype(np.float32)
     ds = xr.Dataset(
         {"position": (("time", "space", "keypoints", "individuals"), arr)},
@@ -477,7 +480,7 @@ def test_gaussian_jitter_determinism():
 
 
 def test_gaussian_window_jitter_basic():
-    T, S, K, I = 60, 2, 4, 3
+    T, S, K, I = 60, 2, 4, 3  # noqa: E741
     arr = np.random.rand(T, S, K, I).astype(np.float32)
     ds = xr.Dataset(
         {"position": (("time", "space", "keypoints", "individuals"), arr)},
@@ -498,13 +501,14 @@ def test_gaussian_window_jitter_basic():
     proportion_changed_elements = changed.mean()
     # With small p and window, expect low proportion
     assert proportion_changed_elements < 0.5
-    # If any changes, ensure locality: for each changed (t,k,i), earlier frames outside window start not all changed
-    # (Heuristic: there should exist at least one untouched element)
+    # If any changes, ensure locality: for each changed (t,k,i), earlier frames outside
+    # window start not all changed (Heuristic: there should exist at least one
+    # untouched element)
     assert np.any(~changed)
 
 
 def test_gaussian_window_jitter_no_change_when_p_zero():
-    T, S, K, I = 30, 2, 2, 2
+    T, S, K, I = 30, 2, 2, 2  # noqa: E741
     arr = np.random.rand(T, S, K, I).astype(np.float32)
     ds = xr.Dataset(
         {"position": (("time", "space", "keypoints", "individuals"), arr)},
