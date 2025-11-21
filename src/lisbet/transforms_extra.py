@@ -303,7 +303,7 @@ class RandomBlockPermutation:
     within a random contiguous block of frames in an xarray.Dataset.
 
     This augmentation is useful to create identity swaps within a portion of the time
-    series, mimiking the effects of a tracking error, while maintaining consistent
+    series, mimicking the effects of a tracking error, while maintaining consistent
     coordinate labels throughout.
 
     Parameters
