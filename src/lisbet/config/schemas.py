@@ -135,7 +135,7 @@ class DataAugmentationConfig(BaseModel):
         if name == "gauss_window_jitter":
             if v is not None and v <= 0:
                 raise ValueError(
-                    "Window must be a positive integer for gauss_window_jitter."
+                    "window must be a positive integer for gauss_window_jitter."
                 )
         else:
             if v is not None:
