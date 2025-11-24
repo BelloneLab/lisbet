@@ -5,7 +5,7 @@ import xarray as xr
 
 from lisbet.transforms_extra import (
     GaussianJitter,
-    GaussianWindowJitter,
+    GaussianBlockJitter,
     RandomBlockPermutation,
     RandomPermutation,
 )
@@ -481,7 +481,7 @@ def test_gaussian_jitter_determinism():
     xr.testing.assert_equal(out1, out2)
 
 
-def test_gaussian_window_jitter_basic():
+def test_gaussian_block_jitter_basic():
     T, S, K, I = 60, 2, 4, 3  # noqa: E741
     rng = np.random.default_rng(1789)
     arr = rng.random((T, S, K, I)).astype(np.float32)
@@ -495,9 +495,9 @@ def test_gaussian_window_jitter_basic():
         },
     )
     p = 0.03
-    window = 8
-    gwj = GaussianWindowJitter(seed=7, p=p, sigma=0.02, window=window)
-    out = gwj(ds)
+    frac = 0.1
+    gbj = GaussianBlockJitter(seed=7, p=p, sigma=0.02, frac=frac)
+    out = gbj(ds)
     diff = out["position"].values - ds["position"].values
     # Collapse space dimension for change detection
     changed = np.any(np.abs(diff) > 1e-9, axis=1)  # shape (T,K,I)
@@ -510,7 +510,7 @@ def test_gaussian_window_jitter_basic():
     assert np.any(~changed)
 
 
-def test_gaussian_window_jitter_no_change_when_p_zero():
+def test_gaussian_block_jitter_no_change_when_p_zero():
     T, S, K, I = 30, 2, 2, 2  # noqa: E741
     rng = np.random.default_rng(1789)
     arr = rng.random((T, S, K, I)).astype(np.float32)
@@ -523,6 +523,7 @@ def test_gaussian_window_jitter_no_change_when_p_zero():
             "individuals": [f"ind{i}" for i in range(I)],
         },
     )
-    gwj = GaussianWindowJitter(seed=1, p=0.0, sigma=0.02, window=5)
-    out = gwj(ds)
+    frac = 0.1
+    gbj = GaussianBlockJitter(seed=1, p=0.0, sigma=0.02, frac=frac)
+    out = gbj(ds)
     xr.testing.assert_equal(out, ds)

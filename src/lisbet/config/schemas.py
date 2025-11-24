@@ -72,11 +72,11 @@ class DataAugmentationConfig(BaseModel):
             - gauss_jitter: Per-element Bernoulli(p) mask over (time, keypoints,
                 individuals), adds N(0, sigma) noise to selected elements (broadcast
                 over space dims).
-            - gauss_window_jitter: Bernoulli(p) over (time, keypoints, individuals)
-                selects start elements. Each start activates a temporal window of
-                length ``window`` for that (keypoint, individual) only (all space dims).
-                Overlapping windows merge; noise applied once per affected
-                element-frame.
+            - gauss_block_jitter: Bernoulli(p) over (time, keypoints, individuals)
+                selects start elements. Each start activates a temporal block of
+                length ``int(frac * window)`` (clipped) for that (keypoint, individual)
+                only (all space dims). Overlapping blocks merge; noise applied once
+                per affected element-frame.
 
         For jitter transforms, ``p`` is *internal* (not wrapped by RandomApply) and
         drives the element/window sampling process.
@@ -86,7 +86,7 @@ class DataAugmentationConfig(BaseModel):
         p: Probability of applying this transformation (0.0 to 1.0)
         frac: Fraction of frames to permute (only for blk_perm_id, 0.0 to 1.0 exclusive)
         sigma: Standard deviation of Gaussian noise (jitter types only).
-        window: Window length (frames) for gauss_window_jitter only.
+        frac: Fraction-based block length for gauss_block_jitter (also required).
     """
 
     name: Literal[
@@ -94,12 +94,12 @@ class DataAugmentationConfig(BaseModel):
         "all_perm_ax",
         "blk_perm_id",
         "gauss_jitter",
-        "gauss_window_jitter",
+        "gauss_block_jitter",
     ]
     p: float = 1.0
     frac: float | None = None
     sigma: float | None = None
-    window: int | None = None
+    # window removed; block length derived from frac
 
     @field_validator("p")
     @classmethod
@@ -118,7 +118,7 @@ class DataAugmentationConfig(BaseModel):
     @field_validator("sigma")
     @classmethod
     def validate_sigma(cls, v, info):
-        if info.data.get("name") in ("gauss_jitter", "gauss_window_jitter"):
+        if info.data.get("name") in ("gauss_jitter", "gauss_block_jitter"):
             # Required (will default later if None), must be positive
             if v is not None and v <= 0.0:
                 raise ValueError("sigma must be > 0.0 for jitter augmentations")
@@ -128,42 +128,26 @@ class DataAugmentationConfig(BaseModel):
                 raise ValueError("sigma parameter only valid for jitter augmentations")
         return v
 
-    @field_validator("window")
-    @classmethod
-    def validate_window(cls, v, info):
-        name = info.data.get("name")
-        if name == "gauss_window_jitter":
-            if v is not None and v <= 0:
-                raise ValueError(
-                    "window must be a positive integer for gauss_window_jitter."
-                )
-        else:
-            if v is not None:
-                raise ValueError("window parameter only valid for gauss_window_jitter")
-        return v
+    # window parameter removed; frac used for gauss_block_jitter
 
     def model_post_init(self, __context):
         """Validate that frac is only set for blk_perm_id."""
-        if self.name == "blk_perm_id" and self.frac is None:
-            # Set default fraction for blk_perm_id
-            self.frac = 0.5
-        elif self.name != "blk_perm_id" and self.frac is not None:
+        if self.name in ("blk_perm_id", "gauss_block_jitter") and self.frac is None:
+            # Set defaults
+            self.frac = 0.5 if self.name == "blk_perm_id" else 0.05
+        elif self.name not in ("blk_perm_id", "gauss_block_jitter") and self.frac is not None:
             raise ValueError(
-                f"frac parameter is only valid for blk_perm_id, not {self.name}"
+                f"frac parameter is only valid for blk_perm_id or gauss_block_jitter, not {self.name}"
             )
 
         # Jitter defaults & requirements
-        if self.name in ("gauss_jitter", "gauss_window_jitter"):
+        if self.name in ("gauss_jitter", "gauss_block_jitter"):
             if self.sigma is None:
                 self.sigma = 0.01  # default sigma
-            if self.name == "gauss_window_jitter" and self.window is None:
-                self.window = 10  # default window length
         else:
             # Non-jitter types must not have sigma/window
             if self.sigma is not None:
                 raise ValueError("sigma parameter only valid for jitter augmentations")
-            if self.window is not None:
-                raise ValueError("window parameter only valid for gauss_window_jitter")
 
 
 class ModelConfig(BaseModel):

@@ -140,36 +140,38 @@ class GaussianJitter:
         return ds
 
 
-class GaussianWindowJitter:
-    """Apply Gaussian jitter to element-specific temporal windows.
+class GaussianBlockJitter:
+    """Apply Gaussian jitter within element-specific temporal blocks.
 
     Bernoulli(p) is sampled independently over (time, keypoints, individuals) to
-    select *start* elements. For each positive start at (t0, k, i), a window of length
-    ``window`` frames [t0, t0+window) (clipped at sequence end) receives Gaussian noise
-    N(0, sigma^2) only for that (keypoint, individual) pair across all space dims.
-    Overlapping windows (either same or different start elements covering same frame
-    and (k,i)) merge naturally; noise is applied once per affected element-frame.
-    A debug log reports overlap when merged coverage < raw expected coverage.
+    select *start* elements. For each positive start at (t0, k, i), a block of length
+    ``block_len = int(frac * window)`` frames [t0, t0+block_len) (clipped at sequence end)
+    receives Gaussian noise N(0, sigma^2) only for that (keypoint, individual) pair
+    across all space dims. Overlapping blocks (either same or different start
+    elements covering the same frame and (k,i)) merge naturally; noise is applied
+    once per affected element-frame. A debug log reports overlap when merged
+    coverage < raw expected coverage.
 
     Parameters
     ----------
     seed : int
         RNG seed.
     p : float
-        Bernoulli probability for each frame to be a window start.
+        Bernoulli probability for each frame to be a block start.
     sigma : float
         Noise standard deviation.
-    window : int
-        Window length in frames (must be > 0).
+    frac : float
+        Fraction of the total temporal window length used for each block
+        (0 < frac < 1). Effective block length is ``max(1, int(frac * window))``.
     """
 
-    def __init__(self, seed: int, p: float, sigma: float, window: int):
-        if window <= 0:
-            raise ValueError("Window must be a positive integer")
+    def __init__(self, seed: int, p: float, sigma: float, frac: float):
+        if not 0 < frac < 1:
+            raise ValueError("frac must be between 0 and 1 (exclusive)")
         self.seed = seed
         self.p = float(p)
         self.sigma = float(sigma)
-        self.window = int(window)
+        self.frac = float(frac)
         self.g = torch.Generator().manual_seed(seed)
 
     def __call__(self, posetracks: xr.Dataset) -> xr.Dataset:
@@ -183,7 +185,6 @@ class GaussianWindowJitter:
         T = shape[t_idx]
         if T == 0:
             return ds
-        # Identify keypoints & individuals dims
         try:
             k_idx = dims.index("keypoints")
             i_idx = dims.index("individuals")
@@ -196,42 +197,38 @@ class GaussianWindowJitter:
         K = shape[k_idx]
         I = shape[i_idx]  # noqa: E741
 
-        # Sample start mask over (time, keypoints, individuals)
+        block_len = max(1, int(self.frac * T))
         start_mask = torch.rand(T, K, I, generator=self.g) < self.p
-
-        # Build window mask of same shape (T, K, I)
-        window_mask = torch.zeros(T, K, I, dtype=torch.bool)
+        block_mask = torch.zeros(T, K, I, dtype=torch.bool)
         starts = torch.nonzero(start_mask, as_tuple=False)
         for idx_row in starts:
             t0, k, ind = idx_row.tolist()
-            end = min(t0 + self.window, T)
-            window_mask[t0:end, k, ind] = True
+            end = min(t0 + block_len, T)
+            block_mask[t0:end, k, ind] = True
 
         if starts.numel() > 0:
-            expected_cover = starts.size(0) * self.window
-            actual_cover = int(window_mask.sum().item())
+            expected_cover = starts.size(0) * block_len
+            actual_cover = int(block_mask.sum().item())
             if actual_cover < expected_cover:
                 logging.debug(
-                    "Overlapping element windows detected in gauss_window_jitter "
+                    "Overlapping element blocks detected in gauss_block_jitter "
                     "(expected raw=%d, merged=%d).",
                     expected_cover,
                     actual_cover,
                 )
 
-        if not window_mask.any():
+        if not block_mask.any():
             return ds
 
-        # Expand window_mask to full position shape via broadcasting over space dim(s)
-        # Build broadcast shape aligned with pos_var dims
         broadcast_shape = [1] * len(shape)
         broadcast_shape[t_idx] = T
         broadcast_shape[k_idx] = K
         broadcast_shape[i_idx] = I
-        window_mask_b = window_mask.view(broadcast_shape)
+        block_mask_b = block_mask.view(broadcast_shape)
 
         noise = torch.randn(shape, generator=self.g) * self.sigma
         pos = torch.from_numpy(pos_var.values)
-        pos = pos + noise * window_mask_b
+        pos = pos + noise * block_mask_b
         pos.clamp_(0.0, 1.0)
         pos_var.values[:] = pos.numpy()
         return ds

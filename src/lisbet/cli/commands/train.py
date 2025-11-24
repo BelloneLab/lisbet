@@ -126,20 +126,18 @@ def configure_train_model_parser(parser: argparse.ArgumentParser) -> None:
 
                 - gauss_jitter: Randomly add N(0,sigma) noise, applied using per-element
                                 Bernoulli(p) over (frame,keypoint,individual).
-                - gauss_window_jitter: Randomly add N(0,sigma) noise.
+                - gauss_block_jitter: Randomly add N(0,sigma) noise.
                                        Bernoulli(p) over (frame,keypoint,individual) selects start elements.
-                                       Each start activates a window of length 'window' adding N(0,sigma)
+                                       Each start activates a block of length int(frac*window) adding N(0,sigma)
                                        noise only for that (keypoint,individual).
-                                       Windows may overlap and merge.
+                                       Blocks may overlap and merge.
 
             Parameters (optional):
                 - p=<float>: Probability of applying the transformation (default: 1.0)
-                - frac=<float>: For blk_perm_id only, fraction of frames to permute
-                                (default: 0.5)
+                - frac=<float>: For blk_perm_id (block size) or gauss_block_jitter
+                                (block jitter length) (defaults: 0.5 / 0.05)
                 - sigma=<float>: Jitter noise std for gauss_jitter and
-                                 gauss_window_jitter (default 0.01).
-                - window=<int>: Window length (frames) for gauss_window_jitter
-                                (default 10).
+                                 gauss_block_jitter (default 0.01).
 
             Examples:
                 --data_augmentation="all_perm_id"
@@ -147,8 +145,8 @@ def configure_train_model_parser(parser: argparse.ArgumentParser) -> None:
                 --data_augmentation="all_perm_id:p=0.5,blk_perm_id:p=0.3:frac=0.2"
                 --data_augmentation="all_perm_ax:p=0.7,blk_perm_id:frac=0.3"
                 --data_augmentation="gauss_jitter:p=0.02:sigma=0.01"
-                --data_augmentation="gauss_window_jitter:p=0.05:sigma=0.02:window=25"
-                --data_augmentation="all_perm_id:p=0.5,gauss_jitter:p=0.02:sigma=0.01,gauss_window_jitter:p=0.05:sigma=0.02:window=25"
+                --data_augmentation="gauss_block_jitter:p=0.05:sigma=0.02:frac=0.1"
+                --data_augmentation="all_perm_id:p=0.5,gauss_jitter:p=0.02:sigma=0.01,gauss_block_jitter:p=0.05:sigma=0.02:frac=0.1"
 
             """
         ),

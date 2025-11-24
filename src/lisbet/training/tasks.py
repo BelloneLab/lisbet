@@ -19,7 +19,7 @@ from torchvision import transforms
 from lisbet import datasets, modeling
 from lisbet.transforms_extra import (
     GaussianJitter,
-    GaussianWindowJitter,
+    GaussianBlockJitter,
     PoseToTensor,
     RandomBlockPermutation,
     RandomPermutation,
@@ -88,12 +88,12 @@ def _build_augmentation_transforms(data_augmentation, seed):
                     p=aug_config.p,
                     sigma=aug_config.sigma,
                 )
-            elif aug_config.name == "gauss_window_jitter":
-                transform = GaussianWindowJitter(
+            elif aug_config.name == "gauss_block_jitter":
+                transform = GaussianBlockJitter(
                     seed=aug_seed,
                     p=aug_config.p,
                     sigma=aug_config.sigma,
-                    window=aug_config.window,
+                    frac=aug_config.frac,
                 )
             else:
                 raise ValueError(f"Unknown augmentation type: {aug_config.name}")

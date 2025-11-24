@@ -79,19 +79,18 @@ def test_data_augmentation_config_valid():
     cfg4 = DataAugmentationConfig(name="gauss_jitter", p=0.02)
     assert cfg4.name == "gauss_jitter"
     assert cfg4.sigma == 0.01  # default
-    assert cfg4.window is None
 
-    # gauss_window_jitter with defaults (sigma & window auto-set)
-    cfg5 = DataAugmentationConfig(name="gauss_window_jitter", p=0.05)
+    # gauss_block_jitter with defaults (sigma & frac auto-set)
+    cfg5 = DataAugmentationConfig(name="gauss_block_jitter", p=0.05)
     assert cfg5.sigma == 0.01
-    assert cfg5.window == 10
+    assert cfg5.frac == 0.05
 
-    # gauss_window_jitter custom parameters
+    # gauss_block_jitter custom parameters
     cfg6 = DataAugmentationConfig(
-        name="gauss_window_jitter", p=0.1, sigma=0.02, window=25
+        name="gauss_block_jitter", p=0.1, sigma=0.02, frac=0.2
     )
     assert cfg6.sigma == 0.02
-    assert cfg6.window == 25
+    assert cfg6.frac == 0.2
 
 
 def test_data_augmentation_config_blk_perm_id_default_fraction():
@@ -128,22 +127,20 @@ def test_data_augmentation_config_invalid_sigma_usage():
         DataAugmentationConfig(name="gauss_jitter", sigma=0.0)
 
 
-def test_data_augmentation_config_invalid_window_usage():
-    with pytest.raises(ValueError, match="window parameter only valid"):
-        DataAugmentationConfig(name="gauss_jitter", window=5)
-    with pytest.raises(ValueError, match="window must be a positive integer"):
-        DataAugmentationConfig(name="gauss_window_jitter", window=0)
+def test_data_augmentation_config_invalid_frac_usage():
+    with pytest.raises(ValueError, match="frac parameter is only valid"):
+        DataAugmentationConfig(name="gauss_jitter", frac=0.2)
 
 
-def test_data_augmentation_config_frac_only_for_blk_perm_id():
-    """Test that frac parameter is only valid for blk_perm_id."""
+def test_data_augmentation_config_frac_only_for_valid_names():
+    """Test that frac parameter is only valid for blk_perm_id or gauss_block_jitter."""
     with pytest.raises(
-        ValueError, match="frac parameter is only valid for blk_perm_id"
+        ValueError, match="frac parameter is only valid for blk_perm_id or gauss_block_jitter"
     ):
         DataAugmentationConfig(name="all_perm_id", frac=0.5)
 
     with pytest.raises(
-        ValueError, match="frac parameter is only valid for blk_perm_id"
+        ValueError, match="frac parameter is only valid for blk_perm_id or gauss_block_jitter"
     ):
         DataAugmentationConfig(name="all_perm_ax", frac=0.5)
 
@@ -181,9 +178,9 @@ def test_parse_data_augmentation_with_spaces():
 
 def test_parse_data_augmentation_with_jitter_params():
     result = parse_data_augmentation(
-        "gauss_jitter:p=0.02:sigma=0.01,gauss_window_jitter:p=0.05:sigma=0.02:window=15"
+        "gauss_jitter:p=0.02:sigma=0.01,gauss_block_jitter:p=0.05:sigma=0.02:frac=0.1"
     )
     assert result[0]["name"] == "gauss_jitter"
     assert result[0]["p"] == 0.02
     assert result[0]["sigma"] == 0.01
-    assert result[1]["window"] == 15
+    assert result[1]["frac"] == 0.1
