@@ -203,5 +203,3 @@ def app() -> None:
             function_name=cmd_config["function"],
             args=vars(args),
         )
-
-torch.set_float32_matmul_precision('medium')
