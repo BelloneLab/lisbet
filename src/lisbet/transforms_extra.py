@@ -97,9 +97,10 @@ class GaussianJitter:
         self.sigma = float(sigma)
         self.g = torch.Generator().manual_seed(seed)
 
+
     def __call__(self, posetracks: xr.Dataset) -> xr.Dataset:
-        ds = posetracks.copy(deep=True)
-        pos_var = ds["position"]
+        pos_var = posetracks["position"]
+
         dims = list(pos_var.dims)
 
         # Validate dataset dimensions
@@ -136,8 +137,10 @@ class GaussianJitter:
         pos = pos + noise * mask
         # Clamp to [0,1]
         pos.clamp_(0.0, 1.0)
-        pos_var.values[:] = pos.numpy()
-        return ds
+        # print('clamped pos:', pos)
+        pos_var = pos.numpy()
+        posetracks['position'].values[:] = pos_var
+        return posetracks
 
 
 class GaussianBlockJitter:
@@ -175,8 +178,7 @@ class GaussianBlockJitter:
         self.g = torch.Generator().manual_seed(seed)
 
     def __call__(self, posetracks: xr.Dataset) -> xr.Dataset:
-        ds = posetracks.copy(deep=True)
-        pos_var = ds["position"]
+        pos_var = posetracks["position"]
         dims = list(pos_var.dims)
         if "time" not in dims:
             raise ValueError("Position variable must have 'time' dimension.")
@@ -184,7 +186,7 @@ class GaussianBlockJitter:
         shape = pos_var.shape
         T = shape[t_idx]
         if T == 0:
-            return ds
+            return posetracks
         try:
             k_idx = dims.index("keypoints")
             i_idx = dims.index("individuals")
@@ -218,7 +220,7 @@ class GaussianBlockJitter:
                 )
 
         if not block_mask.any():
-            return ds
+            return posetracks
 
         broadcast_shape = [1] * len(shape)
         broadcast_shape[t_idx] = T
@@ -231,7 +233,7 @@ class GaussianBlockJitter:
         pos = pos + noise * block_mask_b
         pos.clamp_(0.0, 1.0)
         pos_var.values[:] = pos.numpy()
-        return ds
+        return posetracks
 
 
 class RandomPermutation:
