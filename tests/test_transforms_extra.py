@@ -434,7 +434,8 @@ def test_gaussian_jitter_basic_mask_properties():
     space).
     """
     T, S, K, I = 50, 2, 4, 3  # noqa: E741
-    arr = np.random.rand(T, S, K, I).astype(np.float32)
+    rng = np.random.default_rng(1789)
+    arr = rng.random((T, S, K, I), dtype=np.float32)
     ds = xr.Dataset(
         {"position": (("time", "space", "keypoints", "individuals"), arr)},
         coords={
@@ -462,7 +463,8 @@ def test_gaussian_jitter_basic_mask_properties():
 
 def test_gaussian_jitter_determinism():
     T, S, K, I = 20, 2, 3, 2  # noqa: E741
-    arr = np.random.rand(T, S, K, I).astype(np.float32)
+    rng = np.random.default_rng(1789)
+    arr = rng.random((T, S, K, I)).astype(np.float32)
     ds = xr.Dataset(
         {"position": (("time", "space", "keypoints", "individuals"), arr)},
         coords={
@@ -481,7 +483,8 @@ def test_gaussian_jitter_determinism():
 
 def test_gaussian_window_jitter_basic():
     T, S, K, I = 60, 2, 4, 3  # noqa: E741
-    arr = np.random.rand(T, S, K, I).astype(np.float32)
+    rng = np.random.default_rng(1789)
+    arr = rng.random((T, S, K, I)).astype(np.float32)
     ds = xr.Dataset(
         {"position": (("time", "space", "keypoints", "individuals"), arr)},
         coords={
@@ -509,7 +512,8 @@ def test_gaussian_window_jitter_basic():
 
 def test_gaussian_window_jitter_no_change_when_p_zero():
     T, S, K, I = 30, 2, 2, 2  # noqa: E741
-    arr = np.random.rand(T, S, K, I).astype(np.float32)
+    rng = np.random.default_rng(1789)
+    arr = rng.random((T, S, K, I)).astype(np.float32)
     ds = xr.Dataset(
         {"position": (("time", "space", "keypoints", "individuals"), arr)},
         coords={
