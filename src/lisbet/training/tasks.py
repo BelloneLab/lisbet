@@ -20,6 +20,8 @@ from lisbet import datasets, modeling
 from lisbet.transforms_extra import (
     GaussianJitter,
     GaussianBlockJitter,
+    KeypointAblation,
+    KeypointBlockAblation,
     PoseToTensor,
     RandomBlockPermutation,
     RandomPermutation,
@@ -93,6 +95,17 @@ def _build_augmentation_transforms(data_augmentation, seed):
                     seed=aug_seed,
                     p=aug_config.p,
                     sigma=aug_config.sigma,
+                    frac=aug_config.frac,
+                )
+            elif aug_config.name == "kp_ablation":
+                transform = KeypointAblation(
+                    seed=aug_seed,
+                    p=aug_config.p,
+                )
+            elif aug_config.name == "kp_block_ablation":
+                transform = KeypointBlockAblation(
+                    seed=aug_seed,
+                    p=aug_config.p,
                     frac=aug_config.frac,
                 )
             else:

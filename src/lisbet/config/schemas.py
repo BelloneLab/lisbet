@@ -81,6 +81,19 @@ class DataAugmentationConfig(BaseModel):
         For jitter transforms, ``p`` is *internal* (not wrapped by RandomApply) and
         drives the element/window sampling process.
 
+        Ablation-based :
+            - kp_ablation: Per-element Bernoulli(p) mask over (time, keypoints,
+                individuals), sets selected elements to NaN (all space dims).
+                Simulates missing or occluded keypoints.
+            - kp_block_ablation: Bernoulli(p) over (time, keypoints, individuals)
+                selects start elements. Each start activates a temporal block of
+                length ``int(frac * window)`` (clipped) for that (keypoint, individual)
+                only (all space dims). Sets coordinates to NaN in the block.
+                Simulates sustained occlusion.
+
+        For ablation transforms, ``p`` is *internal* (not wrapped by RandomApply) and
+        drives the element/window sampling process.
+
     Attributes:
         name: Name of the augmentation technique (all_perm_id, all_perm_ax, blk_perm_id)
         p: Probability of applying this transformation (0.0 to 1.0)
@@ -95,6 +108,8 @@ class DataAugmentationConfig(BaseModel):
         "blk_perm_id",
         "gauss_jitter",
         "gauss_block_jitter",
+        "kp_ablation",
+        "kp_block_ablation",
     ]
     p: float = 1.0
     frac: float | None = None
@@ -131,13 +146,19 @@ class DataAugmentationConfig(BaseModel):
     # window parameter removed; frac used for gauss_block_jitter
 
     def model_post_init(self, __context):
-        """Validate that frac is only set for blk_perm_id."""
-        if self.name in ("blk_perm_id", "gauss_block_jitter") and self.frac is None:
+        """Validate that frac is only set for block-based augmentations."""
+        block_types = ("blk_perm_id", "gauss_block_jitter", "kp_block_ablation")
+        if self.name in block_types and self.frac is None:
             # Set defaults
-            self.frac = 0.5 if self.name == "blk_perm_id" else 0.05
-        elif self.name not in ("blk_perm_id", "gauss_block_jitter") and self.frac is not None:
+            if self.name == "blk_perm_id":
+                self.frac = 0.5
+            elif self.name == "gauss_block_jitter":
+                self.frac = 0.05
+            else:  # kp_block_ablation
+                self.frac = 0.1
+        elif self.name not in block_types and self.frac is not None:
             raise ValueError(
-                f"frac parameter is only valid for blk_perm_id or gauss_block_jitter, not {self.name}"
+                f"frac parameter is only valid for {', '.join(block_types)}, not {self.name}"
             )
 
         # Jitter defaults & requirements
@@ -145,7 +166,7 @@ class DataAugmentationConfig(BaseModel):
             if self.sigma is None:
                 self.sigma = 0.01  # default sigma
         else:
-            # Non-jitter types must not have sigma/window
+            # Non-jitter types must not have sigma
             if self.sigma is not None:
                 raise ValueError("sigma parameter only valid for jitter augmentations")
 
