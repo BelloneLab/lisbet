@@ -133,14 +133,14 @@ def test_data_augmentation_config_invalid_frac_usage():
 
 
 def test_data_augmentation_config_frac_only_for_valid_names():
-    """Test that frac parameter is only valid for blk_perm_id or gauss_block_jitter."""
+    """Test that frac parameter is only valid for block-based augmentations."""
     with pytest.raises(
-        ValueError, match="frac parameter is only valid for blk_perm_id or gauss_block_jitter"
+        ValueError, match="frac parameter is only valid for"
     ):
         DataAugmentationConfig(name="all_perm_id", frac=0.5)
 
     with pytest.raises(
-        ValueError, match="frac parameter is only valid for blk_perm_id or gauss_block_jitter"
+        ValueError, match="frac parameter is only valid for"
     ):
         DataAugmentationConfig(name="all_perm_ax", frac=0.5)
 
