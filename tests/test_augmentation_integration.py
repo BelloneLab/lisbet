@@ -243,10 +243,10 @@ def test_train_with_multiple_augmentations(tmp_path):
         DataAugmentationConfig(name="blk_perm_id", p=0.3, frac=0.2),
         DataAugmentationConfig(name="gauss_jitter", p=0.4, sigma=0.01),
         DataAugmentationConfig(
-            name="gauss_block_jitter", p=0.1, sigma=0.02, frac=0.5
+            name="blk_gauss_jitter", p=0.1, sigma=0.02, frac=0.5
         ),
         DataAugmentationConfig(name="kp_ablation", p=0.05),
-        DataAugmentationConfig(name="kp_block_ablation", p=0.03, frac=0.15),
+        DataAugmentationConfig(name="blk_kp_ablation", p=0.03, frac=0.15),
     ]
 
     training_config = TrainingConfig(
@@ -407,7 +407,7 @@ def test_train_with_keypoint_ablation(tmp_path):
 
 @pytest.mark.integration
 def test_train_with_keypoint_block_ablation(tmp_path):
-    """Test training with kp_block_ablation augmentation."""
+    """Test training with blk_kp_ablation augmentation."""
     # Download a small sample dataset
     fetch_dataset("SampleData", download_path=tmp_path)
     data_path = tmp_path / "datasets" / "sample_keypoints"
@@ -439,7 +439,7 @@ def test_train_with_keypoint_block_ablation(tmp_path):
     )
 
     # Use keypoint block ablation with fraction
-    aug_configs = [DataAugmentationConfig(name="kp_block_ablation", p=0.05, frac=0.25)]
+    aug_configs = [DataAugmentationConfig(name="blk_kp_ablation", p=0.05, frac=0.25)]
 
     training_config = TrainingConfig(
         epochs=1,

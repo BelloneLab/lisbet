@@ -4,10 +4,10 @@ import torch
 import xarray as xr
 
 from lisbet.transforms_extra import (
+    BlockGaussianJitter,
+    BlockKeypointAblation,
     GaussianJitter,
-    GaussianBlockJitter,
     KeypointAblation,
-    KeypointBlockAblation,
     RandomBlockPermutation,
     RandomPermutation,
 )
@@ -500,9 +500,9 @@ def test_gaussian_block_jitter_basic():
     )
     p = 0.03
     frac = 0.1
-    gbj = GaussianBlockJitter(seed=7, p=p, sigma=0.02, frac=frac)
-    out = gbj(ds.copy(deep=True))
-    diff = out["position"].values - ds["position"].values
+    gbj = BlockGaussianJitter(seed=7, p=p, sigma=0.02, frac=frac)
+    ds_out = gbj(ds.copy(deep=True))
+    diff = ds_out["position"].values - ds["position"].values
     # Collapse space dimension for change detection
     changed = np.any(np.abs(diff) > 1e-9, axis=1)  # shape (T,K,I)
     proportion_changed_elements = changed.mean()
@@ -528,9 +528,9 @@ def test_gaussian_block_jitter_no_change_when_p_zero():
         },
     )
     frac = 0.1
-    gbj = GaussianBlockJitter(seed=1, p=0.0, sigma=0.02, frac=frac)
-    out = gbj(ds.copy(deep=True))
-    xr.testing.assert_equal(out, ds)
+    gbj = BlockGaussianJitter(seed=1, p=0.0, sigma=0.02, frac=frac)
+    ds_out = gbj(ds.copy(deep=True))
+    xr.testing.assert_equal(ds_out, ds)
 
 
 def test_keypoint_ablation_basic():
@@ -640,7 +640,7 @@ def test_keypoint_ablation_missing_dimensions():
 
 
 def test_keypoint_block_ablation_basic():
-    """Test KeypointBlockAblation creates temporal blocks of ablation."""
+    """Test BlockKeypointAblation creates temporal blocks of ablation."""
     T, S, K, I = 60, 2, 4, 3  # noqa: E741
     rng = np.random.default_rng(1789)
     arr = rng.random((T, S, K, I)).astype(np.float32)
@@ -655,7 +655,7 @@ def test_keypoint_block_ablation_basic():
     )
     p = 0.05
     frac = 0.1
-    kp_block_abl = KeypointBlockAblation(seed=7, p=p, frac=frac)
+    kp_block_abl = BlockKeypointAblation(seed=7, p=p, frac=frac)
     out = kp_block_abl(ds.copy(deep=True))
     
     pos_abl = out["position"].values
@@ -677,19 +677,19 @@ def test_keypoint_block_ablation_basic():
 
 
 def test_keypoint_block_ablation_frac_validation():
-    """Test KeypointBlockAblation raises error with invalid frac."""
+    """Test BlockKeypointAblation raises error with invalid frac."""
     with pytest.raises(ValueError, match="frac must be between 0 and 1"):
-        KeypointBlockAblation(seed=1, p=0.1, frac=0.0)
+        BlockKeypointAblation(seed=1, p=0.1, frac=0.0)
     
     with pytest.raises(ValueError, match="frac must be between 0 and 1"):
-        KeypointBlockAblation(seed=1, p=0.1, frac=1.0)
+        BlockKeypointAblation(seed=1, p=0.1, frac=1.0)
     
     with pytest.raises(ValueError, match="frac must be between 0 and 1"):
-        KeypointBlockAblation(seed=1, p=0.1, frac=1.5)
+        BlockKeypointAblation(seed=1, p=0.1, frac=1.5)
 
 
 def test_keypoint_block_ablation_no_change_when_p_zero():
-    """Test KeypointBlockAblation doesn't ablate when p=0."""
+    """Test BlockKeypointAblation doesn't ablate when p=0."""
     T, S, K, I = 30, 2, 2, 2  # noqa: E741
     rng = np.random.default_rng(1789)
     arr = rng.random((T, S, K, I)).astype(np.float32)
@@ -702,13 +702,13 @@ def test_keypoint_block_ablation_no_change_when_p_zero():
             "individuals": [f"ind{i}" for i in range(I)],
         },
     )
-    kp_block_abl = KeypointBlockAblation(seed=1, p=0.0, frac=0.1)
+    kp_block_abl = BlockKeypointAblation(seed=1, p=0.0, frac=0.1)
     out = kp_block_abl(ds.copy(deep=True))
     xr.testing.assert_equal(out, ds)
 
 
 def test_keypoint_block_ablation_determinism():
-    """Test KeypointBlockAblation produces consistent results with same seed."""
+    """Test BlockKeypointAblation produces consistent results with same seed."""
     T, S, K, I = 40, 2, 3, 2  # noqa: E741
     rng = np.random.default_rng(1789)
     arr = rng.random((T, S, K, I)).astype(np.float32)
@@ -721,8 +721,8 @@ def test_keypoint_block_ablation_determinism():
             "individuals": [f"ind{i}" for i in range(I)],
         },
     )
-    kp_block_abl1 = KeypointBlockAblation(seed=999, p=0.1, frac=0.2)
-    kp_block_abl2 = KeypointBlockAblation(seed=999, p=0.1, frac=0.2)
+    kp_block_abl1 = BlockKeypointAblation(seed=999, p=0.1, frac=0.2)
+    kp_block_abl2 = BlockKeypointAblation(seed=999, p=0.1, frac=0.2)
     out1 = kp_block_abl1(ds.copy(deep=True))
     out2 = kp_block_abl2(ds.copy(deep=True))
     
@@ -733,7 +733,7 @@ def test_keypoint_block_ablation_determinism():
 
 
 def test_keypoint_block_ablation_missing_dimensions():
-    """Test KeypointBlockAblation raises error with missing dimensions."""
+    """Test BlockKeypointAblation raises error with missing dimensions."""
     # Create dataset without 'keypoints' dimension
     arr = np.zeros((10, 2, 3), dtype=np.float32)
     ds = xr.Dataset(
@@ -744,7 +744,7 @@ def test_keypoint_block_ablation_missing_dimensions():
             "individuals": ["ind0", "ind1", "ind2"],
         },
     )
-    kp_block_abl = KeypointBlockAblation(seed=1, p=0.1, frac=0.1)
+    kp_block_abl = BlockKeypointAblation(seed=1, p=0.1, frac=0.1)
     
     with pytest.raises(ValueError, match="must contain 'keypoints' and 'individuals'"):
         kp_block_abl(ds)
@@ -778,7 +778,7 @@ def test_keypoint_ablation_all_space_dims_ablated():
 
 
 def test_keypoint_block_ablation_all_space_dims_ablated():
-    """Test that KeypointBlockAblation sets all space dimensions to NaN in blocks."""
+    """Test that BlockKeypointAblation sets all space dimensions to NaN in blocks."""
     T, S, K, I = 30, 3, 2, 2  # 3 spatial dimensions  # noqa: E741
     rng = np.random.default_rng(1789)
     arr = rng.random((T, S, K, I)).astype(np.float32)
@@ -791,7 +791,7 @@ def test_keypoint_block_ablation_all_space_dims_ablated():
             "individuals": ["ind0", "ind1"],
         },
     )
-    kp_block_abl = KeypointBlockAblation(seed=42, p=0.1, frac=0.15)
+    kp_block_abl = BlockKeypointAblation(seed=42, p=0.1, frac=0.15)
     ds_abl = kp_block_abl(ds.copy(deep=True))
     
     pos_abl = ds_abl["position"].values

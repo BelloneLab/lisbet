@@ -21,7 +21,7 @@ KeypointAblation
     across (time, keypoints, individuals). Simulates missing or occluded keypoints
     for robustness testing.
 
-KeypointBlockAblation
+BlockKeypointAblation
     Randomly sets keypoint coordinates to NaN within element-specific temporal blocks.
     Each selected (time, keypoint, individual) element triggers ablation for a block
     of frames, simulating sustained occlusion or tracking loss.
@@ -162,8 +162,8 @@ class GaussianJitter:
         return posetracks
 
 
-class GaussianBlockJitter:
-    """Apply Gaussian jitter within element-specific temporal blocks.
+class BlockGaussianJitter:
+    """Add Gaussian noise within element-specific temporal blocks.
 
     Bernoulli(p) is sampled independently over (time, keypoints, individuals) to
     select *start* elements. For each positive start at (t0, k, i), a block of length
@@ -232,7 +232,7 @@ class GaussianBlockJitter:
             actual_cover = int(block_mask.sum().item())
             if actual_cover < expected_cover:
                 logging.debug(
-                    "Overlapping element blocks detected in gauss_block_jitter "
+                    "Overlapping element blocks detected in blk_gauss_jitter "
                     "(expected raw=%d, merged=%d).",
                     expected_cover,
                     actual_cover,
@@ -322,7 +322,7 @@ class KeypointAblation:
         return posetracks
 
 
-class KeypointBlockAblation:
+class BlockKeypointAblation:
     """Apply keypoint ablation within element-specific temporal blocks.
 
     Bernoulli(p) is sampled independently over (time, keypoints, individuals) to
@@ -348,8 +348,8 @@ class KeypointBlockAblation:
 
     Examples
     --------
-    >>> from lisbet.transforms_extra import KeypointBlockAblation
-    >>> ablation = KeypointBlockAblation(seed=42, p=0.05, frac=0.1)
+    >>> from lisbet.transforms_extra import BlockKeypointAblation
+    >>> ablation = BlockKeypointAblation(seed=42, p=0.05, frac=0.1)
     >>> ablated_ds = ablation(posetracks)
     """
 
@@ -397,7 +397,7 @@ class KeypointBlockAblation:
             actual_cover = int(block_mask.sum().item())
             if actual_cover < expected_cover:
                 logging.debug(
-                    "Overlapping element blocks detected in kp_block_ablation "
+                    "Overlapping element blocks detected in blk_kp_ablation "
                     "(expected raw=%d, merged=%d).",
                     expected_cover,
                     actual_cover,

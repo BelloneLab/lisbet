@@ -80,14 +80,14 @@ def test_data_augmentation_config_valid():
     assert cfg4.name == "gauss_jitter"
     assert cfg4.sigma == 0.01  # default
 
-    # gauss_block_jitter with defaults (sigma & frac auto-set)
-    cfg5 = DataAugmentationConfig(name="gauss_block_jitter", p=0.05)
+    # blk_gauss_jitter with defaults (sigma & frac auto-set)
+    cfg5 = DataAugmentationConfig(name="blk_gauss_jitter", p=0.05)
     assert cfg5.sigma == 0.01
     assert cfg5.frac == 0.05
 
-    # gauss_block_jitter custom parameters
+    # blk_gauss_jitter custom parameters
     cfg6 = DataAugmentationConfig(
-        name="gauss_block_jitter", p=0.1, sigma=0.02, frac=0.2
+        name="blk_gauss_jitter", p=0.1, sigma=0.02, frac=0.2
     )
     assert cfg6.sigma == 0.02
     assert cfg6.frac == 0.2
@@ -178,7 +178,7 @@ def test_parse_data_augmentation_with_spaces():
 
 def test_parse_data_augmentation_with_jitter_params():
     result = parse_data_augmentation(
-        "gauss_jitter:p=0.02:sigma=0.01,gauss_block_jitter:p=0.05:sigma=0.02:frac=0.1"
+        "gauss_jitter:p=0.02:sigma=0.01,blk_gauss_jitter:p=0.05:sigma=0.02:frac=0.1"
     )
     assert result[0]["name"] == "gauss_jitter"
     assert result[0]["p"] == 0.02

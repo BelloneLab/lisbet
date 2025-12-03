@@ -18,10 +18,10 @@ from torchvision import transforms
 
 from lisbet import datasets, modeling
 from lisbet.transforms_extra import (
+    BlockGaussianJitter,
+    BlockKeypointAblation,
     GaussianJitter,
-    GaussianBlockJitter,
     KeypointAblation,
-    KeypointBlockAblation,
     PoseToTensor,
     RandomBlockPermutation,
     RandomPermutation,
@@ -90,9 +90,9 @@ def _build_augmentation_transforms(data_augmentation, seed):
                     p=aug_config.p,
                     sigma=aug_config.sigma,
                 )
-            elif aug_config.name == "gauss_block_jitter":
-                transform = GaussianBlockJitter(
-                    seed=aug_seed,
+            elif aug_config.name == "blk_gauss_jitter":
+                transform = BlockGaussianJitter(
+                    seed=seed + idx,
                     p=aug_config.p,
                     sigma=aug_config.sigma,
                     frac=aug_config.frac,
@@ -102,8 +102,8 @@ def _build_augmentation_transforms(data_augmentation, seed):
                     seed=aug_seed,
                     p=aug_config.p,
                 )
-            elif aug_config.name == "kp_block_ablation":
-                transform = KeypointBlockAblation(
+            elif aug_config.name == "blk_kp_ablation":
+                transform = BlockKeypointAblation(
                     seed=aug_seed,
                     p=aug_config.p,
                     frac=aug_config.frac,

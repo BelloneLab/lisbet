@@ -126,27 +126,28 @@ def configure_train_model_parser(parser: argparse.ArgumentParser) -> None:
 
                 - gauss_jitter: Randomly add N(0,sigma) noise, applied using per-element
                                 Bernoulli(p) over (frame,keypoint,individual).
-                - gauss_block_jitter: Randomly add N(0,sigma) noise.
-                                       Bernoulli(p) over (frame,keypoint,individual) selects start elements.
-                                       Each start activates a block of length int(frac*window) adding N(0,sigma)
-                                       noise only for that (keypoint,individual).
-                                       Blocks may overlap and merge.
+                - blk_gauss_jitter: Randomly add N(0,sigma) noise.
+                                    Bernoulli(p) over (frame,keypoint,individual) selects start elements.
+                                    Each start activates a block of length int(frac*window) adding N(0,sigma)
+                                    noise only for that (keypoint,individual).
+                                    Blocks may overlap and merge.
 
                 - kp_ablation: Randomly set keypoint coordinates to NaN (missing data).
                                Bernoulli(p) over (frame,keypoint,individual) selects elements to ablate.
                                Simulates sporadic occlusions or tracking failures.
-                - kp_block_ablation: Set keypoint coordinates to NaN in temporal blocks.
-                                     Bernoulli(p) over (frame,keypoint,individual) selects start elements.
-                                     Each start activates a block of length int(frac*window) setting coordinates
-                                     to NaN only for that (keypoint,individual).
-                                     Simulates sustained occlusion. Blocks may overlap and merge.
+                - blk_kp_ablation: Set keypoint coordinates to NaN in temporal blocks.
+                                   Bernoulli(p) over (frame,keypoint,individual) selects start elements.
+                                   Each start activates a block of length int(frac*window) setting coordinates
+                                   to NaN only for that (keypoint,individual).
+                                   Simulates sustained occlusion. Blocks may overlap and merge.
 
             Parameters (optional):
                 - p=<float>: Probability of applying the transformation (default: 1.0)
-                - frac=<float>: For blk_perm_id (block size), gauss_block_jitter (block length),
-                                or kp_block_ablation (block length) (defaults: 0.5 / 0.05 / 0.1)
+                - frac=<float>: For block-based augmentations (blk_perm_id, blk_gauss_jitter,
+                                blk_kp_ablation).
+                                Block size fraction (defaults: 0.5 / 0.05 / 0.1)
                 - sigma=<float>: Jitter noise std for gauss_jitter and
-                                 gauss_block_jitter (default 0.01).
+                                 blk_gauss_jitter (default 0.01).
 
             Examples:
                 --data_augmentation="all_perm_id"
@@ -154,10 +155,10 @@ def configure_train_model_parser(parser: argparse.ArgumentParser) -> None:
                 --data_augmentation="all_perm_id:p=0.5,blk_perm_id:p=0.3:frac=0.2"
                 --data_augmentation="all_perm_ax:p=0.7,blk_perm_id:frac=0.3"
                 --data_augmentation="gauss_jitter:p=0.02:sigma=0.01"
-                --data_augmentation="gauss_block_jitter:p=0.05:sigma=0.02:frac=0.1"
+                --data_augmentation="blk_gauss_jitter:p=0.05:sigma=0.02:frac=0.1"
                 --data_augmentation="kp_ablation:p=0.05"
-                --data_augmentation="kp_block_ablation:p=0.03:frac=0.15"
-                --data_augmentation="all_perm_id:p=0.5,kp_ablation:p=0.03,kp_block_ablation:p=0.02:frac=0.1"
+                --data_augmentation="blk_kp_ablation:p=0.03:frac=0.15"
+                --data_augmentation="all_perm_id:p=0.5,kp_ablation:p=0.03,blk_kp_ablation:p=0.02:frac=0.1"
 
             """
         ),

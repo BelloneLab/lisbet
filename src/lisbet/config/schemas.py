@@ -72,7 +72,7 @@ class DataAugmentationConfig(BaseModel):
             - gauss_jitter: Per-element Bernoulli(p) mask over (time, keypoints,
                 individuals), adds N(0, sigma) noise to selected elements (broadcast
                 over space dims).
-            - gauss_block_jitter: Bernoulli(p) over (time, keypoints, individuals)
+            - blk_gauss_jitter: Bernoulli(p) over (time, keypoints, individuals)
                 selects start elements. Each start activates a temporal block of
                 length ``int(frac * window)`` (clipped) for that (keypoint, individual)
                 only (all space dims). Overlapping blocks merge; noise applied once
@@ -85,7 +85,7 @@ class DataAugmentationConfig(BaseModel):
             - kp_ablation: Per-element Bernoulli(p) mask over (time, keypoints,
                 individuals), sets selected elements to NaN (all space dims).
                 Simulates missing or occluded keypoints.
-            - kp_block_ablation: Bernoulli(p) over (time, keypoints, individuals)
+            - blk_kp_ablation: Bernoulli(p) over (time, keypoints, individuals)
                 selects start elements. Each start activates a temporal block of
                 length ``int(frac * window)`` (clipped) for that (keypoint, individual)
                 only (all space dims). Sets coordinates to NaN in the block.
@@ -99,7 +99,7 @@ class DataAugmentationConfig(BaseModel):
         p: Probability of applying this transformation (0.0 to 1.0)
         frac: Fraction of frames to permute (only for blk_perm_id, 0.0 to 1.0 exclusive)
         sigma: Standard deviation of Gaussian noise (jitter types only).
-        frac: Fraction-based block length for gauss_block_jitter (also required).
+        frac: Fraction-based block length for blk_gauss_jitter (also required).
     """
 
     name: Literal[
@@ -107,10 +107,9 @@ class DataAugmentationConfig(BaseModel):
         "all_perm_ax",
         "blk_perm_id",
         "gauss_jitter",
-        "gauss_block_jitter",
+        "blk_gauss_jitter",
         "kp_ablation",
-        "kp_block_ablation",
-    ]
+        "blk_kp_ablation"]
     p: float = 1.0
     frac: float | None = None
     sigma: float | None = None
@@ -133,7 +132,7 @@ class DataAugmentationConfig(BaseModel):
     @field_validator("sigma")
     @classmethod
     def validate_sigma(cls, v, info):
-        if info.data.get("name") in ("gauss_jitter", "gauss_block_jitter"):
+        if info.data.get("name") in ("gauss_jitter", "blk_gauss_jitter"):
             # Required (will default later if None), must be positive
             if v is not None and v <= 0.0:
                 raise ValueError("sigma must be > 0.0 for jitter augmentations")
@@ -143,18 +142,21 @@ class DataAugmentationConfig(BaseModel):
                 raise ValueError("sigma parameter only valid for jitter augmentations")
         return v
 
-    # window parameter removed; frac used for gauss_block_jitter
+    # window parameter removed; frac used for blk_gauss_jitter
 
     def model_post_init(self, __context):
         """Validate that frac is only set for block-based augmentations."""
-        block_types = ("blk_perm_id", "gauss_block_jitter", "kp_block_ablation")
+        block_types = ("blk_perm_id", "blk_gauss_jitter", "blk_kp_ablation",
+                       "blk_translate", "blk_mirror_x", "blk_zoom")
         if self.name in block_types and self.frac is None:
             # Set defaults
             if self.name == "blk_perm_id":
                 self.frac = 0.5
-            elif self.name == "gauss_block_jitter":
+            elif self.name == "blk_gauss_jitter":
                 self.frac = 0.05
-            else:  # kp_block_ablation
+            elif self.name == "blk_kp_ablation":
+                self.frac = 0.1
+            else:  # blk_translate, blk_mirror_x, blk_zoom
                 self.frac = 0.1
         elif self.name not in block_types and self.frac is not None:
             raise ValueError(
@@ -162,7 +164,7 @@ class DataAugmentationConfig(BaseModel):
             )
 
         # Jitter defaults & requirements
-        if self.name in ("gauss_jitter", "gauss_block_jitter"):
+        if self.name in ("gauss_jitter", "blk_gauss_jitter"):
             if self.sigma is None:
                 self.sigma = 0.01  # default sigma
         else:
