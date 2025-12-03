@@ -708,7 +708,9 @@ class PoseToVideo:
                     if kp in keypoints:
                         idx = keypoints.index(kp)
                         x, y = pos[ind_idx, idx, :]
-                        pts.append([int(x * self.width), int(y * self.height)])
+                        # Skip if coordinates are NaN (ablated keypoints)
+                        if not (np.isnan(x) or np.isnan(y)):
+                            pts.append([int(x * self.width), int(y * self.height)])
                 if len(pts) >= 3:
                     pts_np = np.array([pts], dtype=np.int32)
                     overlay = frame.copy()
@@ -724,27 +726,31 @@ class PoseToVideo:
                     idx2 = keypoints.index(edge[1])
                     x1, y1 = pos[ind_idx, idx1, :]
                     x2, y2 = pos[ind_idx, idx2, :]
-                    color = color_to_bgr(spec.skeleton_color)
-                    cv2.line(
-                        frame,
-                        (int(x1 * self.width), int(y1 * self.height)),
-                        (int(x2 * self.width), int(y2 * self.height)),
-                        color=color,
-                        thickness=spec.skeleton_thickness,
-                        lineType=cv2.LINE_AA,
-                    )
+                    # Skip if any coordinates are NaN (ablated keypoints)
+                    if not (np.isnan(x1) or np.isnan(y1) or np.isnan(x2) or np.isnan(y2)):
+                        color = color_to_bgr(spec.skeleton_color)
+                        cv2.line(
+                            frame,
+                            (int(x1 * self.width), int(y1 * self.height)),
+                            (int(x2 * self.width), int(y2 * self.height)),
+                            color=color,
+                            thickness=spec.skeleton_thickness,
+                            lineType=cv2.LINE_AA,
+                        )
             # Draw keypoints
             for k, kp in enumerate(keypoints):
-                color = color_to_bgr(spec.get_keypoint_color(kp))
                 x, y = pos[ind_idx, k, :]
-                cv2.circle(
-                    frame,
-                    (int(x * self.width), int(y * self.height)),
-                    spec.keypoint_size,
-                    color=color,
-                    thickness=-1,
-                    lineType=cv2.LINE_AA,
-                )
+                # Skip if coordinates are NaN (ablated keypoints)
+                if not (np.isnan(x) or np.isnan(y)):
+                    color = color_to_bgr(spec.get_keypoint_color(kp))
+                    cv2.circle(
+                        frame,
+                        (int(x * self.width), int(y * self.height)),
+                        spec.keypoint_size,
+                        color=color,
+                        thickness=-1,
+                        lineType=cv2.LINE_AA,
+                    )
 
         # Convert a BGR frame (OpenCV) to RGB
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
