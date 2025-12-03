@@ -45,6 +45,21 @@ Available augmentation techniques
     - Simulates localized bursts of degraded tracking quality (e.g., one limb jittering)
     - Debug log emitted when overlapping element blocks are detected
 
+* **kp_ablation**: Randomly set keypoint coordinates to NaN (missing data simulation)
+    - Per-element Bernoulli(p) over (frame, keypoint, individual) selects positions to ablate
+    - Sets all spatial coordinates (x, y, z) to NaN for selected elements
+    - Simulates missing or occluded keypoints commonly occurring in real tracking data
+    - Helps models become robust to incomplete data / tracking failures
+    - Recommended p values: 0.01–0.1 depending on desired robustness level
+
+* **kp_block_ablation**: Set keypoint coordinates to NaN within temporal blocks
+    - Bernoulli(p) over (frame, keypoint, individual) selects *start elements*; each start activates a block of length ``int(frac * window)`` (default frac=0.1) for that keypoint & individual only
+    - All spatial coordinates set to NaN within selected blocks
+    - Simulates sustained occlusion or tracking loss (e.g., animal behind object, marker occlusion)
+    - Overlapping blocks (same element or different) merge naturally
+    - Recommended initial values: p≈0.02–0.05 with frac≈0.1–0.2
+    - Debug log emitted when overlapping element blocks are detected
+
 Usage examples
 --------------
 
@@ -101,6 +116,34 @@ This applies identity permutation to 50% of training samples.
         --data_augmentation="all_perm_id:p=0.5,blk_perm_id:p=0.3:frac=0.2,gauss_jitter:p=0.02:sigma=0.01,gauss_block_jitter:p=0.05:sigma=0.02:frac=0.1" \
         ... # other parameters
 
+**Keypoint ablation (sparse missing data):**
+
+.. code-block:: console
+
+    $ betman train_model \
+        --data_augmentation="kp_ablation:p=0.05" \
+        ... # other parameters
+
+This randomly sets 5% of keypoint coordinates to NaN (missing), simulating sporadic occlusions.
+
+**Block keypoint ablation (sustained occlusion):**
+
+.. code-block:: console
+
+    $ betman train_model \
+        --data_augmentation="kp_block_ablation:p=0.03:frac=0.15" \
+        ... # other parameters
+
+This creates temporal blocks where keypoints are missing, simulating sustained tracking loss.
+
+**Combined augmentation pipeline with ablation:**
+
+.. code-block:: console
+
+    $ betman train_model \
+        --data_augmentation="all_perm_id:p=0.5,kp_ablation:p=0.03,kp_block_ablation:p=0.02:frac=0.1" \
+        ... # other parameters
+
 **Block permutation with fraction:**
 
 .. code-block:: console
@@ -141,6 +184,9 @@ Important considerations
 * **Probability tuning**: Start with moderate probabilities (0.3-0.7) and adjust based on validation performance. Higher probabilities increase variability but may make training less stable.
     - For jitter augmentations, recommended initial values: ``gauss_jitter`` p≈0.01–0.05, ``gauss_block_jitter`` p≈0.02 with frac≈0.05–0.15.
     - Increase ``sigma`` gradually (e.g., 0.005 → 0.02) monitoring degradation in dev metrics.
+    - For ablation augmentations, recommended initial values: ``kp_ablation`` p≈0.01–0.05, ``kp_block_ablation`` p≈0.02–0.05 with frac≈0.1–0.2.
+    - Higher ablation rates train models that are more robust to missing data but may reduce performance on clean data.
 
 * **Computational cost**: Augmentations are applied on-the-fly during training and add minimal overhead. Block permutations (``blk_perm_id``) are slightly more expensive than full permutations.
     - Jitter augmentations add negligible overhead (vectorized operations). Window jitter scales linearly with number of sampled starts; low p keeps cost minimal.
+    - Ablation augmentations are extremely efficient (simple masking operations with negligible overhead).
