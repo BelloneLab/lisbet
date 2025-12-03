@@ -132,10 +132,19 @@ def configure_train_model_parser(parser: argparse.ArgumentParser) -> None:
                                        noise only for that (keypoint,individual).
                                        Blocks may overlap and merge.
 
+                - kp_ablation: Randomly set keypoint coordinates to NaN (missing data).
+                               Bernoulli(p) over (frame,keypoint,individual) selects elements to ablate.
+                               Simulates sporadic occlusions or tracking failures.
+                - kp_block_ablation: Set keypoint coordinates to NaN in temporal blocks.
+                                     Bernoulli(p) over (frame,keypoint,individual) selects start elements.
+                                     Each start activates a block of length int(frac*window) setting coordinates
+                                     to NaN only for that (keypoint,individual).
+                                     Simulates sustained occlusion. Blocks may overlap and merge.
+
             Parameters (optional):
                 - p=<float>: Probability of applying the transformation (default: 1.0)
-                - frac=<float>: For blk_perm_id (block size) or gauss_block_jitter
-                                (block jitter length) (defaults: 0.5 / 0.05)
+                - frac=<float>: For blk_perm_id (block size), gauss_block_jitter (block length),
+                                or kp_block_ablation (block length) (defaults: 0.5 / 0.05 / 0.1)
                 - sigma=<float>: Jitter noise std for gauss_jitter and
                                  gauss_block_jitter (default 0.01).
 
@@ -146,7 +155,9 @@ def configure_train_model_parser(parser: argparse.ArgumentParser) -> None:
                 --data_augmentation="all_perm_ax:p=0.7,blk_perm_id:frac=0.3"
                 --data_augmentation="gauss_jitter:p=0.02:sigma=0.01"
                 --data_augmentation="gauss_block_jitter:p=0.05:sigma=0.02:frac=0.1"
-                --data_augmentation="all_perm_id:p=0.5,gauss_jitter:p=0.02:sigma=0.01,gauss_block_jitter:p=0.05:sigma=0.02:frac=0.1"
+                --data_augmentation="kp_ablation:p=0.05"
+                --data_augmentation="kp_block_ablation:p=0.03:frac=0.15"
+                --data_augmentation="all_perm_id:p=0.5,kp_ablation:p=0.03,kp_block_ablation:p=0.02:frac=0.1"
 
             """
         ),
