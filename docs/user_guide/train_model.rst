@@ -18,7 +18,7 @@ This dataset contains a large corpus of tracking data of mice pairs in free soci
 
 .. code-block:: console
 
-   $ betman fetch_dataset CalMS21_Unlabeled
+    $ betman fetch_dataset CalMS21_Unlabeled
 
 This command will download the dataset to the datasets directory in the current working directory.
 The dataset is preprocessed for training and stored in the `movement` format, which is a binary format that can store large amounts of data efficiently (currently NetCDF).
@@ -30,7 +30,7 @@ To train a model, you can use the ``betman train_model`` command.
 The following command trains a model using the CalMS21 dataset with all the available self-supervised tasks.
 
 .. note::
-   For a detailed explanation of the self-supervised tasks available in LISBET, see :doc:`self_supervised_tasks`.
+    For a detailed explanation of the self-supervised tasks available in LISBET, see :doc:`self_supervised_tasks`.
 
 The model is a transformer model with 8 layers, 8 heads, and a hidden dimension of 256.
 The embedding dimension is 64.
@@ -39,20 +39,22 @@ The training history is saved to a file for later review.
 
 .. code-block:: console
 
-   $ betman train_model \
-      -v \
-      --task_ids=cons,order,shift,warp \  # Use all the available self-supervised tasks
-      --data_format=movement \
-      --run_id=lisbet64x8-calms21U \
-      --seed=1234 \
-      --epochs=100 \
-      --emb_dim=64 \
-      --num_layers=8 \
-      --num_heads=8 \
-      --hidden_dim=256 \
-      --train_sample=0.05 \
-      --save_history \
-      datasets/CalMS21/unlabeled_videos
+    $ betman train_model \
+        -v \
+        --task_ids=cons,order,shift,warp \  # Use all the available self-supervised tasks
+        --data_format=movement \
+        --run_id=lisbet64x8-calms21U \
+        --seed=1234 \
+        --epochs=100 \
+        --emb_dim=64 \
+        --num_layers=8 \
+        --num_heads=8 \
+        --hidden_dim=256 \
+        --train_sample=0.05 \
+        --save_history \
+        datasets/CalMS21/unlabeled_videos
+
+This command will create a new directory under the models directory in the current working directory, named using the specified run_id (i.e., ``lisbet64x8-calms21U`` in this case).
 
 The training process can take a long time depending on the size of the dataset and the complexity of the model.
 For reference, running the command above required approximatively 1h15 per epoch on a MacBook Pro (Apple M1 Pro), or approximatively 12 minutes on a Linux compute node with GPU (AMD EPYC-7742, NVIDIA RTX A5500).
@@ -66,9 +68,9 @@ The trained model can be exported to a standalone embedding model using the foll
 
 .. code-block:: console
 
-   $ betman export_embedder \
-      models/lisbet64x8-calms21U/model_config.yml \
-      models/lisbet64x8-calms21U/weights/weights_last.pt
+    $ betman export_embedder \
+        models/lisbet64x8-calms21U/model_config.yml \
+        models/lisbet64x8-calms21U/weights/weights_last.pt
 
 Unless otherwise specified using the --output_path option, the embedding model is saved in the ``models directory`` in the current working directory, under models using the same run_id of the original model with the "-embedder" suffix (i.e., ``lisbet64x8-calms21U-embedder`` in this case).
 

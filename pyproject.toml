@@ -52,6 +52,12 @@ dev = ["lisbet[tests,docs]"]
 [project.scripts]
 betman = "lisbet.cli:app"
 
+[tool.ruff]
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "UP", "B", "SIM", "I"]
+
 [tool.pytest.ini_options]
 addopts = ["--import-mode=importlib"]
 markers = ["integration: mark a test as an integration."]

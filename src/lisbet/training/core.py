@@ -176,7 +176,8 @@ def _train_one_epoch(
         optimizer.zero_grad(set_to_none=True)
 
         # Iterate over all tasks
-        for task, dataloader in zip(tasks, dl_iter):
+        # NOTE: strict=False to allow for different iterable lengths
+        for task, dataloader in zip(tasks, dl_iter, strict=False):
             data, target = next(dataloader)
 
             # Forward pass
@@ -212,7 +213,8 @@ def _evaluate(model, dataloaders, n_batches, tasks):
         # Iterate over all batches
         for batch_idx in trange(n_batches, desc="Evaluation batches", leave=False):
             # Iterate over all tasks
-            for task, dataloader in zip(tasks, dl_iter):
+            # NOTE: strict=False to allow for different iterable lengths
+            for task, dataloader in zip(tasks, dl_iter, strict=False):
                 data, target = next(dataloader)
 
                 # Forward pass

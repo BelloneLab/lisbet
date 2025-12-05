@@ -19,6 +19,7 @@ Advanced
    :maxdepth: 2
 
    train_model
+   data_augmentation
    fine_tuning
    prototype_calibration
    prototype_inference
