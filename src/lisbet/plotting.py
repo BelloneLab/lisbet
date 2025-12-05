@@ -89,7 +89,7 @@ def get_custom_cmap(n, palette="Set2", alpha=None, desat=None):
     colors = colors[:n] if n <= len(colors) else sns.blend_palette(colors, n_colors=n)
 
     if alpha:
-        colors = [c + (a,) for c, a in zip(colors, alpha)]
+        colors = [c + (a,) for c, a in zip(colors, alpha, strict=True)]
 
     # Convert to a *discrete* colormap
     cmap = mpl.colors.ListedColormap(colors)
@@ -167,6 +167,7 @@ def plot_umap2d(
             zip(
                 unique_labels,
                 compute_class_weight("balanced", classes=unique_labels, y=labels),
+                strict=True,
             )
         )
 
@@ -332,7 +333,7 @@ def plot_transition_graph(
     G = nx.from_numpy_array(trans_prob, create_using=nx.DiGraph)
     pos = nx.circular_layout(G)
 
-    edgelist, weights = zip(*nx.get_edge_attributes(G, "weight").items())
+    edgelist, weights = zip(*nx.get_edge_attributes(G, "weight").items(), strict=True)
 
     nodes = nx.draw_networkx_nodes(
         G,

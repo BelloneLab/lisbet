@@ -20,7 +20,6 @@ from lisbet.cli.commands import (
     configure_select_prototypes_parser,
     configure_train_model_parser,
 )
-import torch
 
 
 class RawDefaultsHelpFormatter(

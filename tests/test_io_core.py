@@ -1,11 +1,9 @@
 import numpy as np
 import pytest
 import xarray as xr
-import tempfile
-from pathlib import Path
 
 from lisbet.io import load_records
-from lisbet.io.core import dump_embeddings, dump_annotations
+from lisbet.io.core import dump_annotations, dump_embeddings
 
 
 @pytest.fixture
@@ -366,78 +364,80 @@ def test_explicit_and_image_size_px_scaling_identical_in_range(tmp_path):
 def test_dump_embeddings_includes_frame_index(tmp_path):
     """Test that dump_embeddings includes frame index in CSV output."""
     # Create test data: 3 frames, 4 features
-    test_data = np.array([[1.0, 2.0, 3.0, 4.0], [5.0, 6.0, 7.0, 8.0], [9.0, 10.0, 11.0, 12.0]])
+    test_data = np.array(
+        [[1.0, 2.0, 3.0, 4.0], [5.0, 6.0, 7.0, 8.0], [9.0, 10.0, 11.0, 12.0]]
+    )
     results = [("test_record", test_data)]
-    
+
     # Save embeddings
     dump_embeddings(results, tmp_path)
-    
+
     # Check that CSV file was created
     csv_path = tmp_path / "embeddings" / "test_record" / "features_lisbet_embedding.csv"
     assert csv_path.exists()
-    
+
     # Read and verify CSV content
     with open(csv_path) as f:
         lines = f.readlines()
-    
+
     # Should have header + 3 data lines
     assert len(lines) == 4
-    
+
     # Check header includes index column (empty first column name)
-    header = lines[0].strip().split(',')
+    header = lines[0].strip().split(",")
     assert header[0] == ""  # Index column has no name
     assert len(header) == 5  # index + 4 feature columns
-    
+
     # Check first data line has frame index 0
-    first_data = lines[1].strip().split(',')
+    first_data = lines[1].strip().split(",")
     assert first_data[0] == "0"
     assert len(first_data) == 5  # index + 4 values
-    
+
     # Check second data line has frame index 1
-    second_data = lines[2].strip().split(',')
+    second_data = lines[2].strip().split(",")
     assert second_data[0] == "1"
-    
+
     # Check third data line has frame index 2
-    third_data = lines[3].strip().split(',')
+    third_data = lines[3].strip().split(",")
     assert third_data[0] == "2"
 
 
 def test_dump_annotations_includes_frame_index(tmp_path):
     """Test that dump_annotations includes frame index in CSV output."""
-    # Create test data: 3 frames, 2 behavior classes  
+    # Create test data: 3 frames, 2 behavior classes
     test_data = np.array([[1, 0], [0, 1], [1, 1]])
     results = [("test_record", test_data)]
-    
+
     # Save annotations
     dump_annotations(results, tmp_path)
-    
+
     # Check that CSV file was created
     csv_path = tmp_path / "annotations" / "test_record" / "machineAnnotation_lisbet.csv"
     assert csv_path.exists()
-    
+
     # Read and verify CSV content
     with open(csv_path) as f:
         lines = f.readlines()
-    
+
     # Should have header + 3 data lines
     assert len(lines) == 4
-    
+
     # Check header includes index column (empty first column name)
-    header = lines[0].strip().split(',')
+    header = lines[0].strip().split(",")
     assert header[0] == ""  # Index column has no name
     assert len(header) == 3  # index + 2 behavior columns
-    
+
     # Check first data line has frame index 0
-    first_data = lines[1].strip().split(',')
+    first_data = lines[1].strip().split(",")
     assert first_data[0] == "0"
     assert len(first_data) == 3  # index + 2 values
-    
-    # Check second data line has frame index 1  
-    second_data = lines[2].strip().split(',')
+
+    # Check second data line has frame index 1
+    second_data = lines[2].strip().split(",")
     assert second_data[0] == "1"
-    
+
     # Check third data line has frame index 2
-    third_data = lines[3].strip().split(',')
+    third_data = lines[3].strip().split(",")
     assert third_data[0] == "2"
 
 
@@ -445,13 +445,27 @@ def test_dump_functions_create_directories(tmp_path):
     """Test that dump functions create necessary directory structure."""
     test_data = np.array([[1.0, 2.0]])
     results = [("nested/path/record", test_data)]
-    
+
     # Test embeddings
     dump_embeddings(results, tmp_path)
-    embeddings_path = tmp_path / "embeddings" / "nested" / "path" / "record" / "features_lisbet_embedding.csv"
+    embeddings_path = (
+        tmp_path
+        / "embeddings"
+        / "nested"
+        / "path"
+        / "record"
+        / "features_lisbet_embedding.csv"
+    )
     assert embeddings_path.exists()
-    
+
     # Test annotations
     dump_annotations(results, tmp_path)
-    annotations_path = tmp_path / "annotations" / "nested" / "path" / "record" / "machineAnnotation_lisbet.csv"
+    annotations_path = (
+        tmp_path
+        / "annotations"
+        / "nested"
+        / "path"
+        / "record"
+        / "machineAnnotation_lisbet.csv"
+    )
     assert annotations_path.exists()

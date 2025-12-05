@@ -109,7 +109,8 @@ class DataAugmentationConfig(BaseModel):
         "gauss_jitter",
         "blk_gauss_jitter",
         "kp_ablation",
-        "blk_kp_ablation"]
+        "blk_kp_ablation",
+    ]
     p: float = 1.0
     frac: float | None = None
     sigma: float | None = None
@@ -146,8 +147,14 @@ class DataAugmentationConfig(BaseModel):
 
     def model_post_init(self, __context):
         """Validate that frac is only set for block-based augmentations."""
-        block_types = ("blk_perm_id", "blk_gauss_jitter", "blk_kp_ablation",
-                       "blk_translate", "blk_mirror_x", "blk_zoom")
+        block_types = (
+            "blk_perm_id",
+            "blk_gauss_jitter",
+            "blk_kp_ablation",
+            "blk_translate",
+            "blk_mirror_x",
+            "blk_zoom",
+        )
         if self.name in block_types and self.frac is None:
             # Set defaults
             if self.name == "blk_perm_id":
@@ -160,7 +167,8 @@ class DataAugmentationConfig(BaseModel):
                 self.frac = 0.1
         elif self.name not in block_types and self.frac is not None:
             raise ValueError(
-                f"frac parameter is only valid for {', '.join(block_types)}, not {self.name}"
+                f"frac parameter is only valid for {', '.join(block_types)}, "
+                "not {self.name}"
             )
 
         # Jitter defaults & requirements

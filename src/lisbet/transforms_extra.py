@@ -116,7 +116,6 @@ class GaussianJitter:
         self.sigma = float(sigma)
         self.g = torch.Generator().manual_seed(seed)
 
-
     def __call__(self, posetracks: xr.Dataset) -> xr.Dataset:
         pos_var = posetracks["position"]
 
@@ -158,7 +157,7 @@ class GaussianJitter:
         pos.clamp_(0.0, 1.0)
         # print('clamped pos:', pos)
         pos_var = pos.numpy()
-        posetracks['position'].values[:] = pos_var
+        posetracks["position"].values[:] = pos_var
         return posetracks
 
 
@@ -167,9 +166,9 @@ class BlockGaussianJitter:
 
     Bernoulli(p) is sampled independently over (time, keypoints, individuals) to
     select *start* elements. For each positive start at (t0, k, i), a block of length
-    ``block_len = int(frac * window)`` frames [t0, t0+block_len) (clipped at sequence end)
-    receives Gaussian noise N(0, sigma^2) only for that (keypoint, individual) pair
-    across all space dims. Overlapping blocks (either same or different start
+    ``block_len = int(frac * window)`` frames [t0, t0+block_len) (clipped at sequence
+    end) receives Gaussian noise N(0, sigma^2) only for that (keypoint, individual)
+    pair across all space dims. Overlapping blocks (either same or different start
     elements covering the same frame and (k,i)) merge naturally; noise is applied
     once per affected element-frame. A debug log reports overlap when merged
     coverage < raw expected coverage.
@@ -317,7 +316,7 @@ class KeypointAblation:
 
         # Apply ablation by setting selected elements to NaN
         pos = torch.from_numpy(pos_var.values)
-        pos = torch.where(mask, torch.tensor(float('nan')), pos)
+        pos = torch.where(mask, torch.tensor(float("nan")), pos)
         pos_var.values[:] = pos.numpy()
         return posetracks
 
@@ -327,8 +326,9 @@ class BlockKeypointAblation:
 
     Bernoulli(p) is sampled independently over (time, keypoints, individuals) to
     select *start* elements. For each positive start at (t0, k, i), a block of length
-    ``block_len = int(frac * window)`` frames [t0, t0+block_len) (clipped at sequence end)
-    has all spatial coordinates set to NaN only for that (keypoint, individual) pair.
+    ``block_len = int(frac * window)`` frames [t0, t0+block_len) (clipped at sequence
+    end) has all spatial coordinates set to NaN only for that (keypoint, individual)
+    pair.
     Overlapping blocks (either same or different start elements covering the same frame
     and (k, i)) merge naturally; ablation is applied once per affected element-frame.
     A debug log reports overlap when merged coverage < raw expected coverage.
@@ -414,7 +414,7 @@ class BlockKeypointAblation:
 
         # Apply ablation by setting selected elements to NaN
         pos = torch.from_numpy(pos_var.values)
-        pos = torch.where(block_mask_b, torch.tensor(float('nan')), pos)
+        pos = torch.where(block_mask_b, torch.tensor(float("nan")), pos)
         pos_var.values[:] = pos.numpy()
         return posetracks
 
@@ -727,7 +727,9 @@ class PoseToVideo:
                     x1, y1 = pos[ind_idx, idx1, :]
                     x2, y2 = pos[ind_idx, idx2, :]
                     # Skip if any coordinates are NaN (ablated keypoints)
-                    if not (np.isnan(x1) or np.isnan(y1) or np.isnan(x2) or np.isnan(y2)):
+                    if not (
+                        np.isnan(x1) or np.isnan(y1) or np.isnan(x2) or np.isnan(y2)
+                    ):
                         color = color_to_bgr(spec.skeleton_color)
                         cv2.line(
                             frame,

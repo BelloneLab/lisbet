@@ -12,7 +12,7 @@ from tqdm.auto import tqdm, trange
 
 def frame2time(frame_count, fps=30):
     td = timedelta(seconds=(frame_count / fps))
-    return strftime("%H:%M:%S", gmtime(td.seconds)) + f".{int(td.microseconds/1000)}"
+    return strftime("%H:%M:%S", gmtime(td.seconds)) + f".{int(td.microseconds / 1000)}"
 
 
 def split_motifs(
@@ -158,7 +158,7 @@ def motif_collage(video_chunks, output_path=None, seed=None):
             ["ffmpeg", "-y", "-loglevel", "warning"]
             + [
                 val
-                for tup in zip(["-i"] * len(chunks_paths), chunks_paths)
+                for tup in zip(["-i"] * len(chunks_paths), chunks_paths, strict=True)
                 for val in tup
             ]
             + [

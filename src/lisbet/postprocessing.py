@@ -3,7 +3,6 @@
 import logging
 from itertools import groupby
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -166,7 +165,7 @@ def select_prototypes(
     bout_threshold: float = 0.5,
     distance_threshold: float = 0.6,
     fps: int = 30,
-    output_path: Optional[str] = None,
+    output_path: str | None = None,
 ) -> tuple[dict, list[tuple[str, pd.DataFrame]]]:
     """
     Select motifs from a set of Hidden Markov Models using a posteriori linkage.
