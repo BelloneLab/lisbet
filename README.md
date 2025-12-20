@@ -1,19 +1,19 @@
-<div align="center">
-
 <p align="center">
   <img src="https://raw.githubusercontent.com/BelloneLab/lisbet/main/docs/_static/logo_dark.png" alt="Logo" width="200">
-</p><br>
+</p>
 
+<p align="center">
 [📚 Documentation](https://docs.lisbet.ai) |
 [📦 Install](https://docs.lisbet.ai/en/latest/getting_started/installation.html) |
 [🚀 Quickstart](https://docs.lisbet.ai/en/latest/getting_started/quickstart.html) |
 [🪲 Reporting Issues](https://github.com/BelloneLab/lisbet/issues)
+</p>
 
-[![PyPI](https://img.shields.io/pypi/v/lisbet)](https://pypi.org/project/lisbet/)
-[![Documentation Status](https://readthedocs.org/projects/lisbet/badge/?version=latest)](https://docs.lisbet.ai/en/latest/?badge=latest)
-[![arXiv](https://img.shields.io/badge/arXiv-2311.04069-b31b1b.svg)](https://doi.org/10.48550/arXiv.2311.04069)
-
-</div>
+<p align="center">
+  <a href="https://pypi.org/project/lisbet/"><img src="https://img.shields.io/pypi/v/lisbet" alt="PyPI"></a>
+  <a href="https://docs.lisbet.ai/en/latest/?badge=latest"><img src="https://readthedocs.org/projects/lisbet/badge/?version=latest" alt="Documentation Status"></a>
+  <a href="https://doi.org/10.48550/arXiv.2311.04069"><img src="https://img.shields.io/badge/arXiv-2311.04069-b31b1b.svg" alt="arXiv"></a>
+</p>
 
 ## About LISBET
 LISBET (LISBET Is a Social BEhavior Transformer) is a machine learning model for social behavior discovery and classification.
