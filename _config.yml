@@ -1,0 +1,7 @@
+title: LISBET Project
+description: LISBET Is a Social BEhavior Transformer (LISBET)
+theme: jekyll-theme-cayman
+encoding: "utf-8"
+markdown: kramdown
+kramdown:
+  input: GFM
