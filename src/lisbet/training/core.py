@@ -183,7 +183,11 @@ def _train_one_epoch(
             # Contrastive tasks return pairs of views instead of (data, target)
             if task.task_id == "geom":
                 data_orig, data_transform = batch
-                
+                 #TODO code only for debuging purpose : save output_orig and output_transform
+                orig_path = r"/mnt/c/Users/chataint/Documents/projet/humanlisbet2/output/debug"
+                np.save(rf"{orig_path}/data_{task.task_id}_{batch_idx}.npy", data_orig.detach().cpu().numpy())
+                np.save(rf"{orig_path}/target_{task.task_id}_{batch_idx}.npy", data_transform.detach().cpu().numpy())
+                               
                 # Forward pass for both views
                 output_orig = model(data_orig, task.task_id)
                 output_transform = model(data_transform, task.task_id)
@@ -191,11 +195,7 @@ def _train_one_epoch(
                 # InfoNCE loss expects both projections
                 loss = task.loss_function(output_orig, output_transform)
 
-                #TODO code only for debuging purpose : save output_orig and output_transform
-                # orig_path = r"C:\Users\chataint\Documents\projet\humanlisbet2\output\debug2"
-                # np.save(rf"{orig_path}\output_orig_{batch_idx}.npy", output_orig.detach().cpu().numpy())
-                # np.save(rf"{orig_path}\output_transform_{batch_idx}.npy", output_transform.detach().cpu().numpy())
-                
+
                 # Store loss value and metrics for stats
                 if batch_idx % 10 == 0:
                     task.train_loss.update(loss)
@@ -204,6 +204,11 @@ def _train_one_epoch(
             else:
                 # Classification tasks return (data, target)
                 data, target = batch
+
+                #TODO code only for debuging purpose : save data and target
+                class_path = r"/mnt/c/Users/chataint/Documents/projet/humanlisbet2/output/debug"
+                np.save(rf"{class_path}/data_{task.task_id}_{batch_idx}.npy", data.detach().cpu().numpy())
+                np.save(rf"{class_path}/target_{task.task_id}_{batch_idx}.npy", target.detach().cpu().numpy())
                 
                 # Forward pass
                 output = model(data, task.task_id)
