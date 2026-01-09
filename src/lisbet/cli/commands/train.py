@@ -124,36 +124,22 @@ def configure_train_model_parser(parser: argparse.ArgumentParser) -> None:
                 - blk_perm_id: Randomly permute identities of individuals, applied
                                to a contiguous block of frames within a window.
 
-                - gauss_jitter: Randomly add N(0,sigma) noise, applied using per-element
-                                Bernoulli(p) over (frame,keypoint,individual).
-                - blk_gauss_jitter: Randomly add N(0,sigma) noise.
-                                    Bernoulli(p) over (frame,keypoint,individual)
-                                    selects start elements.
-                                    Each start activates a block of length
-                                    int(frac*window) adding N(0,sigma)
-                                    noise only for that (keypoint,individual).
-                                    Blocks may overlap and merge.
+                - gauss_jitter: Randomly add N(0,sigma) noise applied consistently in a window.
 
-                - kp_ablation: Randomly set keypoint coordinates to NaN (missing data).
-                               Bernoulli(p) over (frame,keypoint,individual) selects
-                               elements to ablate.
+                - kp_ablation: Randomly set keypoint coordinates to NaN (missing data)
+                               applied consistently across all frames in a window.
+                               Use Bernoulli(pB) to select which keypoints to ablate.
                                Simulates sporadic occlusions or tracking failures.
-                - blk_kp_ablation: Set keypoint coordinates to NaN in temporal blocks.
-                                   Bernoulli(p) over (frame,keypoint,individual)
-                                   selects start elements.
-                                   Each start activates a block of length
-                                   int(frac*window) setting coordinates
-                                   to NaN only for that (keypoint,individual).
-                                   Simulates sustained occlusion. Blocks may overlap
-                                   and merge.
+ 
 
             Parameters (optional):
                 - p=<float>: Probability of applying the transformation (default: 1.0)
                 - frac=<float>: For block-based augmentations (blk_perm_id,
-                                blk_gauss_jitter, blk_kp_ablation).
+                                blk_gauss_jitter).
                                 Block size fraction (defaults: 0.5 / 0.05 / 0.1)
                 - sigma=<float>: Jitter noise std for gauss_jitter and
                                  blk_gauss_jitter (default 0.01).
+
 
             Examples:
                 --data_augmentation="all_perm_id"
@@ -161,10 +147,8 @@ def configure_train_model_parser(parser: argparse.ArgumentParser) -> None:
                 --data_augmentation="all_perm_id:p=0.5,blk_perm_id:p=0.3:frac=0.2"
                 --data_augmentation="all_perm_ax:p=0.7,blk_perm_id:frac=0.3"
                 --data_augmentation="gauss_jitter:p=0.02:sigma=0.01"
-                --data_augmentation="blk_gauss_jitter:p=0.05:sigma=0.02:frac=0.1"
-                --data_augmentation="kp_ablation:p=0.05"
-                --data_augmentation="blk_kp_ablation:p=0.03:frac=0.15"
-                --data_augmentation="all_perm_id:p=0.5,kp_ablation:p=0.03,blk_kp_ablation:p=0.02:frac=0.1"
+                --data_augmentation="kp_ablation:p=0.05:pB=0.01"
+                --data_augmentation="all_perm_id:p=0.5,kp_ablation:p=0.03:pB=0.01"
 
             """
         ),
