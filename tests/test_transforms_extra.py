@@ -4,8 +4,6 @@ import torch
 import xarray as xr
 
 from lisbet.transforms_extra import (
-    BlockGaussianJitter,
-    BlockKeypointAblation,
     GaussianJitter,
     KeypointAblation,
     RandomBlockPermutation,
@@ -447,9 +445,8 @@ def test_gaussian_jitter_basic_mask_properties():
             "individuals": [f"ind{i}" for i in range(I)],
         },
     )
-    p = 0.1
     sigma = 0.2
-    gj = GaussianJitter(seed=123, p=p, sigma=sigma)
+    gj = GaussianJitter(seed=123, sigma=sigma)
     ds_j = gj(ds.copy(deep=True))
 
     diff = ds_j["position"].values - ds["position"].values
@@ -457,7 +454,7 @@ def test_gaussian_jitter_basic_mask_properties():
     changed = np.any(np.abs(diff) > 1e-9, axis=1)  # shape (T, K, I)
     proportion_changed = changed.mean()
     print(f"Proportion changed: {proportion_changed:.3f}")
-    assert 0.05 < proportion_changed < 0.2  # loose bounds around p=0.1
+    assert 0.95 < proportion_changed < 1.1  # loose bounds around p=0.1
     # Check noise statistics roughly
     if changed.sum() > 0:
         observed = diff[:, :, :, :][np.abs(diff) > 1e-9]
@@ -478,59 +475,12 @@ def test_gaussian_jitter_determinism():
             "individuals": [f"ind{i}" for i in range(I)],
         },
     )
-    gj1 = GaussianJitter(seed=999, p=0.2, sigma=0.01)
-    gj2 = GaussianJitter(seed=999, p=0.2, sigma=0.01)
+    gj1 = GaussianJitter(seed=999,sigma=0.01)
+    gj2 = GaussianJitter(seed=999, sigma=0.01)
     out1 = gj1(ds.copy(deep=True))
     out2 = gj2(ds.copy(deep=True))
     xr.testing.assert_equal(out1, out2)
 
-
-def test_gaussian_block_jitter_basic():
-    T, S, K, I = 60, 2, 4, 3  # noqa: E741
-    rng = np.random.default_rng(1789)
-    arr = rng.random((T, S, K, I)).astype(np.float32)
-    ds = xr.Dataset(
-        {"position": (("time", "space", "keypoints", "individuals"), arr)},
-        coords={
-            "time": np.arange(T),
-            "space": ["x", "y"],
-            "keypoints": [f"kp{k}" for k in range(K)],
-            "individuals": [f"ind{i}" for i in range(I)],
-        },
-    )
-    p = 0.03
-    frac = 0.1
-    gbj = BlockGaussianJitter(seed=7, p=p, sigma=0.02, frac=frac)
-    ds_out = gbj(ds.copy(deep=True))
-    diff = ds_out["position"].values - ds["position"].values
-    # Collapse space dimension for change detection
-    changed = np.any(np.abs(diff) > 1e-9, axis=1)  # shape (T,K,I)
-    proportion_changed_elements = changed.mean()
-    # With small p and window, expect low proportion
-    assert proportion_changed_elements < 0.5
-    # If any changes, ensure locality: for each changed (t,k,i), earlier frames outside
-    # window start not all changed (Heuristic: there should exist at least one
-    # untouched element)
-    assert np.any(~changed)
-
-
-def test_gaussian_block_jitter_no_change_when_p_zero():
-    T, S, K, I = 30, 2, 2, 2  # noqa: E741
-    rng = np.random.default_rng(1789)
-    arr = rng.random((T, S, K, I)).astype(np.float32)
-    ds = xr.Dataset(
-        {"position": (("time", "space", "keypoints", "individuals"), arr)},
-        coords={
-            "time": np.arange(T),
-            "space": ["x", "y"],
-            "keypoints": [f"kp{k}" for k in range(K)],
-            "individuals": [f"ind{i}" for i in range(I)],
-        },
-    )
-    frac = 0.1
-    gbj = BlockGaussianJitter(seed=1, p=0.0, sigma=0.02, frac=frac)
-    ds_out = gbj(ds.copy(deep=True))
-    xr.testing.assert_equal(ds_out, ds)
 
 
 def test_keypoint_ablation_basic():
@@ -547,8 +497,8 @@ def test_keypoint_ablation_basic():
             "individuals": [f"ind{i}" for i in range(I)],
         },
     )
-    p = 0.1
-    kp_abl = KeypointAblation(seed=123, p=p)
+    pB = 0.1
+    kp_abl = KeypointAblation(seed=123, pB=pB)
     ds_abl = kp_abl(ds.copy(deep=True))
 
     # Check that some elements are NaN
@@ -591,8 +541,8 @@ def test_keypoint_ablation_determinism():
             "individuals": [f"ind{i}" for i in range(I)],
         },
     )
-    kp_abl1 = KeypointAblation(seed=999, p=0.2)
-    kp_abl2 = KeypointAblation(seed=999, p=0.2)
+    kp_abl1 = KeypointAblation(seed=999, pB=0.2)
+    kp_abl2 = KeypointAblation(seed=999, pB=0.2)
     out1 = kp_abl1(ds.copy(deep=True))
     out2 = kp_abl2(ds.copy(deep=True))
 
@@ -616,7 +566,7 @@ def test_keypoint_ablation_no_change_when_p_zero():
             "individuals": [f"ind{i}" for i in range(I)],
         },
     )
-    kp_abl = KeypointAblation(seed=1, p=0.0)
+    kp_abl = KeypointAblation(seed=1, pB=0.0)
     out = kp_abl(ds.copy(deep=True))
     xr.testing.assert_equal(out, ds)
 
@@ -633,123 +583,12 @@ def test_keypoint_ablation_missing_dimensions():
             "keypoints": ["kp0", "kp1", "kp2"],
         },
     )
-    kp_abl = KeypointAblation(seed=1, p=0.1)
+    kp_abl = KeypointAblation(seed=1, pB=0.1)
 
     with pytest.raises(ValueError, match="Missing: {'individuals'}"):
         kp_abl(ds)
 
 
-def test_keypoint_block_ablation_basic():
-    """Test BlockKeypointAblation creates temporal blocks of ablation."""
-    T, S, K, I = 60, 2, 4, 3  # noqa: E741
-    rng = np.random.default_rng(1789)
-    arr = rng.random((T, S, K, I)).astype(np.float32)
-    ds = xr.Dataset(
-        {"position": (("time", "space", "keypoints", "individuals"), arr)},
-        coords={
-            "time": np.arange(T),
-            "space": ["x", "y"],
-            "keypoints": [f"kp{k}" for k in range(K)],
-            "individuals": [f"ind{i}" for i in range(I)],
-        },
-    )
-    p = 0.05
-    frac = 0.1
-    kp_block_abl = BlockKeypointAblation(seed=7, p=p, frac=frac)
-    out = kp_block_abl(ds.copy(deep=True))
-
-    pos_abl = out["position"].values
-    # Check for NaN elements
-    ablated_elements = np.all(np.isnan(pos_abl), axis=1)  # shape (T, K, I)
-
-    # Should have some ablation
-    if ablated_elements.sum() > 0:
-        # Check that ablation happens in blocks (temporal continuity)
-        # For each (k, i) pair that has any ablation, check for continuity
-        for k in range(K):
-            for i in range(I):
-                ablated_frames = np.where(ablated_elements[:, k, i])[0]
-                if len(ablated_frames) > 1:
-                    # Check if there are consecutive frames
-                    diffs = np.diff(ablated_frames)
-                    # At least some should be consecutive (diff == 1)
-                    assert np.any(diffs == 1), (
-                        "Block ablation should create consecutive frames"
-                    )
-
-
-def test_keypoint_block_ablation_frac_validation():
-    """Test BlockKeypointAblation raises error with invalid frac."""
-    with pytest.raises(ValueError, match="frac must be between 0 and 1"):
-        BlockKeypointAblation(seed=1, p=0.1, frac=0.0)
-
-    with pytest.raises(ValueError, match="frac must be between 0 and 1"):
-        BlockKeypointAblation(seed=1, p=0.1, frac=1.0)
-
-    with pytest.raises(ValueError, match="frac must be between 0 and 1"):
-        BlockKeypointAblation(seed=1, p=0.1, frac=1.5)
-
-
-def test_keypoint_block_ablation_no_change_when_p_zero():
-    """Test BlockKeypointAblation doesn't ablate when p=0."""
-    T, S, K, I = 30, 2, 2, 2  # noqa: E741
-    rng = np.random.default_rng(1789)
-    arr = rng.random((T, S, K, I)).astype(np.float32)
-    ds = xr.Dataset(
-        {"position": (("time", "space", "keypoints", "individuals"), arr)},
-        coords={
-            "time": np.arange(T),
-            "space": ["x", "y"],
-            "keypoints": [f"kp{k}" for k in range(K)],
-            "individuals": [f"ind{i}" for i in range(I)],
-        },
-    )
-    kp_block_abl = BlockKeypointAblation(seed=1, p=0.0, frac=0.1)
-    out = kp_block_abl(ds.copy(deep=True))
-    xr.testing.assert_equal(out, ds)
-
-
-def test_keypoint_block_ablation_determinism():
-    """Test BlockKeypointAblation produces consistent results with same seed."""
-    T, S, K, I = 40, 2, 3, 2  # noqa: E741
-    rng = np.random.default_rng(1789)
-    arr = rng.random((T, S, K, I)).astype(np.float32)
-    ds = xr.Dataset(
-        {"position": (("time", "space", "keypoints", "individuals"), arr)},
-        coords={
-            "time": np.arange(T),
-            "space": ["x", "y"],
-            "keypoints": [f"kp{k}" for k in range(K)],
-            "individuals": [f"ind{i}" for i in range(I)],
-        },
-    )
-    kp_block_abl1 = BlockKeypointAblation(seed=999, p=0.1, frac=0.2)
-    kp_block_abl2 = BlockKeypointAblation(seed=999, p=0.1, frac=0.2)
-    out1 = kp_block_abl1(ds.copy(deep=True))
-    out2 = kp_block_abl2(ds.copy(deep=True))
-
-    # Both should have NaN in the same positions
-    nan_mask1 = np.isnan(out1["position"].values)
-    nan_mask2 = np.isnan(out2["position"].values)
-    np.testing.assert_array_equal(nan_mask1, nan_mask2)
-
-
-def test_keypoint_block_ablation_missing_dimensions():
-    """Test BlockKeypointAblation raises error with missing dimensions."""
-    # Create dataset without 'keypoints' dimension
-    arr = np.zeros((10, 2, 3), dtype=np.float32)
-    ds = xr.Dataset(
-        {"position": (("time", "space", "individuals"), arr)},
-        coords={
-            "time": np.arange(10),
-            "space": ["x", "y"],
-            "individuals": ["ind0", "ind1", "ind2"],
-        },
-    )
-    kp_block_abl = BlockKeypointAblation(seed=1, p=0.1, frac=0.1)
-
-    with pytest.raises(ValueError, match="must contain 'keypoints' and 'individuals'"):
-        kp_block_abl(ds)
 
 
 def test_keypoint_ablation_all_space_dims_ablated():
@@ -768,7 +607,7 @@ def test_keypoint_ablation_all_space_dims_ablated():
             "individuals": ["ind0", "ind1"],
         },
     )
-    kp_abl = KeypointAblation(seed=42, p=0.2)
+    kp_abl = KeypointAblation(seed=42, pB=0.2)
     ds_abl = kp_abl(ds.copy(deep=True))
 
     pos_abl = ds_abl["position"].values
@@ -780,29 +619,3 @@ def test_keypoint_ablation_all_space_dims_ablated():
                 # Either all NaN or none NaN
                 assert np.all(np.isnan(space_vals)) or np.all(~np.isnan(space_vals))
 
-
-def test_keypoint_block_ablation_all_space_dims_ablated():
-    """Test that BlockKeypointAblation sets all space dimensions to NaN in blocks."""
-    T, S, K, I = 30, 3, 2, 2  # 3 spatial dimensions  # noqa: E741
-    rng = np.random.default_rng(1789)
-    arr = rng.random((T, S, K, I)).astype(np.float32)
-    ds = xr.Dataset(
-        {"position": (("time", "space", "keypoints", "individuals"), arr)},
-        coords={
-            "time": np.arange(T),
-            "space": ["x", "y", "z"],
-            "keypoints": ["kp0", "kp1"],
-            "individuals": ["ind0", "ind1"],
-        },
-    )
-    kp_block_abl = BlockKeypointAblation(seed=42, p=0.1, frac=0.15)
-    ds_abl = kp_block_abl(ds.copy(deep=True))
-
-    pos_abl = ds_abl["position"].values
-    # For each (t, k, i), either all space dims are NaN or none are
-    for t in range(T):
-        for k in range(K):
-            for i in range(I):
-                space_vals = pos_abl[t, :, k, i]
-                # Either all NaN or none NaN
-                assert np.all(np.isnan(space_vals)) or np.all(~np.isnan(space_vals))

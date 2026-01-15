@@ -93,26 +93,22 @@ from lisbet.drawing import BodySpecs, body_specs_registry, color_to_bgr
 
 
 class GaussianJitter:
-    """Apply Gaussian jitter with per-element Bernoulli sampling.
+    """Apply Gaussian jitter with accross the full window.
 
-    Probability ``p`` is applied independently over (time, keypoints, individuals).
-    For every selected element, Gaussian noise N(0, sigma^2) is added *broadcast*
-    across the space dimension(s). Coordinates are assumed normalized in [0, 1] and
+    Apply a Gaussian noise N(0, sigma^2) is added across all dimension. 
+    Coordinates are assumed normalized in [0, 1] and
     are clamped to that range post-perturbation.
 
     Parameters
     ----------
     seed : int
         RNG seed for reproducibility.
-    p : float
-        Bernoulli probability for each (frame,keypoint,individual) element.
     sigma : float
         Standard deviation of the Gaussian noise.
     """
 
-    def __init__(self, seed: int, p: float, sigma: float):
+    def __init__(self, seed: int, sigma: float):
         self.seed = seed
-        self.p = float(p)
         self.sigma = float(sigma)
         self.g = torch.Generator().manual_seed(seed)
 
@@ -145,14 +141,11 @@ class GaussianJitter:
             if d_name not in ("time", "keypoints", "individuals", "space"):
                 mask_shape[dims.index(d_name)] = 1
 
-        bern = torch.rand(mask_shape, generator=self.g) < self.p
-        # Broadcast mask to full position shape
-        mask = bern
         # Create noise tensor same full shape
         noise = torch.randn(shape, generator=self.g) * self.sigma
         # Apply
         pos = torch.from_numpy(pos_var.values)
-        pos = pos + noise * mask
+        pos = pos + noise 
         # Clamp to [0,1]
         pos.clamp_(0.0, 1.0)
         # print('clamped pos:', pos)
@@ -161,105 +154,13 @@ class GaussianJitter:
         return posetracks
 
 
-class BlockGaussianJitter:
-    """Add Gaussian noise within element-specific temporal blocks.
-
-    Bernoulli(p) is sampled independently over (time, keypoints, individuals) to
-    select *start* elements. For each positive start at (t0, k, i), a block of length
-    ``block_len = int(frac * window)`` frames [t0, t0+block_len) (clipped at sequence
-    end) receives Gaussian noise N(0, sigma^2) only for that (keypoint, individual)
-    pair across all space dims. Overlapping blocks (either same or different start
-    elements covering the same frame and (k,i)) merge naturally; noise is applied
-    once per affected element-frame. A debug log reports overlap when merged
-    coverage < raw expected coverage.
-
-    Parameters
-    ----------
-    seed : int
-        RNG seed.
-    p : float
-        Bernoulli probability for each frame to be a block start.
-    sigma : float
-        Noise standard deviation.
-    frac : float
-        Fraction of the total temporal window length used for each block
-        (0 < frac < 1). Effective block length is ``max(1, int(frac * window))``.
-    """
-
-    def __init__(self, seed: int, p: float, sigma: float, frac: float):
-        if not 0 < frac < 1:
-            raise ValueError("frac must be between 0 and 1 (exclusive)")
-        self.seed = seed
-        self.p = float(p)
-        self.sigma = float(sigma)
-        self.frac = float(frac)
-        self.g = torch.Generator().manual_seed(seed)
-
-    def __call__(self, posetracks: xr.Dataset) -> xr.Dataset:
-        pos_var = posetracks["position"]
-        dims = list(pos_var.dims)
-        if "time" not in dims:
-            raise ValueError("Position variable must have 'time' dimension.")
-        t_idx = dims.index("time")
-        shape = pos_var.shape
-        T = shape[t_idx]
-        if T == 0:
-            return posetracks
-        try:
-            k_idx = dims.index("keypoints")
-            i_idx = dims.index("individuals")
-        except ValueError as e:
-            raise ValueError(
-                "Position variable must contain 'keypoints' and 'individuals' "
-                "dimensions."
-            ) from e
-
-        K = shape[k_idx]
-        I = shape[i_idx]  # noqa: E741
-
-        block_len = max(1, int(self.frac * T))
-        start_mask = torch.rand(T, K, I, generator=self.g) < self.p
-        block_mask = torch.zeros(T, K, I, dtype=torch.bool)
-        starts = torch.nonzero(start_mask, as_tuple=False)
-        for idx_row in starts:
-            t0, k, ind = idx_row.tolist()
-            end = min(t0 + block_len, T)
-            block_mask[t0:end, k, ind] = True
-
-        if starts.numel() > 0:
-            expected_cover = starts.size(0) * block_len
-            actual_cover = int(block_mask.sum().item())
-            if actual_cover < expected_cover:
-                logging.debug(
-                    "Overlapping element blocks detected in blk_gauss_jitter "
-                    "(expected raw=%d, merged=%d).",
-                    expected_cover,
-                    actual_cover,
-                )
-
-        if not block_mask.any():
-            return posetracks
-
-        broadcast_shape = [1] * len(shape)
-        broadcast_shape[t_idx] = T
-        broadcast_shape[k_idx] = K
-        broadcast_shape[i_idx] = I
-        block_mask_b = block_mask.view(broadcast_shape)
-
-        noise = torch.randn(shape, generator=self.g) * self.sigma
-        pos = torch.from_numpy(pos_var.values)
-        pos = pos + noise * block_mask_b
-        pos.clamp_(0.0, 1.0)
-        pos_var.values[:] = pos.numpy()
-        return posetracks
-
 
 class KeypointAblation:
-    """Apply keypoint ablation with per-element Bernoulli sampling.
+    """Apply keypoint ablation with per-(keypoint, individual) Bernoulli sampling.
 
-    Probability ``p`` is applied independently over (time, keypoints, individuals).
-    For every selected element, all spatial coordinates (x, y, z, etc.) are set to NaN,
-    simulating missing or occluded keypoints.
+    Probability ``pB`` is applied independently to each (keypoint, individual) pair.
+    For every selected pair, all spatial coordinates (x, y, z, etc.) are set to NaN
+    across the entire time window, simulating sustained missing or occluded keypoints.
 
     This augmentation helps models become robust to missing data, which commonly occurs
     due to occlusions, tracking failures, or low-confidence detections.
@@ -268,19 +169,19 @@ class KeypointAblation:
     ----------
     seed : int
         RNG seed for reproducibility.
-    p : float
-        Bernoulli probability for each (frame, keypoint, individual) element.
+    pB : float
+        Bernoulli probability for each (keypoint, individual) pair across the full window.
 
     Examples
     --------
     >>> from lisbet.transforms_extra import KeypointAblation
-    >>> ablation = KeypointAblation(seed=42, p=0.05)
+    >>> ablation = KeypointAblation(seed=42, pB=0.05)
     >>> ablated_ds = ablation(posetracks)
     """
 
-    def __init__(self, seed: int, p: float):
+    def __init__(self, seed: int, pB: float):
         self.seed = seed
-        self.p = float(p)
+        self.pB = float(pB)
         self.g = torch.Generator().manual_seed(seed)
 
     def __call__(self, posetracks: xr.Dataset) -> xr.Dataset:
@@ -297,124 +198,21 @@ class KeypointAblation:
             )
 
         shape = pos_var.shape
-        # Mask shape excludes space dimension(s) for independence semantics.
-        mask_shape = [shape[d] for d in range(len(shape))]
-        # Replace space dimension size(s) by 1 for broadcasting
-        for s_name in ["space"]:
-            if s_name in dims:
-                s_idx = dims.index(s_name)
-                mask_shape[s_idx] = 1
-        # Ensure independence only over time, keypoints, individuals
+        # Create mask shape for (keypoints, individuals) only, broadcast over time and space
+        mask_shape = []
         for d_name in dims:
-            if d_name not in ("time", "keypoints", "individuals", "space"):
-                mask_shape[dims.index(d_name)] = 1
+            if d_name in ("keypoints", "individuals"):
+                mask_shape.append(shape[dims.index(d_name)])
+            else:
+                # Set to 1 for broadcasting (time, space, etc.)
+                mask_shape.append(1)
 
-        # Generate Bernoulli mask
-        bern = torch.rand(mask_shape, generator=self.g) < self.p
-        # Broadcast mask to full position shape
-        mask = bern
-
-        # Apply ablation by setting selected elements to NaN
+        # Generate Bernoulli mask for (keypoint, individual) pairs
+        bern = torch.rand(mask_shape, generator=self.g) < self.pB
+        
+        # Apply ablation by setting selected (keypoint, individual) pairs to NaN across all time
         pos = torch.from_numpy(pos_var.values)
-        pos = torch.where(mask, torch.tensor(float("nan")), pos)
-        pos_var.values[:] = pos.numpy()
-        return posetracks
-
-
-class BlockKeypointAblation:
-    """Apply keypoint ablation within element-specific temporal blocks.
-
-    Bernoulli(p) is sampled independently over (time, keypoints, individuals) to
-    select *start* elements. For each positive start at (t0, k, i), a block of length
-    ``block_len = int(frac * window)`` frames [t0, t0+block_len) (clipped at sequence
-    end) has all spatial coordinates set to NaN only for that (keypoint, individual)
-    pair.
-    Overlapping blocks (either same or different start elements covering the same frame
-    and (k, i)) merge naturally; ablation is applied once per affected element-frame.
-    A debug log reports overlap when merged coverage < raw expected coverage.
-
-    This augmentation simulates sustained occlusion or tracking loss, where a specific
-    keypoint for a specific individual becomes unavailable for a period of time.
-
-    Parameters
-    ----------
-    seed : int
-        RNG seed.
-    p : float
-        Bernoulli probability for each frame to be a block start.
-    frac : float
-        Fraction of the total temporal window length used for each block
-        (0 < frac < 1). Effective block length is ``max(1, int(frac * window))``.
-
-    Examples
-    --------
-    >>> from lisbet.transforms_extra import BlockKeypointAblation
-    >>> ablation = BlockKeypointAblation(seed=42, p=0.05, frac=0.1)
-    >>> ablated_ds = ablation(posetracks)
-    """
-
-    def __init__(self, seed: int, p: float, frac: float):
-        if not 0 < frac < 1:
-            raise ValueError("frac must be between 0 and 1 (exclusive)")
-        self.seed = seed
-        self.p = float(p)
-        self.frac = float(frac)
-        self.g = torch.Generator().manual_seed(seed)
-
-    def __call__(self, posetracks: xr.Dataset) -> xr.Dataset:
-        pos_var = posetracks["position"]
-        dims = list(pos_var.dims)
-        if "time" not in dims:
-            raise ValueError("Position variable must have 'time' dimension.")
-        t_idx = dims.index("time")
-        shape = pos_var.shape
-        T = shape[t_idx]
-        if T == 0:
-            return posetracks
-        try:
-            k_idx = dims.index("keypoints")
-            i_idx = dims.index("individuals")
-        except ValueError as e:
-            raise ValueError(
-                "Position variable must contain 'keypoints' and 'individuals' "
-                "dimensions."
-            ) from e
-
-        K = shape[k_idx]
-        I = shape[i_idx]  # noqa: E741
-
-        block_len = max(1, int(self.frac * T))
-        start_mask = torch.rand(T, K, I, generator=self.g) < self.p
-        block_mask = torch.zeros(T, K, I, dtype=torch.bool)
-        starts = torch.nonzero(start_mask, as_tuple=False)
-        for idx_row in starts:
-            t0, k, ind = idx_row.tolist()
-            end = min(t0 + block_len, T)
-            block_mask[t0:end, k, ind] = True
-
-        if starts.numel() > 0:
-            expected_cover = starts.size(0) * block_len
-            actual_cover = int(block_mask.sum().item())
-            if actual_cover < expected_cover:
-                logging.debug(
-                    "Overlapping element blocks detected in blk_kp_ablation "
-                    "(expected raw=%d, merged=%d).",
-                    expected_cover,
-                    actual_cover,
-                )
-
-        if not block_mask.any():
-            return posetracks
-
-        broadcast_shape = [1] * len(shape)
-        broadcast_shape[t_idx] = T
-        broadcast_shape[k_idx] = K
-        broadcast_shape[i_idx] = I
-        block_mask_b = block_mask.view(broadcast_shape)
-
-        # Apply ablation by setting selected elements to NaN
-        pos = torch.from_numpy(pos_var.values)
-        pos = torch.where(block_mask_b, torch.tensor(float("nan")), pos)
+        pos = torch.where(bern, torch.tensor(float("nan")), pos)
         pos_var.values[:] = pos.numpy()
         return posetracks
 

@@ -18,8 +18,6 @@ from torchvision import transforms
 
 from lisbet import datasets, modeling
 from lisbet.transforms_extra import (
-    BlockGaussianJitter,
-    BlockKeypointAblation,
     GaussianJitter,
     KeypointAblation,
     PoseToTensor,
@@ -87,29 +85,17 @@ def _build_augmentation_transforms(data_augmentation, seed):
             elif aug_config.name == "gauss_jitter":
                 transform = GaussianJitter(
                     seed=aug_seed,
-                    p=aug_config.p,
                     sigma=aug_config.sigma,
                 )
-            elif aug_config.name == "blk_gauss_jitter":
-                transform = BlockGaussianJitter(
-                    seed=seed + idx,
-                    p=aug_config.p,
-                    sigma=aug_config.sigma,
-                    frac=aug_config.frac,
-                )
+                if aug_config.p < 1.0:
+                    transform = transforms.RandomApply([transform], p=aug_config.p)
             elif aug_config.name == "kp_ablation":
                 transform = KeypointAblation(
                     seed=aug_seed,
-                    p=aug_config.p,
                 )
-            elif aug_config.name == "blk_kp_ablation":
-                transform = BlockKeypointAblation(
-                    seed=aug_seed,
-                    p=aug_config.p,
-                    frac=aug_config.frac,
-                )
-            else:
-                raise ValueError(f"Unknown augmentation type: {aug_config.name}")
+                if aug_config.p < 1.0:
+                        transform = transforms.RandomApply([transform], p=aug_config.p)
+
 
             transform_list.append(transform)
 

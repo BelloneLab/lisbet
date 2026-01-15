@@ -69,34 +69,20 @@ class DataAugmentationConfig(BaseModel):
         (implemented via ``RandomApply`` in the pipeline).
 
         Jitter-based :
-            - gauss_jitter: Per-element Bernoulli(p) mask over (time, keypoints,
-                individuals), adds N(0, sigma) noise to selected elements (broadcast
-                over space dims).
-            - blk_gauss_jitter: Bernoulli(p) over (time, keypoints, individuals)
-                selects start elements. Each start activates a temporal block of
-                length ``int(frac * window)`` (clipped) for that (keypoint, individual)
-                only (all space dims). Overlapping blocks merge; noise applied once
-                per affected element-frame.
-
-        For jitter transforms, ``p`` is *internal* (not wrapped by RandomApply) and
-        drives the element/window sampling process.
+            - gauss_jitter: For the full window  (time, keypoints,
+                individuals), adds N(0, sigma) noise.
 
         Ablation-based :
-            - kp_ablation: Per-element Bernoulli(p) mask over (time, keypoints,
+            - kp_ablation: Per-element Bernoulli(pB) mask over (time, keypoints,
                 individuals), sets selected elements to NaN (all space dims).
                 Simulates missing or occluded keypoints.
-            - blk_kp_ablation: Bernoulli(p) over (time, keypoints, individuals)
-                selects start elements. Each start activates a temporal block of
-                length ``int(frac * window)`` (clipped) for that (keypoint, individual)
-                only (all space dims). Sets coordinates to NaN in the block.
-                Simulates sustained occlusion.
 
-        For ablation transforms, ``p`` is *internal* (not wrapped by RandomApply) and
-        drives the element/window sampling process.
+
 
     Attributes:
         name: Name of the augmentation technique (all_perm_id, all_perm_ax, blk_perm_id)
         p: Probability of applying this transformation (0.0 to 1.0)
+        pB: When applicable, per-element Bernoulli probability (kp_ablation types only)
         frac: Fraction of frames to permute (only for blk_perm_id, 0.0 to 1.0 exclusive)
         sigma: Standard deviation of Gaussian noise (jitter types only).
         frac: Fraction-based block length for blk_gauss_jitter (also required).
@@ -107,11 +93,10 @@ class DataAugmentationConfig(BaseModel):
         "all_perm_ax",
         "blk_perm_id",
         "gauss_jitter",
-        "blk_gauss_jitter",
         "kp_ablation",
-        "blk_kp_ablation",
     ]
     p: float = 1.0
+    pB: float | None = None
     frac: float | None = None
     sigma: float | None = None
     # window removed; block length derived from frac
@@ -133,7 +118,7 @@ class DataAugmentationConfig(BaseModel):
     @field_validator("sigma")
     @classmethod
     def validate_sigma(cls, v, info):
-        if info.data.get("name") in ("gauss_jitter", "blk_gauss_jitter"):
+        if info.data.get("name") in ("gauss_jitter"):
             # Required (will default later if None), must be positive
             if v is not None and v <= 0.0:
                 raise ValueError("sigma must be > 0.0 for jitter augmentations")
@@ -142,6 +127,21 @@ class DataAugmentationConfig(BaseModel):
             if v is not None:
                 raise ValueError("sigma parameter only valid for jitter augmentations")
         return v
+    
+    @field_validator("pB")
+    @classmethod
+    def validate_pB(cls, v, info):
+        if info.data.get("name") in ("kp_ablation"):
+            # Required for ablation types
+            if v is None:
+                raise ValueError("pB must be set for keypoint ablation augmentations")
+            if not 0.0 <= v <= 1.0:
+                raise ValueError("pB must be between 0.0 and 1.0 for ablation augmentations")
+        else:
+            # Disallow pB for non-ablation types to avoid silent misuse
+            if v is not None:
+                raise ValueError("pB parameter only valid for keypoint ablation augmentations")
+        return v
 
     # window parameter removed; frac used for blk_gauss_jitter
 
@@ -149,8 +149,6 @@ class DataAugmentationConfig(BaseModel):
         """Validate that frac is only set for block-based augmentations."""
         block_types = (
             "blk_perm_id",
-            "blk_gauss_jitter",
-            "blk_kp_ablation",
             "blk_translate",
             "blk_mirror_x",
             "blk_zoom",
@@ -159,10 +157,6 @@ class DataAugmentationConfig(BaseModel):
             # Set defaults
             if self.name == "blk_perm_id":
                 self.frac = 0.5
-            elif self.name == "blk_gauss_jitter":
-                self.frac = 0.05
-            elif self.name == "blk_kp_ablation":
-                self.frac = 0.1
             else:  # blk_translate, blk_mirror_x, blk_zoom
                 self.frac = 0.1
         elif self.name not in block_types and self.frac is not None:
@@ -172,7 +166,7 @@ class DataAugmentationConfig(BaseModel):
             )
 
         # Jitter defaults & requirements
-        if self.name in ("gauss_jitter", "blk_gauss_jitter"):
+        if self.name in ("gauss_jitter"):
             if self.sigma is None:
                 self.sigma = 0.01  # default sigma
         else:
