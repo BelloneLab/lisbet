@@ -128,7 +128,7 @@ def _random_permutation(n, generator, exclude_identity=False):
 
 
 class GaussianJitter:
-    """Apply Gaussian jitter with accross the full window.
+    """Apply Gaussian jitter with across the full window.
 
     Apply a Gaussian noise N(0, sigma^2) is added across all dimension.
     Coordinates are assumed normalized in [0, 1] and
