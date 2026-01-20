@@ -8,6 +8,7 @@ from lisbet.transforms_extra import (
     KeypointAblation,
     RandomBlockPermutation,
     RandomPermutation,
+    _random_permutation,
 )
 
 
@@ -82,9 +83,13 @@ def test_randompermutation_space_swap(monkeypatch):
 
 
 def test_randompermutation_space_no_swap(monkeypatch):
-    """Test RandomPermutation on 'space' with no swap (identity permutation)."""
+    """Test RandomPermutation on 'space' with no swap (identity permutation).
+
+    This test verifies that identity permutations are allowed when
+    exclude_identity=False.
+    """
     ds = make_posetracks(n_time=2)
-    permute = RandomPermutation(seed=42, coordinate="space")
+    permute = RandomPermutation(seed=42, coordinate="space", exclude_identity=False)
 
     # Monkeypatch torch.randperm to return identity
     monkeypatch.setattr(
@@ -428,6 +433,198 @@ def test_randompermutation_large_permutation(monkeypatch):
     )
 
 
+# Tests for _random_permutation helper function
+
+
+def test_random_permutation_helper_basic():
+    """Test _random_permutation returns valid permutation."""
+    g = torch.Generator().manual_seed(42)
+    perm = _random_permutation(5, g, exclude_identity=False)
+
+    assert isinstance(perm, list)
+    assert len(perm) == 5
+    assert sorted(perm) == [0, 1, 2, 3, 4]
+
+
+def test_random_permutation_helper_exclude_identity():
+    """Test _random_permutation with exclude_identity=True never returns identity."""
+    g = torch.Generator().manual_seed(123)
+
+    # Run many times to check identity is never returned
+    for _ in range(100):
+        perm = _random_permutation(3, g, exclude_identity=True)
+        identity = list(range(3))
+        assert perm != identity, "Identity permutation should never be returned"
+
+
+def test_random_permutation_helper_exclude_identity_n2():
+    """Test _random_permutation with n=2 and exclude_identity=True always swaps."""
+    g = torch.Generator().manual_seed(456)
+
+    # For n=2, there's only one non-identity permutation: [1, 0]
+    for _ in range(50):
+        perm = _random_permutation(2, g, exclude_identity=True)
+        assert perm == [1, 0], "With n=2 and exclude_identity=True, must always swap"
+
+
+def test_random_permutation_helper_exclude_identity_n1_raises():
+    """Test _random_permutation raises ValueError for n=1 with exclude_identity=True."""
+    g = torch.Generator().manual_seed(789)
+
+    with pytest.raises(
+        ValueError, match="Cannot exclude identity permutation for n < 2"
+    ):
+        _random_permutation(1, g, exclude_identity=True)
+
+
+def test_random_permutation_helper_reproducibility():
+    """Test _random_permutation is reproducible with same seed."""
+    g1 = torch.Generator().manual_seed(42)
+    g2 = torch.Generator().manual_seed(42)
+
+    perm1 = _random_permutation(5, g1, exclude_identity=False)
+    perm2 = _random_permutation(5, g2, exclude_identity=False)
+
+    assert perm1 == perm2
+
+
+# Tests for exclude_identity parameter in RandomPermutation
+
+
+def test_randompermutation_exclude_identity_guarantees_change():
+    """Test RandomPermutation with exclude_identity=True always changes something."""
+    ds = make_posetracks(n_individuals=2, n_time=5)
+
+    # Run multiple times to ensure we never get identity
+    for seed in range(50):
+        permute = RandomPermutation(
+            seed=seed, coordinate="individuals", exclude_identity=True
+        )
+        ds_permuted = permute(ds.copy(deep=True))
+
+        # With exclude_identity=True and n=2, we should always get a swap
+        assert list(ds_permuted.individuals.values) == ["ind1", "ind0"]
+
+
+def test_randompermutation_exclude_identity_space():
+    """Test RandomPermutation with exclude_identity=True on space coordinate."""
+    ds = make_posetracks(n_time=3)
+
+    # For n=2 (x, y), exclude_identity should always swap
+    for seed in range(50):
+        permute = RandomPermutation(
+            seed=seed, coordinate="space", exclude_identity=True
+        )
+        ds_permuted = permute(ds.copy(deep=True))
+
+        # Should always swap x and y
+        assert list(ds_permuted.space.values) == ["y", "x"]
+
+
+def test_randompermutation_exclude_identity_false_allows_identity(monkeypatch):
+    """Test RandomPermutation with exclude_identity=False allows identity."""
+    ds = make_posetracks(n_time=2)
+    permute = RandomPermutation(
+        seed=42, coordinate="individuals", exclude_identity=False
+    )
+
+    # Monkeypatch to force identity permutation
+    monkeypatch.setattr(
+        torch, "randperm", lambda n, generator=None: torch.tensor([0, 1])
+    )
+
+    ds_permuted = permute(ds.copy(deep=True))
+
+    # Should be identical since identity permutation was returned
+    xr.testing.assert_equal(ds_permuted, ds)
+
+
+# Tests for exclude_identity parameter in RandomBlockPermutation
+
+
+def test_randomblockpermutation_exclude_identity_guarantees_change():
+    """Test RandomBlockPermutation with exclude_identity=True always permutes."""
+    n_time = 20
+    ds = make_posetracks(n_individuals=2, n_time=n_time)
+
+    # Run multiple times to ensure we never get identity in the block
+    for seed in range(50):
+        permute = RandomBlockPermutation(
+            seed=seed,
+            coordinate="individuals",
+            permute_fraction=0.3,
+            exclude_identity=True,
+        )
+        ds_permuted = permute(ds.copy(deep=True))
+
+        # The dataset should not be identical to original
+        # (there should be some permuted block)
+        assert not ds.equals(ds_permuted)
+
+
+def test_randomblockpermutation_exclude_identity_n2(monkeypatch):
+    """Test RandomBlockPermutation with n=2 and exclude_identity=True always swaps."""
+    n_time = 20
+    ds = make_posetracks(n_individuals=2, n_time=n_time)
+
+    permute = RandomBlockPermutation(
+        seed=42,
+        coordinate="individuals",
+        permute_fraction=0.3,
+        exclude_identity=True,
+    )
+
+    # Force block to start at index 5
+    monkeypatch.setattr(
+        torch, "randint", lambda low, high, size, generator=None: torch.tensor([5])
+    )
+
+    ds_permuted = permute(ds.copy(deep=True))
+
+    block_size = int(0.3 * n_time)  # 6
+    start_idx = 5
+    end_idx = start_idx + block_size
+
+    # Check that data inside the block is swapped (ind0 <-> ind1)
+    block_orig = ds.isel(time=slice(start_idx, end_idx))
+    block_permuted = ds_permuted.isel(time=slice(start_idx, end_idx))
+
+    np.testing.assert_array_equal(
+        block_permuted.sel(individuals="ind0")["position"],
+        block_orig.sel(individuals="ind1")["position"],
+    )
+    np.testing.assert_array_equal(
+        block_permuted.sel(individuals="ind1")["position"],
+        block_orig.sel(individuals="ind0")["position"],
+    )
+
+
+def test_randomblockpermutation_exclude_identity_false_allows_identity(monkeypatch):
+    """Test RandomBlockPermutation with exclude_identity=False allows identity."""
+    n_time = 20
+    ds = make_posetracks(n_individuals=2, n_time=n_time)
+
+    permute = RandomBlockPermutation(
+        seed=42,
+        coordinate="individuals",
+        permute_fraction=0.3,
+        exclude_identity=False,
+    )
+
+    # Monkeypatch to force identity permutation and a specific block location
+    monkeypatch.setattr(
+        torch, "randperm", lambda n, generator=None: torch.tensor([0, 1])
+    )
+    monkeypatch.setattr(
+        torch, "randint", lambda low, high, size, generator=None: torch.tensor([5])
+    )
+
+    ds_permuted = permute(ds.copy(deep=True))
+
+    # With identity permutation, the dataset should be unchanged
+    xr.testing.assert_equal(ds_permuted, ds)
+
+
 def test_gaussian_jitter_basic_mask_properties():
     """
     GaussianJitter should approximately modify p proportion of elements (excluding
@@ -475,12 +672,11 @@ def test_gaussian_jitter_determinism():
             "individuals": [f"ind{i}" for i in range(I)],
         },
     )
-    gj1 = GaussianJitter(seed=999,sigma=0.01)
+    gj1 = GaussianJitter(seed=999, sigma=0.01)
     gj2 = GaussianJitter(seed=999, sigma=0.01)
     out1 = gj1(ds.copy(deep=True))
     out2 = gj2(ds.copy(deep=True))
     xr.testing.assert_equal(out1, out2)
-
 
 
 def test_keypoint_ablation_basic():
@@ -589,8 +785,6 @@ def test_keypoint_ablation_missing_dimensions():
         kp_abl(ds)
 
 
-
-
 def test_keypoint_ablation_all_space_dims_ablated():
     """
     Test that KeypointAblation sets all space dimensions to NaN for selected elements.
@@ -618,4 +812,3 @@ def test_keypoint_ablation_all_space_dims_ablated():
                 space_vals = pos_abl[t, :, k, i]
                 # Either all NaN or none NaN
                 assert np.all(np.isnan(space_vals)) or np.all(~np.isnan(space_vals))
-

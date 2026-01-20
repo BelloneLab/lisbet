@@ -67,11 +67,15 @@ def _build_augmentation_transforms(data_augmentation, seed):
 
             # Build the transform based on augmentation name
             if aug_config.name == "all_perm_id":
-                transform = RandomPermutation(aug_seed, coordinate="individuals")
+                transform = RandomPermutation(
+                    aug_seed, coordinate="individuals", exclude_identity=True
+                )
                 if aug_config.p < 1.0:
                     transform = transforms.RandomApply([transform], p=aug_config.p)
             elif aug_config.name == "all_perm_ax":
-                transform = RandomPermutation(aug_seed, coordinate="space")
+                transform = RandomPermutation(
+                    aug_seed, coordinate="space", exclude_identity=True
+                )
                 if aug_config.p < 1.0:
                     transform = transforms.RandomApply([transform], p=aug_config.p)
             elif aug_config.name == "blk_perm_id":
@@ -79,6 +83,7 @@ def _build_augmentation_transforms(data_augmentation, seed):
                     aug_seed,
                     coordinate="individuals",
                     permute_fraction=aug_config.frac,
+                    exclude_identity=True,
                 )
                 if aug_config.p < 1.0:
                     transform = transforms.RandomApply([transform], p=aug_config.p)
@@ -94,8 +99,7 @@ def _build_augmentation_transforms(data_augmentation, seed):
                     seed=aug_seed,
                 )
                 if aug_config.p < 1.0:
-                        transform = transforms.RandomApply([transform], p=aug_config.p)
-
+                    transform = transforms.RandomApply([transform], p=aug_config.p)
 
             transform_list.append(transform)
 

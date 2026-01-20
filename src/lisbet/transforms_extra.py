@@ -60,7 +60,9 @@ Usage Examples
 >>> # Block permutation for temporal identity confusion
 >>> from lisbet.transforms_extra import RandomBlockPermutation
 >>> transform = transforms.Compose([
-...     RandomBlockPermutation(seed=42, coordinate='individuals', permute_fraction=0.3),
+...     RandomBlockPermutation(
+...         seed=42, coordinate='individuals', permute_fraction=0.3
+...     ),
 ...     PoseToTensor(),
 ... ])
 >>>
@@ -82,8 +84,6 @@ Notes
   interchangeable
 """
 
-import logging
-
 import cv2
 import numpy as np
 import torch
@@ -92,10 +92,45 @@ import xarray as xr
 from lisbet.drawing import BodySpecs, body_specs_registry, color_to_bgr
 
 
-class GaussianJitter:
-    """Apply Gaussian jitter with accross the full window.
+def _random_permutation(n, generator, exclude_identity=False):
+    """Generate a random permutation of n elements.
 
-    Apply a Gaussian noise N(0, sigma^2) is added across all dimension. 
+    Parameters
+    ----------
+    n : int
+        Number of elements to permute.
+    generator : torch.Generator
+        Random number generator.
+    exclude_identity : bool
+        If True, the identity permutation is excluded.
+
+    Returns
+    -------
+    list
+        A random permutation as a list of indices.
+
+    Raises
+    ------
+    ValueError
+        If exclude_identity=True and n < 2.
+    """
+    if exclude_identity and n < 2:
+        raise ValueError("Cannot exclude identity permutation for n < 2")
+
+    perm = torch.randperm(n, generator=generator).tolist()
+
+    if exclude_identity:
+        identity = list(range(n))
+        while perm == identity:
+            perm = torch.randperm(n, generator=generator).tolist()
+
+    return perm
+
+
+class GaussianJitter:
+    """Apply Gaussian jitter with across the full window.
+
+    Apply a Gaussian noise N(0, sigma^2) is added across all dimension.
     Coordinates are assumed normalized in [0, 1] and
     are clamped to that range post-perturbation.
 
@@ -145,14 +180,13 @@ class GaussianJitter:
         noise = torch.randn(shape, generator=self.g) * self.sigma
         # Apply
         pos = torch.from_numpy(pos_var.values)
-        pos = pos + noise 
+        pos = pos + noise
         # Clamp to [0,1]
         pos.clamp_(0.0, 1.0)
         # print('clamped pos:', pos)
         pos_var = pos.numpy()
         posetracks["position"].values[:] = pos_var
         return posetracks
-
 
 
 class KeypointAblation:
@@ -170,7 +204,8 @@ class KeypointAblation:
     seed : int
         RNG seed for reproducibility.
     pB : float
-        Bernoulli probability for each (keypoint, individual) pair across the full window.
+        Bernoulli probability for each (keypoint, individual) pair across the full
+        window.
 
     Examples
     --------
@@ -198,7 +233,8 @@ class KeypointAblation:
             )
 
         shape = pos_var.shape
-        # Create mask shape for (keypoints, individuals) only, broadcast over time and space
+        # Create mask shape for (keypoints, individuals) only, broadcast over time and
+        # space
         mask_shape = []
         for d_name in dims:
             if d_name in ("keypoints", "individuals"):
@@ -209,8 +245,9 @@ class KeypointAblation:
 
         # Generate Bernoulli mask for (keypoint, individual) pairs
         bern = torch.rand(mask_shape, generator=self.g) < self.pB
-        
-        # Apply ablation by setting selected (keypoint, individual) pairs to NaN across all time
+
+        # Apply ablation by setting selected (keypoint, individual) pairs to NaN
+        # across all time
         pos = torch.from_numpy(pos_var.values)
         pos = torch.where(bern, torch.tensor(float("nan")), pos)
         pos_var.values[:] = pos.numpy()
@@ -232,6 +269,9 @@ class RandomPermutation:
         Random seed for reproducibility.
     coordinate : str
         Name of the coordinate to permute (e.g., 'individuals', 'keypoints', 'space').
+    exclude_identity : bool
+        If True, the identity permutation (no change) is excluded. This guarantees
+        that at least one element will be moved. Default is False.
 
     Methods
     -------
@@ -243,11 +283,15 @@ class RandomPermutation:
     --------
     >>> permute = RandomPermutation(seed=42, coordinate='individuals')
     >>> permuted_ds = permute(posetracks)
+    >>> # Guarantee a permutation occurs
+    >>> permute = RandomPermutation(seed=42, coordinate='space', exclude_identity=True)
+    >>> permuted_ds = permute(posetracks)
     """
 
-    def __init__(self, seed, coordinate="individuals"):
+    def __init__(self, seed, coordinate="individuals", exclude_identity=False):
         self.seed = seed
         self.coordinate = coordinate
+        self.exclude_identity = exclude_identity
         self.g = torch.Generator().manual_seed(seed)
 
     def __call__(self, posetracks):
@@ -268,7 +312,7 @@ class RandomPermutation:
         coord_vals = list(posetracks.coords[self.coordinate].values)
 
         # Generate a random permutation
-        perm = torch.randperm(len(coord_vals), generator=self.g).tolist()
+        perm = _random_permutation(len(coord_vals), self.g, self.exclude_identity)
 
         # Apply permutation to the entire dataset
         # NOTE: This reorders both coordinates and data together
@@ -297,6 +341,9 @@ class RandomBlockPermutation:
         Must be between 0 (exclusive) and 1 (exclusive). A continuous block of frames
         of this relative size will be selected at random, and the permutation will be
         applied only to the data within this block, keeping coordinate labels unchanged.
+    exclude_identity : bool
+        If True, the identity permutation (no change) is excluded. This guarantees
+        that at least one element will be moved. Default is False.
 
     Methods
     -------
@@ -309,14 +356,25 @@ class RandomBlockPermutation:
     >>> permute = RandomBlockPermutation(seed=42, coordinate='individuals',
     ...                                   permute_fraction=0.3)
     >>> permuted_ds = permute(posetracks)
+    >>> # Guarantee a permutation occurs within the block
+    >>> permute = RandomBlockPermutation(seed=42, coordinate='individuals',
+    ...                                   permute_fraction=0.3, exclude_identity=True)
+    >>> permuted_ds = permute(posetracks)
     """
 
-    def __init__(self, seed, coordinate="individuals", permute_fraction=0.5):
+    def __init__(
+        self,
+        seed,
+        coordinate="individuals",
+        permute_fraction=0.5,
+        exclude_identity=False,
+    ):
         self.seed = seed
         self.coordinate = coordinate
         if not 0 < permute_fraction < 1:
             raise ValueError("permute_fraction must be a float between 0 and 1.")
         self.permute_fraction = permute_fraction
+        self.exclude_identity = exclude_identity
         self.g = torch.Generator().manual_seed(seed)
 
     def __call__(self, posetracks):
@@ -337,7 +395,7 @@ class RandomBlockPermutation:
         coord_vals = list(posetracks.coords[self.coordinate].values)
 
         # Generate a random permutation
-        perm = torch.randperm(len(coord_vals), generator=self.g).tolist()
+        perm = _random_permutation(len(coord_vals), self.g, self.exclude_identity)
 
         window_size = posetracks.sizes["time"]
         block_size = int(self.permute_fraction * window_size)
