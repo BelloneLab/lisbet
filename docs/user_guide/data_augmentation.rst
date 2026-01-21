@@ -30,7 +30,10 @@ Available augmentation techniques
 * **blk_perm_id**: Randomly permute individual identities within a contiguous block of frames
     - Creates temporal identity confusion within part of the window
     - More challenging augmentation than ``all_perm_id``
-    - Requires ``frac`` parameter to specify the fraction of frames to permute
+    - Requires ``frac`` parameter to specify the *nominal* block size as a fraction of the window
+    - Uses uniform frame probability: every frame in the window has equal chance of being affected, regardless of its position (no boundary bias)
+    - Due to boundary handling, the actual number of affected frames may be smaller than ``frac × window_size`` when the block overlaps window edges. The expected probability per frame is approximately ``frac / (1 + frac)``. For example, with ``frac=0.3``, each frame has ~23% chance of being affected.
+    - **Note**: ``frac`` controls the nominal block size, not the expected affected fraction. Even ``frac=1.0`` yields ~50% probability per frame (not 100%), because the block can "hang off" either edge of the window. This is the tradeoff for achieving uniform frame probability.
     - See the visualization above (fourth panel) for an example of block permutation
 
 * **gauss_jitter**: Inject sparse Gaussian coordinate noise

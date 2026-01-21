@@ -338,9 +338,9 @@ class RandomBlockPermutation:
         Name of the coordinate to permute (e.g., 'individuals', 'keypoints').
     permute_fraction : float
         Fraction of the time window to which the permutation is applied.
-        Must be between 0 (exclusive) and 1 (exclusive). A continuous block of frames
-        of this relative size will be selected at random, and the permutation will be
-        applied only to the data within this block, keeping coordinate labels unchanged.
+        Must be in (0, 1]. A continuous block of frames of this relative size will be
+        selected at random, and the permutation will be applied only to the data
+        within this block, keeping coordinate labels unchanged.
     exclude_identity : bool
         If True, the identity permutation (no change) is excluded. This guarantees
         that at least one element will be moved. Default is False.
@@ -350,6 +350,29 @@ class RandomBlockPermutation:
     __call__(posetracks)
         Applies the random block permutation to the specified coordinate of the input
         xarray.Dataset.
+
+    Notes
+    -----
+    This implementation uses uniform frame probability sampling to ensure that every
+    frame in the window has an equal probability of being affected by the permutation,
+    regardless of its position. This is achieved by allowing the block's starting
+    position to extend beyond window boundaries, then clipping to the valid range.
+
+    As a consequence, the actual number of affected frames may be smaller than
+    ``permute_fraction * window_size`` when the block overlaps with window boundaries.
+    On average, the expected probability for any given frame to be affected is::
+
+        block_size / (window_size + block_size - 1)
+
+    which simplifies to approximately ``permute_fraction / (1 + permute_fraction)``
+    for large windows. For example, with ``permute_fraction=0.3``, the expected
+    probability per frame is approximately 0.23 (about 77% of the nominal fraction).
+
+    Note that ``permute_fraction`` specifies the *nominal* block size, not the
+    expected fraction of affected frames. Even with ``permute_fraction=1.0``, the
+    expected probability per frame would be ~0.5, not 1.0, because the block can
+    "hang off" either edge of the window. This is the expected tradeoff for
+    achieving uniform frame probability.
 
     Examples
     --------
@@ -371,8 +394,8 @@ class RandomBlockPermutation:
     ):
         self.seed = seed
         self.coordinate = coordinate
-        if not 0 < permute_fraction < 1:
-            raise ValueError("permute_fraction must be a float between 0 and 1.")
+        if not 0 < permute_fraction <= 1:
+            raise ValueError("permute_fraction must be a float in (0, 1].")
         self.permute_fraction = permute_fraction
         self.exclude_identity = exclude_identity
         self.g = torch.Generator().manual_seed(seed)
@@ -404,14 +427,20 @@ class RandomBlockPermutation:
             # No permutation needed
             return posetracks
 
+        # Sample start_idx from extended range to ensure uniform frame probability.
+        # Range: [1 - block_size, window_size - 1] gives each frame exactly
+        # block_size chances to be included in the block.
         start_idx = torch.randint(
-            0, window_size - block_size + 1, (1,), generator=self.g
+            1 - block_size, window_size, (1,), generator=self.g
         ).item()
-        end_idx = start_idx + block_size
+
+        # Clip to valid range
+        actual_start = max(0, start_idx)
+        actual_end = min(window_size, start_idx + block_size)
 
         # For block permutation, we permute only the data
         # while keeping coordinates unchanged across the full time series
-        block_to_permute = posetracks.isel(time=slice(start_idx, end_idx))
+        block_to_permute = posetracks.isel(time=slice(actual_start, actual_end))
 
         # Get the dimension index for the coordinate
         coord_dim = list(posetracks["position"].dims).index(self.coordinate)
@@ -426,8 +455,8 @@ class RandomBlockPermutation:
         permuted_block["position"].values[:] = permuted_data
 
         # Split and concatenate
-        before_block = posetracks.isel(time=slice(None, start_idx))
-        after_block = posetracks.isel(time=slice(end_idx, None))
+        before_block = posetracks.isel(time=slice(None, actual_start))
+        after_block = posetracks.isel(time=slice(actual_end, None))
 
         posetracks = xr.concat(
             [before_block, permuted_block, after_block], dim="time", join="outer"
