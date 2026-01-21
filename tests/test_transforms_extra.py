@@ -198,21 +198,19 @@ def test_randompermutation_full_track(monkeypatch):
 def test_randomblockpermutation_invalid_fraction():
     """Test for ValueError with invalid permute_fraction."""
     with pytest.raises(
-        ValueError, match="permute_fraction must be a float between 0 and 1."
+        ValueError, match=r"permute_fraction must be a float in \(0, 1\]."
     ):
         RandomBlockPermutation(seed=1, permute_fraction=1.5)
     with pytest.raises(
-        ValueError, match="permute_fraction must be a float between 0 and 1."
+        ValueError, match=r"permute_fraction must be a float in \(0, 1\]."
     ):
         RandomBlockPermutation(seed=1, permute_fraction=0.0)
     with pytest.raises(
-        ValueError, match="permute_fraction must be a float between 0 and 1."
-    ):
-        RandomBlockPermutation(seed=1, permute_fraction=1.0)
-    with pytest.raises(
-        ValueError, match="permute_fraction must be a float between 0 and 1."
+        ValueError, match=r"permute_fraction must be a float in \(0, 1\]."
     ):
         RandomBlockPermutation(seed=1, permute_fraction=-0.5)
+    # permute_fraction=1.0 is now valid
+    RandomBlockPermutation(seed=1, permute_fraction=1.0)
 
 
 def test_randompermutation_does_not_modify_original():
@@ -785,7 +783,120 @@ def test_keypoint_ablation_missing_dimensions():
         kp_abl(ds)
 
 
-def test_keypoint_ablation_all_space_dims_ablated():
+def test_randomblockpermutation_uniform_frame_probability():
+    """Test that RandomBlockPermutation affects all frames with equal probability.
+
+    This test verifies that the boundary handling ensures uniform probability
+    across all frames, including those at the start and end of the window.
+    """
+    n_time = 50
+    n_iterations = 5000
+    n_individuals = 2
+
+    # Track how many times each frame is affected across iterations
+    frame_affected_counts = np.zeros(n_time)
+
+    for seed in range(n_iterations):
+        ds = make_posetracks(n_individuals=n_individuals, n_time=n_time)
+        permute = RandomBlockPermutation(
+            seed=seed,
+            coordinate="individuals",
+            permute_fraction=0.3,
+            exclude_identity=True,  # Guarantee permutation happens
+        )
+        ds_permuted = permute(ds.copy(deep=True))
+
+        # Check which frames were affected (data changed)
+        orig_data = ds["position"].values
+        perm_data = ds_permuted["position"].values
+
+        for t in range(n_time):
+            if not np.allclose(orig_data[t], perm_data[t]):
+                frame_affected_counts[t] += 1
+
+    # Calculate probabilities for each frame
+    frame_probabilities = frame_affected_counts / n_iterations
+
+    # With uniform probability, all frames should have roughly equal probability.
+    # The sampling range is [-(block_size-1), window_size-1], giving
+    # (window_size + block_size - 1) possible start positions.
+    # Each frame can be included by exactly block_size start positions.
+    # Expected probability = block_size / (window_size + block_size - 1)
+    block_size = int(0.3 * n_time)
+    sampling_range = n_time + block_size - 1
+    expected_prob = block_size / sampling_range
+
+    # Check that all frame probabilities are within a reasonable range
+    # Allow for statistical variance (using a tolerance based on expected std)
+    # For binomial: std = sqrt(n * p * (1-p)) / n = sqrt(p * (1-p) / n)
+    std_estimate = np.sqrt(expected_prob * (1 - expected_prob) / n_iterations)
+    tolerance = 4 * std_estimate  # ~99.99% confidence interval
+
+    # All frames should have similar probability (no boundary bias)
+    assert np.all(frame_probabilities > expected_prob - tolerance), (
+        f"Some frames have too low probability. Min: {frame_probabilities.min():.3f}, "
+        f"expected: {expected_prob:.3f} ± {tolerance:.3f}"
+    )
+    assert np.all(frame_probabilities < expected_prob + tolerance), (
+        f"Some frames have too high probability. Max: {frame_probabilities.max():.3f}, "
+        f"expected: {expected_prob:.3f} ± {tolerance:.3f}"
+    )
+
+    # Additionally check that edge frames are not significantly different from middle
+    edge_prob = (frame_probabilities[0] + frame_probabilities[-1]) / 2
+    middle_prob = np.mean(frame_probabilities[n_time // 3 : 2 * n_time // 3])
+
+    # Edge and middle should be very close (within 2x tolerance)
+    assert abs(edge_prob - middle_prob) < 2 * tolerance, (
+        f"Edge frames probability ({edge_prob:.3f}) differs too much from "
+        f"middle frames ({middle_prob:.3f})"
+    )
+
+
+def test_randomblockpermutation_boundary_clipping(monkeypatch):
+    """Test that block permutation correctly handles boundary clipping.
+
+    When the sampled start_idx is negative, only the portion within the valid
+    range should be permuted.
+    """
+    n_time = 20
+    ds = make_posetracks(n_individuals=2, n_time=n_time)
+
+    permute = RandomBlockPermutation(
+        seed=1, coordinate="individuals", permute_fraction=0.3
+    )
+
+    # Force a negative start index (-3), which should result in
+    # actual_start=0, actual_end=3 (only 3 frames affected)
+    monkeypatch.setattr(
+        torch, "randint", lambda low, high, size, generator=None: torch.tensor([-3])
+    )
+    monkeypatch.setattr(
+        torch, "randperm", lambda n, generator=None: torch.tensor([1, 0])
+    )
+
+    ds_permuted = permute(ds.copy(deep=True))
+
+    # Only frames 0-2 should be permuted (actual_start=0, actual_end=3)
+    actual_end = 3
+
+    # Check that the first 3 frames are permuted
+    block_orig = ds.isel(time=slice(0, actual_end))
+    block_permuted = ds_permuted.isel(time=slice(0, actual_end))
+
+    np.testing.assert_array_equal(
+        block_permuted.sel(individuals="ind0")["position"],
+        block_orig.sel(individuals="ind1")["position"],
+    )
+
+    # Check that data after the clipped block is unchanged
+    xr.testing.assert_equal(
+        ds_permuted.isel(time=slice(actual_end, None)),
+        ds.isel(time=slice(actual_end, None)),
+    )
+
+
+def test_keypoint_ablation_all_space_dims_ablated(monkeypatch):
     """
     Test that KeypointAblation sets all space dimensions to NaN for selected elements.
     """
