@@ -289,9 +289,13 @@ def train_model(kwargs):
     # Parse and configure data augmentation
     aug_string = kwargs.get("data_augmentation")
     parsed_augmentation = parse_data_augmentation(aug_string)
-    pipeline = DataAugmentationPipeline(augmentations=parsed_augmentation)
-    validated_augmentations = pipeline.augmentations
-    
+
+    if not(parsed_augmentation is None):
+        pipeline = DataAugmentationPipeline(augmentations=parsed_augmentation)
+        validated_augmentations = pipeline.augmentations
+    else:
+        validated_augmentations = parsed_augmentation
+
     # Update kwargs with parsed augmentation
     kwargs_for_training = {**kwargs, "data_augmentation": validated_augmentations}
 

@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, ClassVar, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -100,7 +100,7 @@ class DataAugmentationConfig(BaseModel):
     sigma: float | None = None
 
     # Define which parameters are valid for each augmentation type
-    VALID_PARAMS = {
+    VALID_PARAMS: ClassVar[dict[str, set[str]]] = {
         "all_perm_id": {"p"},
         "all_perm_ax": {"p"},
         "blk_perm_id": {"p", "frac"},
