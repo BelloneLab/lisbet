@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class TransformerBackboneConfig(BaseModel):
@@ -80,12 +80,11 @@ class DataAugmentationConfig(BaseModel):
 
 
     Attributes:
-        name: Name of the augmentation technique (all_perm_id, all_perm_ax, blk_perm_id)
+        name: Name of the augmentation technique
         p: Probability of applying this transformation (0.0 to 1.0)
         pB: When applicable, per-element Bernoulli probability (kp_ablation types only)
-        frac: Fraction of frames to permute (only for blk_perm_id, 0.0 to 1.0 exclusive)
-        sigma: Standard deviation of Gaussian noise (jitter types only).
-        frac: Fraction-based block length for blk_gauss_jitter (also required).
+        frac: Fraction of frames to permute (only for block-based augmentations, 0.0 to 1.0 exclusive)
+        sigma: Standard deviation of Gaussian noise (jitter types only)
     """
     model_config = {"extra": "forbid"}  # Reject unknown parameters!
     name: Literal[
@@ -137,7 +136,46 @@ class DataAugmentationConfig(BaseModel):
             raise ValueError("pB must be > 0.0 and <= 1.0")
         return v
 
-
+    @model_validator(mode="after")
+    def validate_parameters_for_augmentation(self):
+        """Ensure only valid parameters are set for each augmentation type and apply defaults."""
+        valid_params = self.VALID_PARAMS[self.name]
+        
+        # Check which parameters are actually set (not None)
+        set_params = set()
+        if self.pB is not None:
+            set_params.add("pB")
+        if self.frac is not None:
+            set_params.add("frac")
+        if self.sigma is not None:
+            set_params.add("sigma")
+        
+        # Find invalid parameters
+        invalid_params = set_params - valid_params
+        if invalid_params:
+            raise ValueError(
+                f"Invalid parameter(s) {invalid_params} for augmentation '{self.name}'. "
+                f"Valid parameters are: {valid_params}"
+            )
+        
+        # Check required parameters and set defaults
+        block_types = ("blk_perm_id", "blk_translate", "blk_mirror_x", "blk_zoom")
+        
+        if self.name in block_types and self.frac is None:
+            # Set defaults for block-based augmentations
+            if self.name == "blk_perm_id":
+                self.frac = 0.5
+            else:  # blk_translate, blk_mirror_x, blk_zoom
+                self.frac = 0.1
+        
+        if self.name == "kp_ablation" and self.pB is None:
+            raise ValueError(f"Parameter 'pB' is required for augmentation '{self.name}'")
+        
+        if self.name == "gauss_jitter" and self.sigma is None:
+            # Set default sigma
+            self.sigma = 0.01
+        
+        return self
 
 class DataAugmentationPipeline(BaseModel):
     augmentations: list[DataAugmentationConfig]
