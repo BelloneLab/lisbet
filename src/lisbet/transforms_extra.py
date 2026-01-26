@@ -249,7 +249,7 @@ class KeypointAblation:
         # Apply ablation by setting selected (keypoint, individual) pairs to NaN
         # across all time
         pos = torch.from_numpy(pos_var.values)
-        pos = torch.where(bern, torch.tensor(float("nan")), pos)
+        pos = torch.where(bern, torch.tensor(0.0), pos)
         pos_var.values[:] = pos.numpy()
         return posetracks
 

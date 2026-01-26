@@ -234,9 +234,11 @@ def train_model(kwargs):
     from lisbet.config.schemas import (
         BackboneConfig,
         DataConfig,
+        DataAugmentationPipeline,
         ExperimentConfig,
         ModelConfig,
         TrainingConfig,
+
     )
     from lisbet.training import train
 
@@ -287,9 +289,11 @@ def train_model(kwargs):
     # Parse and configure data augmentation
     aug_string = kwargs.get("data_augmentation")
     parsed_augmentation = parse_data_augmentation(aug_string)
-
+    pipeline = DataAugmentationPipeline(augmentations=parsed_augmentation)
+    validated_augmentations = pipeline.augmentations
+    
     # Update kwargs with parsed augmentation
-    kwargs_for_training = {**kwargs, "data_augmentation": parsed_augmentation}
+    kwargs_for_training = {**kwargs, "data_augmentation": validated_augmentations}
 
     # Configure training
     training_config = TrainingConfig.model_validate(kwargs_for_training)

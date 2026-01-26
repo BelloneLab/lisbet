@@ -87,7 +87,7 @@ class DataAugmentationConfig(BaseModel):
         sigma: Standard deviation of Gaussian noise (jitter types only).
         frac: Fraction-based block length for blk_gauss_jitter (also required).
     """
-
+    model_config = {"extra": "forbid"}  # Reject unknown parameters!
     name: Literal[
         "all_perm_id",
         "all_perm_ax",
@@ -99,7 +99,15 @@ class DataAugmentationConfig(BaseModel):
     pB: float | None = None
     frac: float | None = None
     sigma: float | None = None
-    # window removed; block length derived from frac
+
+    # Define which parameters are valid for each augmentation type
+    VALID_PARAMS = {
+        "all_perm_id": {"p"},
+        "all_perm_ax": {"p"},
+        "blk_perm_id": {"p", "frac"},
+        "gauss_jitter": {"p", "sigma"},
+        "kp_ablation": {"p", "pB"},
+    }
 
     @field_validator("p")
     @classmethod
@@ -117,63 +125,22 @@ class DataAugmentationConfig(BaseModel):
 
     @field_validator("sigma")
     @classmethod
-    def validate_sigma(cls, v, info):
-        if info.data.get("name") in ("gauss_jitter"):
-            # Required (will default later if None), must be positive
-            if v is not None and v <= 0.0:
-                raise ValueError("sigma must be > 0.0 for jitter augmentations")
-        else:
-            # Disallow sigma for non-jitter types to avoid silent misuse
-            if v is not None:
-                raise ValueError("sigma parameter only valid for jitter augmentations")
+    def validate_sigma(cls, v):
+        if v is not None and v <= 0.0:
+            raise ValueError("sigma must be > 0.0")
         return v
     
     @field_validator("pB")
     @classmethod
-    def validate_pB(cls, v, info):
-        if info.data.get("name") in ("kp_ablation"):
-            # Required for ablation types
-            if v is None:
-                raise ValueError("pB must be set for keypoint ablation augmentations")
-            if not 0.0 <= v <= 1.0:
-                raise ValueError("pB must be between 0.0 and 1.0 for ablation augmentations")
-        else:
-            # Disallow pB for non-ablation types to avoid silent misuse
-            if v is not None:
-                raise ValueError("pB parameter only valid for keypoint ablation augmentations")
+    def validate_pB(cls, v):
+        if v is not None and not 0.0 < v <= 1.0:
+            raise ValueError("pB must be > 0.0 and <= 1.0")
         return v
 
-    # window parameter removed; frac used for blk_gauss_jitter
 
-    def model_post_init(self, __context):
-        """Validate that frac is only set for block-based augmentations."""
-        block_types = (
-            "blk_perm_id",
-            "blk_translate",
-            "blk_mirror_x",
-            "blk_zoom",
-        )
-        if self.name in block_types and self.frac is None:
-            # Set defaults
-            if self.name == "blk_perm_id":
-                self.frac = 0.5
-            else:  # blk_translate, blk_mirror_x, blk_zoom
-                self.frac = 0.1
-        elif self.name not in block_types and self.frac is not None:
-            raise ValueError(
-                f"frac parameter is only valid for {', '.join(block_types)}, "
-                "not {self.name}"
-            )
 
-        # Jitter defaults & requirements
-        if self.name in ("gauss_jitter"):
-            if self.sigma is None:
-                self.sigma = 0.01  # default sigma
-        else:
-            # Non-jitter types must not have sigma
-            if self.sigma is not None:
-                raise ValueError("sigma parameter only valid for jitter augmentations")
-
+class DataAugmentationPipeline(BaseModel):
+    augmentations: list[DataAugmentationConfig]
 
 class ModelConfig(BaseModel):
     model_id: str | None = None
