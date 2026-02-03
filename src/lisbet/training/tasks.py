@@ -70,14 +70,10 @@ def _build_augmentation_transforms(data_augmentation, seed):
                 transform = RandomPermutation(
                     aug_seed, coordinate="individuals", exclude_identity=True
                 )
-                if aug_config.p < 1.0:
-                    transform = transforms.RandomApply([transform], p=aug_config.p)
             elif aug_config.name == "all_perm_ax":
                 transform = RandomPermutation(
                     aug_seed, coordinate="space", exclude_identity=True
                 )
-                if aug_config.p < 1.0:
-                    transform = transforms.RandomApply([transform], p=aug_config.p)
             elif aug_config.name == "blk_perm_id":
                 transform = RandomBlockPermutation(
                     aug_seed,
@@ -85,21 +81,19 @@ def _build_augmentation_transforms(data_augmentation, seed):
                     permute_fraction=aug_config.frac,
                     exclude_identity=True,
                 )
-                if aug_config.p < 1.0:
-                    transform = transforms.RandomApply([transform], p=aug_config.p)
             elif aug_config.name == "gauss_jitter":
                 transform = GaussianJitter(
                     seed=aug_seed,
                     sigma=aug_config.sigma,
                 )
-                if aug_config.p < 1.0:
-                    transform = transforms.RandomApply([transform], p=aug_config.p)
             elif aug_config.name == "kp_ablation":
                 transform = KeypointAblation(
                     seed=aug_seed,
+                    pB=aug_config.pB,
                 )
-                if aug_config.p < 1.0:
-                    transform = transforms.RandomApply([transform], p=aug_config.p)
+
+            if aug_config.p < 1.0:
+                transform = transforms.RandomApply([transform], p=aug_config.p)
 
             transform_list.append(transform)
 
