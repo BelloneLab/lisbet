@@ -83,9 +83,11 @@ class DataAugmentationConfig(BaseModel):
         name: Name of the augmentation technique
         p: Probability of applying this transformation (0.0 to 1.0)
         pB: When applicable, per-element Bernoulli probability (kp_ablation types only)
-        frac: Fraction of frames to permute (only for block-based augmentations, 0.0 to 1.0 exclusive)
+        frac: Fraction of frames to permute (only for block-based augmentations, 0.0
+              to 1.0 exclusive)
         sigma: Standard deviation of Gaussian noise (jitter types only)
     """
+
     model_config = {"extra": "forbid"}  # Reject unknown parameters!
     name: Literal[
         "all_perm_id",
@@ -118,8 +120,8 @@ class DataAugmentationConfig(BaseModel):
     @field_validator("frac")
     @classmethod
     def validate_fraction(cls, v, info):
-        if v is not None and not 0.0 < v < 1.0:
-            raise ValueError("Fraction frac must be between 0.0 and 1.0 (exclusive)")
+        if v is not None and not 0.0 < v <= 1.0:
+            raise ValueError("Fraction frac must be in (0, 1]")
         return v
 
     @field_validator("sigma")
@@ -128,7 +130,7 @@ class DataAugmentationConfig(BaseModel):
         if v is not None and v <= 0.0:
             raise ValueError("sigma must be > 0.0")
         return v
-    
+
     @field_validator("pB")
     @classmethod
     def validate_pB(cls, v):
@@ -138,9 +140,12 @@ class DataAugmentationConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_parameters_for_augmentation(self):
-        """Ensure only valid parameters are set for each augmentation type and apply defaults."""
+        """
+        Ensure only valid parameters are set for each augmentation type and apply
+        defaults.
+        """
         valid_params = self.VALID_PARAMS[self.name]
-        
+
         # Check which parameters are actually set (not None)
         set_params = set()
         if self.pB is not None:
@@ -149,36 +154,40 @@ class DataAugmentationConfig(BaseModel):
             set_params.add("frac")
         if self.sigma is not None:
             set_params.add("sigma")
-        
+
         # Find invalid parameters
         invalid_params = set_params - valid_params
         if invalid_params:
             raise ValueError(
-                f"Invalid parameter(s) {invalid_params} for augmentation '{self.name}'. "
-                f"Valid parameters are: {valid_params}"
+                f"Invalid parameter(s) {invalid_params} for augmentation "
+                f"'{self.name}'. Valid parameters are: {valid_params}"
             )
-        
+
         # Check required parameters and set defaults
         block_types = ("blk_perm_id", "blk_translate", "blk_mirror_x", "blk_zoom")
-        
+
         if self.name in block_types and self.frac is None:
             # Set defaults for block-based augmentations
             if self.name == "blk_perm_id":
                 self.frac = 0.5
             else:  # blk_translate, blk_mirror_x, blk_zoom
                 self.frac = 0.1
-        
+
         if self.name == "kp_ablation" and self.pB is None:
-            raise ValueError(f"Parameter 'pB' is required for augmentation '{self.name}'")
-        
+            raise ValueError(
+                f"Parameter 'pB' is required for augmentation '{self.name}'"
+            )
+
         if self.name == "gauss_jitter" and self.sigma is None:
             # Set default sigma
             self.sigma = 0.01
-        
+
         return self
+
 
 class DataAugmentationPipeline(BaseModel):
     augmentations: list[DataAugmentationConfig]
+
 
 class ModelConfig(BaseModel):
     model_id: str | None = None

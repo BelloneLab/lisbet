@@ -124,13 +124,14 @@ def configure_train_model_parser(parser: argparse.ArgumentParser) -> None:
                 - blk_perm_id: Randomly permute identities of individuals, applied
                                to a contiguous block of frames within a window.
 
-                - gauss_jitter: Randomly add N(0,sigma) noise applied consistently in a window.
+                - gauss_jitter: Randomly add N(0,sigma) noise applied consistently in
+                                a window.
 
                 - kp_ablation: Randomly set keypoint coordinates to NaN (missing data)
                                applied consistently across all frames in a window.
                                Use Bernoulli(pB) to select which keypoints to ablate.
                                Simulates sporadic occlusions or tracking failures.
- 
+
 
             Parameters (optional):
                 - p=<float>: Probability of applying the transformation (default: 1.0)
@@ -233,12 +234,11 @@ def train_model(kwargs):
     from lisbet.config.presets import BACKBONE_PRESETS
     from lisbet.config.schemas import (
         BackboneConfig,
-        DataConfig,
         DataAugmentationPipeline,
+        DataConfig,
         ExperimentConfig,
         ModelConfig,
         TrainingConfig,
-
     )
     from lisbet.training import train
 
@@ -290,7 +290,7 @@ def train_model(kwargs):
     aug_string = kwargs.get("data_augmentation")
     parsed_augmentation = parse_data_augmentation(aug_string)
 
-    if not(parsed_augmentation is None):
+    if parsed_augmentation is not None:
         pipeline = DataAugmentationPipeline(augmentations=parsed_augmentation)
         validated_augmentations = pipeline.augmentations
     else:
