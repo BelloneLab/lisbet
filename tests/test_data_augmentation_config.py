@@ -172,3 +172,39 @@ def test_parse_data_augmentation_with_jitter_params():
     assert result[0]["name"] == "gauss_jitter"
     assert result[0]["p"] == 0.02
     assert result[0]["sigma"] == 0.01
+
+def test_data_augmentation_config_translate():
+    """Test creating translate augmentation configs."""
+    # translate without parameters
+    cfg1 = DataAugmentationConfig(name="translate")
+    assert cfg1.name == "translate"
+    assert cfg1.p == 1.0
+    assert cfg1.frac is None
+
+    # translate with probability
+    cfg2 = DataAugmentationConfig(name="translate", p=0.5)
+    assert cfg2.p == 0.5
+
+def test_data_augmentation_config_mirror_x():
+    """Test creating mirror_x augmentation configs."""
+    # mirror_x without parameters
+    cfg1 = DataAugmentationConfig(name="mirror_x")
+    assert cfg1.name == "mirror_x"
+    assert cfg1.p == 1.0
+    assert cfg1.frac is None
+
+    # mirror_x with probability
+    cfg2 = DataAugmentationConfig(name="mirror_x", p=0.4)
+    assert cfg2.p == 0.4
+
+def test_data_augmentation_config_zoom():
+    """Test creating zoom augmentation configs."""
+    # zoom without parameters
+    cfg1 = DataAugmentationConfig(name="zoom")
+    assert cfg1.name == "zoom"
+    assert cfg1.p == 1.0
+    assert cfg1.frac is None
+
+    # zoom with probability
+    cfg2 = DataAugmentationConfig(name="zoom", p=0.3)
+    assert cfg2.p == 0.3

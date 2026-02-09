@@ -38,6 +38,19 @@ VideoToTensor
     Converts video frames from NumPy arrays to PyTorch tensors with optional
     normalization for video model inputs.
 
+RandomTranslate
+    Apply random translation to entire window. Same translation applied to all
+    frames, computed to keep all keypoints within [0, 1] bounds. Provides invariance
+    to location within frame.
+RandomMirrorX
+    Apply horizontal mirroring to entire window. All frames mirrored around x=0.5
+    (flip left/right). Provides invariance to lateral orientation.
+RandomZoom
+    Apply random zoom/dezoom to entire window around center (0.5, 0.5). Same scale
+    factor applied to all frames using formula: keypoints_new = 0.5 + scale * 
+    (keypoints_old - 0.5). Scale computed to keep all keypoints within [0, 1] bounds.
+    Provides invariance to depth/distance.
+
 Usage Examples
 --------------
 >>> from lisbet.transforms_extra import RandomPermutation, PoseToTensor
@@ -75,6 +88,15 @@ Usage Examples
 ...     PoseToTensor(),
 ... ])
 
+>>> # Spatial augmentation pipeline
+>>> from lisbet.transforms_extra import RandomTranslate, RandomMirrorX, RandomZoom
+>>> transform = transforms.Compose([
+...     transforms.RandomApply([RandomTranslate(seed=42)], p=0.5),
+...     transforms.RandomApply([RandomMirrorX(seed=43)], p=0.5),
+...     transforms.RandomApply([RandomZoom(seed=44)], p=0.3),
+...     PoseToTensor(),
+... ])
+
 Notes
 -----
 - Augmentations should be applied thoughtfully based on dataset characteristics
@@ -82,6 +104,10 @@ Notes
   datasets where axes are symmetric
 - Identity permutations work best for datasets where individual labels are
   interchangeable
+- Spatial transformations (translate, mirror_x, zoom) automatically handle NaN values
+  and ensure coordinates remain within [0, 1] bounds
+- Mirror augmentation should only be used when left/right symmetry is meaningful
+  for the task
 """
 
 import cv2
@@ -465,6 +491,212 @@ class RandomBlockPermutation:
         return posetracks
 
 
+class RandomTranslate:
+    """Apply random translation to entire window.
+    Same translation applied to all frames in the window, computed to keep all
+    keypoints within [0, 1] bounds. Provides invariance to location within frame.
+    Parameters
+    ----------
+    seed : int
+        RNG seed for reproducibility.
+    Examples
+    --------
+    >>> from lisbet.transforms_extra import RandomTranslate
+    >>> translate = RandomTranslate(seed=42)
+    >>> translated_ds = translate(posetracks)
+    """
+
+    def __init__(self, seed: int):
+        self.seed = seed
+        self.g = torch.Generator().manual_seed(seed)
+
+    def __call__(self, posetracks: xr.Dataset) -> xr.Dataset:
+        pos_var = posetracks["position"]
+        dims = list(pos_var.dims)
+        if "time" not in dims:
+            raise ValueError("Position variable must have 'time' dimension.")
+        t_idx = dims.index("time")
+        T = pos_var.shape[t_idx]
+        if T == 0:
+            return posetracks
+
+        # Find space dimension indices
+        space_dims = []
+        if "space" in dims:
+            space_coords = list(posetracks.coords["space"].values)
+            for coord_name in ["x", "y"]:
+                if coord_name in space_coords:
+                    space_dims.append(space_coords.index(coord_name))
+
+        if len(space_dims) == 0:
+            return posetracks
+
+        pos = torch.from_numpy(pos_var.values)
+
+        # Compute translation for the entire window
+        # Find min/max across all frames
+        translations = []
+        for s_local_idx, s_global_idx in enumerate(space_dims):
+            all_coords = pos[:, s_global_idx, :, :]
+            valid_coords = all_coords[~torch.isnan(all_coords)]
+
+            if valid_coords.numel() == 0:
+                translations.append(0.0)
+                continue
+
+            min_coord = valid_coords.min().item()
+            max_coord = valid_coords.max().item()
+
+            min_translation = -min_coord
+            max_translation = 1.0 - max_coord
+
+            if min_translation < max_translation:
+                delta = torch.rand(1, generator=self.g).item()
+                translation = min_translation + delta * (max_translation - min_translation)
+            else:
+                translation = min_translation
+
+            translations.append(translation)
+
+        # Apply to all frames
+        for t in range(T):
+            for s_local_idx, s_global_idx in enumerate(space_dims):
+                pos[t, s_global_idx, :, :] += translations[s_local_idx]
+
+        pos_var.values[:] = pos.numpy()
+        return posetracks
+    
+class RandomMirrorX:
+    """Apply horizontal mirroring to entire window.
+    All frames in the window have x coordinates mirrored around x=0.5
+    (flip left/right). Provides invariance to lateral orientation.
+    Parameters
+    ----------
+    seed : int
+        RNG seed for reproducibility.
+    Examples
+    --------
+    >>> from lisbet.transforms_extra import RandomMirrorX
+    >>> mirror = RandomMirrorX(seed=42)
+    >>> mirrored_ds = mirror(posetracks)
+    """
+
+    def __init__(self, seed: int):
+        self.seed = seed
+        self.g = torch.Generator().manual_seed(seed)
+
+    def __call__(self, posetracks: xr.Dataset) -> xr.Dataset:
+        pos_var = posetracks["position"]
+        dims = list(pos_var.dims)
+        if "time" not in dims:
+            raise ValueError("Position variable must have 'time' dimension.")
+        t_idx = dims.index("time")
+        T = pos_var.shape[t_idx]
+        if T == 0:
+            return posetracks
+
+        # Find x coordinate index
+        x_idx = None
+        if "space" in dims:
+            space_coords = list(posetracks.coords["space"].values)
+            if "x" in space_coords:
+                x_idx = space_coords.index("x")
+
+        if x_idx is None:
+            return posetracks
+
+        pos = torch.from_numpy(pos_var.values)
+
+        # Mirror all frames
+        for t in range(T):
+            pos[t, x_idx, :, :] = 1.0 - pos[t, x_idx, :, :]
+
+        pos_var.values[:] = pos.numpy()
+        return posetracks
+
+
+class RandomZoom:
+    """Apply random zoom/dezoom to entire window.
+    Same scale factor applied to all frames in the window, scaling around center
+    (0.5, 0.5). Scale computed to keep all keypoints within [0, 1] bounds.
+    Formula: keypoints_new = 0.5 + scale * (keypoints_old - 0.5).
+    Provides invariance to depth/distance.
+    Parameters
+    ----------
+    seed : int
+        RNG seed for reproducibility.
+    Examples
+    --------
+    >>> from lisbet.transforms_extra import RandomZoom
+    >>> zoom = RandomZoom(seed=42)
+    >>> zoomed_ds = zoom(posetracks)
+    """
+
+    def __init__(self, seed: int):
+        self.seed = seed
+        self.g = torch.Generator().manual_seed(seed)
+
+    def __call__(self, posetracks: xr.Dataset) -> xr.Dataset:
+        pos_var = posetracks["position"]
+        dims = list(pos_var.dims)
+        if "time" not in dims:
+            raise ValueError("Position variable must have 'time' dimension.")
+        t_idx = dims.index("time")
+        T = pos_var.shape[t_idx]
+        if T == 0:
+            return posetracks
+
+        # Find x and y coordinate indices
+        space_dims = []
+        if "space" in dims:
+            space_coords = list(posetracks.coords["space"].values)
+            for coord_name in ["x", "y"]:
+                if coord_name in space_coords:
+                    space_dims.append(space_coords.index(coord_name))
+
+        if len(space_dims) == 0:
+            return posetracks
+
+        pos = torch.from_numpy(pos_var.values)
+        center = 0.5
+
+        # Find valid scale range across all frames in the window
+        min_scale = 0.0
+        max_scale = float('inf')
+
+        for t in range(T):
+            for s_idx in space_dims:
+                coords = pos[t, s_idx, :, :]
+                valid_coords = coords[~torch.isnan(coords)]
+
+                if valid_coords.numel() == 0:
+                    continue
+
+                for coord in valid_coords:
+                    diff = coord.item() - center
+                    if abs(diff) < 1e-9:
+                        continue
+
+                    if diff > 0:
+                        max_scale = min(max_scale, (1.0 - center) / diff)
+                        min_scale = max(min_scale, -center / diff)
+                    else:
+                        min_scale = max(min_scale, (1.0 - center) / diff)
+                        max_scale = min(max_scale, -center / diff)
+
+        # Sample random scale for entire window
+        if min_scale < max_scale and max_scale > 0:
+            scale = min_scale + torch.rand(1, generator=self.g).item() * (max_scale - min_scale)
+
+            # Apply to all frames
+            for t in range(T):
+                for s_idx in space_dims:
+                    pos[t, s_idx, :, :] = center + scale * (pos[t, s_idx, :, :] - center)
+
+        pos_var.values[:] = pos.numpy()
+        return posetracks
+    
+        
 class PoseToTensor:
     """
     Convert the 'position' variable from a posetracks xarray.Dataset into a PyTorch

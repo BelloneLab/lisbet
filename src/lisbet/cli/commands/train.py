@@ -91,6 +91,7 @@ def configure_train_model_parser(parser: argparse.ArgumentParser) -> None:
               - order: Temporal Order Classification
               - shift: Temporal Shift Classification
               - warp: Temporal Warp Classification
+              - geom : Geometric Consistency Classification
 
             Example:
               order,cons
@@ -131,6 +132,18 @@ def configure_train_model_parser(parser: argparse.ArgumentParser) -> None:
                                applied consistently across all frames in a window.
                                Use Bernoulli(pB) to select which keypoints to ablate.
                                Simulates sporadic occlusions or tracking failures.
+
+                - all_translate: Randomly translate all individuals together in x,y
+                            consistently across all frames in a window. 
+                            Translation computed to keep all keypoints in [0,1] bounds.
+                            Provides invariance to location within frame.
+                - all_mirror_x: Randomly mirror horizontally around x=0.5.
+                            Consistently across all frames in a window.
+                            Provides invariance to lateral orientation.
+                - all_zoom: Randomly zoom/dezoom around center (0.5, 0.5).
+                        Consistently across all frames in a window.
+                        Scale computed to keep all keypoints in [0,1] bounds.
+                        Provides invariance to depth/distance.
 
 
             Parameters (optional):
