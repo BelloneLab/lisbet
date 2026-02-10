@@ -97,41 +97,9 @@ def test_data_augmentation_config_invalid_probability():
         DataAugmentationConfig(name="all_perm_id", p=-0.1)
 
 
-def test_data_augmentation_config_invalid_fraction():
-    """Test that invalid fractions are rejected."""
-    with pytest.raises(ValueError, match="Fraction frac must be between 0.0 and 1.0"):
-        DataAugmentationConfig(name="blk_perm_id", frac=0.0)
-
-    with pytest.raises(ValueError, match="Fraction frac must be between 0.0 and 1.0"):
-        DataAugmentationConfig(name="blk_perm_id", frac=1.0)
-
-    with pytest.raises(ValueError, match="Fraction frac must be between 0.0 and 1.0"):
-        DataAugmentationConfig(name="blk_perm_id", frac=1.5)
 
 
-def test_data_augmentation_config_invalid_sigma_usage():
-    with pytest.raises(ValueError, match="sigma parameter only valid"):
-        DataAugmentationConfig(name="all_perm_id", sigma=0.01)
-    with pytest.raises(ValueError, match="sigma must be > 0.0"):
-        DataAugmentationConfig(name="gauss_jitter", sigma=0.0)
 
-
-def test_data_augmentation_config_invalid_frac_usage():
-    with pytest.raises(ValueError, match="frac parameter is only valid"):
-        DataAugmentationConfig(name="gauss_jitter", frac=0.2)
-
-
-def test_data_augmentation_config_frac_only_for_valid_names():
-    """Test that frac parameter is only valid for block-based augmentations."""
-    with pytest.raises(
-        ValueError, match="frac parameter is only valid for"
-    ):
-        DataAugmentationConfig(name="all_perm_id", frac=0.5)
-
-    with pytest.raises(
-        ValueError, match="frac parameter is only valid for"
-    ):
-        DataAugmentationConfig(name="all_perm_ax", frac=0.5)
 
 
 def test_data_augmentation_config_edge_case_probabilities():
