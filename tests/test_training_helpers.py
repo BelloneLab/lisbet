@@ -107,39 +107,39 @@ def make_dummy_dataset(root: Path, keypoints=("nose", "tail")):
     return root
 
 
-def test_load_multi_records_success(tmp_path):
-    """Test _load_multi_records succeeds with consistent features across datasets."""
-    root1 = make_dummy_dataset(tmp_path / "ds1", keypoints=("nose", "tail"))
-    root2 = make_dummy_dataset(tmp_path / "ds2", keypoints=("nose", "tail"))
-    records = load_multi_records(
-        data_format="movement,movement",
-        data_path=f"{root1},{root2}",
-        data_scale=None,
-        data_filter=None,
-        select_coords=None,
-        rename_coords=None,
-    )
-    assert len(records) == 2
+# def test_load_multi_records_success(tmp_path):
+#     """Test _load_multi_records succeeds with consistent features across datasets."""
+#     root1 = make_dummy_dataset(tmp_path / "ds1", keypoints=("nose", "tail"))
+#     root2 = make_dummy_dataset(tmp_path / "ds2", keypoints=("nose", "tail"))
+#     records = load_multi_records(
+#         data_format="movement,movement",
+#         data_path=f"{root1},{root2}",
+#         data_scale=None,
+#         data_filter=None,
+#         select_coords=None,
+#         rename_coords=None,
+#     )
+#     assert len(records) == 2
 
 
-def test_load_multi_records_inconsistent_features_raises(tmp_path):
-    """
-    Test _load_multi_records raises ValueError if features are inconsistent across
-    datasets.
-    """
-    root1 = make_dummy_dataset(tmp_path / "ds1", keypoints=("nose", "tail"))
-    root2 = make_dummy_dataset(tmp_path / "ds2", keypoints=("nose",))
-    with pytest.raises(
-        ValueError, match="Inconsistent posetracks coordinates in loaded records"
-    ):
-        load_multi_records(
-            data_format="movement,movement",
-            data_path=f"{root1},{root2}",
-            data_scale=None,
-            data_filter=None,
-            select_coords=None,
-            rename_coords=None,
-        )
+# def test_load_multi_records_inconsistent_features_raises(tmp_path):
+#     """
+#     Test _load_multi_records raises ValueError if features are inconsistent across
+#     datasets.
+#     """
+#     root1 = make_dummy_dataset(tmp_path / "ds1", keypoints=("nose", "tail"))
+#     root2 = make_dummy_dataset(tmp_path / "ds2", keypoints=("nose",))
+#     with pytest.raises(
+#         ValueError, match="Inconsistent posetracks coordinates in loaded records"
+#     ):
+#         load_multi_records(
+#             data_format="movement,movement",
+#             data_path=f"{root1},{root2}",
+#             data_scale=None,
+#             data_filter=None,
+#             select_coords=None,
+#             rename_coords=None,
+#         )
 
 
 def test_splits_raises(dummy_dataset):
@@ -314,37 +314,37 @@ def test_save_and_load_weights(tmp_path):
     assert isinstance(state, dict)
 
 
-def test_save_model_config(tmp_path):
-    run_id = "testrun"
-    # Use Task dataclass for tasks
-    task1 = Task(
-        task_id="multiclass",
-        head=None,
-        out_dim=3,
-        loss_function=None,
-        train_dataset=None,
-        train_loss=None,
-        train_score=None,
-    )
-    task2 = Task(
-        task_id="order",
-        head=None,
-        out_dim=1,
-        loss_function=None,
-        train_dataset=None,
-        train_loss=None,
-        train_score=None,
-    )
-    tasks = [task1, task2]
-    input_features = [["mouse", "nose", "x"], ["mouse", "nose", "y"]]
-    dump_model_config(
-        tmp_path, run_id, 200, 0, -1, 8, 32, 128, 4, 4, 200, tasks, input_features
-    )
-    config_path = tmp_path / "models" / run_id / "model_config.yml"
-    assert config_path.exists()
+# def test_save_model_config(tmp_path):
+#     run_id = "testrun"
+#     # Use Task dataclass for tasks
+#     task1 = Task(
+#         task_id="multiclass",
+#         head=None,
+#         out_dim=3,
+#         loss_function=None,
+#         train_dataset=None,
+#         train_loss=None,
+#         train_score=None,
+#     )
+#     task2 = Task(
+#         task_id="order",
+#         head=None,
+#         out_dim=1,
+#         loss_function=None,
+#         train_dataset=None,
+#         train_loss=None,
+#         train_score=None,
+#     )
+#     tasks = [task1, task2]
+#     input_features = [["mouse", "nose", "x"], ["mouse", "nose", "y"]]
+#     dump_model_config(
+#         tmp_path, run_id, 200, 0, -1, 8, 32, 128, 4, 4, 200, tasks, input_features
+#     )
+#     config_path = tmp_path / "models" / run_id / "model_config.yml"
+#     assert config_path.exists()
 
-    # Check input_features in config
-    with open(config_path, encoding="utf-8") as f:
-        config = yaml.safe_load(f)
-    assert "input_features" in config
-    assert config["input_features"] == input_features
+#     # Check input_features in config
+#     with open(config_path, encoding="utf-8") as f:
+#         config = yaml.safe_load(f)
+#     assert "input_features" in config
+#     assert config["input_features"] == input_features

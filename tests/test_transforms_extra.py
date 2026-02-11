@@ -9,6 +9,9 @@ from lisbet.transforms_extra import (
     RandomBlockPermutation,
     RandomPermutation,
     _random_permutation,
+    RandomTranslate,
+    RandomZoom,
+    RandomMirrorX,
 )
 
 
@@ -678,7 +681,7 @@ def test_gaussian_jitter_determinism():
 
 
 def test_keypoint_ablation_basic():
-    """Test KeypointAblation sets selected elements to NaN."""
+    """Test KeypointAblation sets selected elements to 0.0."""
     T, S, K, I = 50, 2, 4, 3  # noqa: E741
     rng = np.random.default_rng(1789)
     arr = rng.random((T, S, K, I), dtype=np.float32)
@@ -699,9 +702,9 @@ def test_keypoint_ablation_basic():
     pos_orig = ds["position"].values
     pos_abl = ds_abl["position"].values
 
-    # An element is ablated if all its space coordinates are NaN
+    # An element is ablated if all its space coordinates are 0.0
     # Shape: (T, S, K, I)
-    ablated_elements = np.all(np.isnan(pos_abl), axis=1)  # shape (T, K, I)
+    ablated_elements = np.all(pos_abl == 0.0, axis=1)  # shape (T, K, I)
 
     # Check that we have some ablation
     assert ablated_elements.sum() > 0, "No keypoints were ablated"
@@ -923,3 +926,273 @@ def test_keypoint_ablation_all_space_dims_ablated(monkeypatch):
                 space_vals = pos_abl[t, :, k, i]
                 # Either all NaN or none NaN
                 assert np.all(np.isnan(space_vals)) or np.all(~np.isnan(space_vals))
+
+
+
+
+# Tests for RandomTranslate
+def test_random_translate_basic():
+    """Test RandomTranslate applies same translation to all frames."""
+    T, S, K, I = 30, 2, 3, 2  # noqa: E741
+    rng = np.random.default_rng(42)
+    # Create data with values in [0.2, 0.8] range
+    arr = 0.2 + 0.6 * rng.random((T, S, K, I)).astype(np.float32)
+    ds = xr.Dataset(
+        {"position": (("time", "space", "keypoints", "individuals"), arr)},
+        coords={
+            "time": np.arange(T),
+            "space": ["x", "y"],
+            "keypoints": [f"kp{k}" for k in range(K)],
+            "individuals": [f"ind{i}" for i in range(I)],
+        },
+    )
+
+    translate = RandomTranslate(seed=123)
+    ds_translated = translate(ds.copy(deep=True))
+
+    # Check that all frames are translated
+    diff = ds_translated["position"].values - ds["position"].values
+
+    # All frames should have the same translation
+    # Check x and y translations separately
+    for s_idx in range(S):
+        frame_translations = diff[:, s_idx, 0, 0]  # Translation for first kp and ind
+        # All should be the same (ignoring numerical errors)
+        assert np.allclose(frame_translations, frame_translations[0]), \
+            f"Translation not consistent across frames for space dim {s_idx}"
+
+    # Check that all coordinates remain in [0, 1]
+    assert np.all(ds_translated["position"].values >= 0.0)
+    assert np.all(ds_translated["position"].values <= 1.0)
+
+
+def test_random_translate_determinism():
+    """Test RandomTranslate produces deterministic results with same seed."""
+    T, S, K, I = 20, 2, 2, 2  # noqa: E741
+    rng = np.random.default_rng(42)
+    arr = 0.3 + 0.4 * rng.random((T, S, K, I)).astype(np.float32)
+    ds = xr.Dataset(
+        {"position": (("time", "space", "keypoints", "individuals"), arr)},
+        coords={
+            "time": np.arange(T),
+            "space": ["x", "y"],
+            "keypoints": [f"kp{k}" for k in range(K)],
+            "individuals": [f"ind{i}" for i in range(I)],
+        },
+    )
+
+    translate1 = RandomTranslate(seed=42)
+    translate2 = RandomTranslate(seed=42)
+
+    ds1 = translate1(ds.copy(deep=True))
+    ds2 = translate2(ds.copy(deep=True))
+
+    xr.testing.assert_allclose(ds1, ds2)
+
+
+def test_random_translate_with_nans():
+    """Test RandomTranslate preserves NaN values."""
+    T, S, K, I = 15, 2, 3, 2  # noqa: E741
+    rng = np.random.default_rng(42)
+    arr = 0.2 + 0.6 * rng.random((T, S, K, I)).astype(np.float32)
+    # Set some values to NaN
+    arr[5:10, :, 1, :] = np.nan
+
+    ds = xr.Dataset(
+        {"position": (("time", "space", "keypoints", "individuals"), arr)},
+        coords={
+            "time": np.arange(T),
+            "space": ["x", "y"],
+            "keypoints": [f"kp{k}" for k in range(K)],
+            "individuals": [f"ind{i}" for i in range(I)],
+        },
+    )
+
+    translate = RandomTranslate(seed=123)
+    ds_translated = translate(ds.copy(deep=True))
+
+    # NaN pattern should be preserved
+    nan_mask_original = np.isnan(ds["position"].values)
+    nan_mask_translated = np.isnan(ds_translated["position"].values)
+    np.testing.assert_array_equal(nan_mask_original, nan_mask_translated)
+
+
+# Tests for RandomMirrorX
+def test_random_mirror_x_basic():
+    """Test RandomMirrorX basic functionality."""
+    T, S, K, I = 30, 2, 3, 2  # noqa: E741
+    rng = np.random.default_rng(42)
+    arr = 0.2 + 0.6 * rng.random((T, S, K, I)).astype(np.float32)
+    ds = xr.Dataset(
+        {"position": (("time", "space", "keypoints", "individuals"), arr)},
+        coords={
+            "time": np.arange(T),
+            "space": ["x", "y"],
+            "keypoints": [f"kp{k}" for k in range(K)],
+            "individuals": [f"ind{i}" for i in range(I)],
+        },
+    )
+
+    mirror = RandomMirrorX(seed=123)
+    ds_mirrored = mirror(ds.copy(deep=True))
+
+    # Check that all frames are mirrored (x becomes 1.0 - x)
+    x_diff = ds_mirrored["position"].sel(space="x").values - ds["position"].sel(space="x").values
+    changed_frames = np.any(np.abs(x_diff) > 1e-9, axis=(1, 2))
+    assert changed_frames.sum() == T, "Not all frames were mirrored"
+
+    # Check that y coordinates are unchanged
+    y_diff = ds_mirrored["position"].sel(space="y").values - ds["position"].sel(space="y").values
+    np.testing.assert_allclose(y_diff, 0.0, atol=1e-9)
+
+    # Check that all coordinates remain in [0, 1]
+    assert np.all(ds_mirrored["position"].values >= 0.0)
+    assert np.all(ds_mirrored["position"].values <= 1.0)
+
+
+def test_random_mirror_x_symmetry():
+    """Test RandomMirrorX creates proper mirror symmetry around x=0.5."""
+    T, S, K, I = 10, 2, 2, 1  # noqa: E741
+    # Create test data with known x values
+    arr = np.zeros((T, S, K, I), dtype=np.float32)
+    arr[:, 0, :, :] = 0.3  # x = 0.3 should mirror to 0.7
+    arr[:, 1, :, :] = 0.5  # y values
+
+    ds = xr.Dataset(
+        {"position": (("time", "space", "keypoints", "individuals"), arr)},
+        coords={
+            "time": np.arange(T),
+            "space": ["x", "y"],
+            "keypoints": [f"kp{k}" for k in range(K)],
+            "individuals": [f"ind{i}" for i in range(I)],
+        },
+    )
+
+    mirror = RandomMirrorX(seed=123)
+    ds_mirrored = mirror(ds.copy(deep=True))
+
+    # Check x values are mirrored: x_new = 1.0 - x_old
+    x_original = ds["position"].sel(space="x").values
+    x_mirrored = ds_mirrored["position"].sel(space="x").values
+    np.testing.assert_allclose(x_mirrored, 1.0 - x_original, atol=1e-6)
+
+
+def test_random_mirror_x_with_nans():
+    """Test RandomMirrorX preserves NaN values."""
+    T, S, K, I = 15, 2, 3, 2  # noqa: E741
+    rng = np.random.default_rng(42)
+    arr = 0.2 + 0.6 * rng.random((T, S, K, I)).astype(np.float32)
+    # Set some values to NaN
+    arr[5:10, :, 1, :] = np.nan
+
+    ds = xr.Dataset(
+        {"position": (("time", "space", "keypoints", "individuals"), arr)},
+        coords={
+            "time": np.arange(T),
+            "space": ["x", "y"],
+            "keypoints": [f"kp{k}" for k in range(K)],
+            "individuals": [f"ind{i}" for i in range(I)],
+        },
+    )
+
+    mirror = RandomMirrorX(seed=123)
+    ds_mirrored = mirror(ds.copy(deep=True))
+
+    # NaN pattern should be preserved
+    nan_mask_original = np.isnan(ds["position"].values)
+    nan_mask_mirrored = np.isnan(ds_mirrored["position"].values)
+    np.testing.assert_array_equal(nan_mask_original, nan_mask_mirrored)
+
+
+
+# Tests for RandomZoom
+def test_random_zoom_basic():
+    """Test RandomZoom basic functionality."""
+    T, S, K, I = 30, 2, 3, 2  # noqa: E741
+    rng = np.random.default_rng(42)
+    arr = 0.2 + 0.6 * rng.random((T, S, K, I)).astype(np.float32)
+    ds = xr.Dataset(
+        {"position": (("time", "space", "keypoints", "individuals"), arr)},
+        coords={
+            "time": np.arange(T),
+            "space": ["x", "y"],
+            "keypoints": [f"kp{k}" for k in range(K)],
+            "individuals": [f"ind{i}" for i in range(I)],
+        },
+    )
+
+    zoom = RandomZoom(seed=123)
+    ds_zoomed = zoom(ds.copy(deep=True))
+
+    # Check that all frames are zoomed (same scale applied to all)
+    diff = ds_zoomed["position"].values - ds["position"].values
+    changed_frames = np.any(np.abs(diff) > 1e-9, axis=(1, 2, 3))
+    assert changed_frames.sum() == T, "Not all frames were zoomed"
+
+    # Check that all coordinates remain in [0, 1]
+    assert np.all(ds_zoomed["position"].values >= 0.0)
+    assert np.all(ds_zoomed["position"].values <= 1.0)
+
+
+def test_random_zoom_center():
+    """Test RandomZoom zooms around center (0.5, 0.5)."""
+    T, S, K, I = 10, 2, 3, 2  # noqa: E741
+    # Create test data symmetric around center
+    arr = np.zeros((T, S, K, I), dtype=np.float32)
+    # Create points at equal distances from center
+    arr[:, 0, 0, :] = 0.3  # x = 0.3 (0.2 from center)
+    arr[:, 0, 1, :] = 0.5  # x = 0.5 (at center)
+    arr[:, 0, 2, :] = 0.7  # x = 0.7 (0.2 from center)
+    arr[:, 1, :, :] = 0.5  # y = 0.5 for all
+
+    ds = xr.Dataset(
+        {"position": (("time", "space", "keypoints", "individuals"), arr)},
+        coords={
+            "time": np.arange(T),
+            "space": ["x", "y"],
+            "keypoints": [f"kp{k}" for k in range(K)],
+            "individuals": [f"ind{i}" for i in range(I)],
+        },
+    )
+
+    zoom = RandomZoom(seed=123)
+    ds_zoomed = zoom(ds.copy(deep=True))
+
+    # Center keypoint (kp1) should remain at x=0.5
+    center_kp_x = ds_zoomed["position"].sel(space="x", keypoints="kp1").values
+    np.testing.assert_allclose(center_kp_x, 0.5, atol=1e-6)
+
+    # After zoom, symmetric points should remain symmetric around center
+    # Check that kp0 and kp2 are equidistant from center
+    kp0_x = ds_zoomed["position"].sel(space="x", keypoints="kp0").values
+    kp2_x = ds_zoomed["position"].sel(space="x", keypoints="kp2").values
+    dist0 = np.abs(kp0_x - 0.5)
+    dist2 = np.abs(kp2_x - 0.5)
+    np.testing.assert_allclose(dist0, dist2, atol=1e-6)
+
+
+def test_random_zoom_with_nans():
+    """Test RandomZoom preserves NaN values."""
+    T, S, K, I = 15, 2, 3, 2  # noqa: E741
+    rng = np.random.default_rng(42)
+    arr = 0.2 + 0.6 * rng.random((T, S, K, I)).astype(np.float32)
+    # Set some values to NaN
+    arr[5:10, :, 1, :] = np.nan
+
+    ds = xr.Dataset(
+        {"position": (("time", "space", "keypoints", "individuals"), arr)},
+        coords={
+            "time": np.arange(T),
+            "space": ["x", "y"],
+            "keypoints": [f"kp{k}" for k in range(K)],
+            "individuals": [f"ind{i}" for i in range(I)],
+        },
+    )
+
+    zoom = RandomZoom(seed=123)
+    ds_zoomed = zoom(ds.copy(deep=True))
+
+    # NaN pattern should be preserved
+    nan_mask_original = np.isnan(ds["position"].values)
+    nan_mask_zoomed = np.isnan(ds_zoomed["position"].values)
+    np.testing.assert_array_equal(nan_mask_original, nan_mask_zoomed)

@@ -23,6 +23,9 @@ from lisbet.transforms_extra import (
     PoseToTensor,
     RandomBlockPermutation,
     RandomPermutation,
+    RandomTranslate,
+    RandomZoom,
+    RandomMirrorX,
 )
 
 
@@ -91,7 +94,21 @@ def _build_augmentation_transforms(data_augmentation, seed):
                     seed=aug_seed,
                     pB=aug_config.pB,
                 )
-
+            elif aug_config.name == "all_translate":
+                transform = RandomTranslate(
+                    seed=aug_seed,
+                )
+            elif aug_config.name == "all_zoom":
+                transform = RandomZoom(
+                    seed=aug_seed,
+                )
+            elif aug_config.name == "all_mirror_x":
+                transform = RandomMirrorX(
+                    seed=aug_seed,
+                )
+            else:
+                raise ValueError(f"Unknown augmentation type: {aug_config.name}")
+                                 
             if aug_config.p < 1.0:
                 transform = transforms.RandomApply([transform], p=aug_config.p)
 
@@ -328,6 +345,70 @@ def _configure_selfsupervised_task(
 
     return task
 
+def _configure_geometric_invariance_task(
+    train_rec,
+    dev_rec,
+    window_size,
+    window_offset,
+    embedding_dim,
+    projection_dim,
+    data_augmentation,
+    run_seeds,
+    device,
+):
+    """Internal helper. Configures the geometric invariance contrastive task.
+    This task uses contrastive learning (InfoNCE) to learn that geometric
+    transformations preserve scene identity.
+    """
+    # Create projection head for contrastive learning
+    head = modeling.ProjectionHead(
+        input_dim=embedding_dim,
+        projection_dim=projection_dim // 2,
+        hidden_dim=projection_dim,
+        normalize=True,
+    )
+
+    # Create data transformers
+    train_transform = _build_augmentation_transforms(
+        data_augmentation, run_seeds["transform_geom"]
+    )
+
+    # Create dataset
+    train_dataset = datasets.GeometricInvarianceDataset(
+        records=train_rec["geom"],
+        window_size=window_size,
+        window_offset=window_offset,
+        transform=train_transform,
+        base_seed=run_seeds["dataset_geom"],
+    )
+
+    # Create task as dataclass with default dev attributes
+    # Note: out_dim is the projection output dimension for contrastive learning
+    task = Task(
+        task_id="geom",
+        head=head,
+        out_dim=projection_dim // 2,
+        loss_function=modeling.InfoNCELoss(temperature=0.07),
+        train_dataset=train_dataset,
+        train_loss=MeanMetric().to(device),
+        train_score=modeling.AlignmentMetric().to(device),
+    )
+
+    # Update dev attributes if dev records are provided
+    if dev_rec["geom"]:
+        dev_transform = transforms.Compose([PoseToTensor()])
+        task.dev_dataset = datasets.GeometricInvarianceDataset(
+            records=dev_rec["geom"],
+            window_size=window_size,
+            window_offset=window_offset,
+            transform=dev_transform,
+            base_seed=run_seeds["dataset_geom"],
+        )
+        task.dev_loss = MeanMetric().to(device)
+        task.dev_score = modeling.AlignmentMetric().to(device)
+
+    return task
+
 
 def configure_tasks(
     train_rec,
@@ -385,6 +466,21 @@ def configure_tasks(
                     data_augmentation,
                     run_seeds,
                     device,
+                )
+            )
+        elif task_id == "geom":
+             # Use hidden_dim as projection_dim for consistency
+            tasks.append(
+                _configure_geometric_invariance_task(
+                    train_rec,
+                    dev_rec,
+                    window_size,
+                    window_offset,
+                    embedding_dim,
+                    projection_dim=hidden_dim,
+                    data_augmentation=data_augmentation,
+                    run_seeds=run_seeds,
+                    device=device,
                 )
             )
         else:
