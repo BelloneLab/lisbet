@@ -679,7 +679,7 @@ def test_gaussian_jitter_determinism():
 
 
 def test_keypoint_ablation_basic():
-    """Test KeypointAblation sets selected elements to NaN."""
+    """Test KeypointAblation sets selected elements to 0."""
     T, S, K, I = 50, 2, 4, 3  # noqa: E741
     rng = np.random.default_rng(1789)
     arr = rng.random((T, S, K, I), dtype=np.float32)
@@ -696,13 +696,13 @@ def test_keypoint_ablation_basic():
     kp_abl = KeypointAblation(seed=123, pB=pB)
     ds_abl = kp_abl(ds.copy(deep=True))
 
-    # Check that some elements are NaN
+    # Check that some elements are 0
     pos_orig = ds["position"].values
     pos_abl = ds_abl["position"].values
 
-    # An element is ablated if all its space coordinates are NaN
+    # An element is ablated if all its space coordinates are 0
     # Shape: (T, S, K, I)
-    ablated_elements = np.all(np.isnan(pos_abl), axis=1)  # shape (T, K, I)
+    ablated_elements = np.all(pos_abl == 0.0, axis=1)  # shape (T, K, I)
 
     # Check that we have some ablation
     assert ablated_elements.sum() > 0, "No keypoints were ablated"
@@ -741,10 +741,10 @@ def test_keypoint_ablation_determinism():
     out1 = kp_abl1(ds.copy(deep=True))
     out2 = kp_abl2(ds.copy(deep=True))
 
-    # Both should have NaN in the same positions
-    nan_mask1 = np.isnan(out1["position"].values)
-    nan_mask2 = np.isnan(out2["position"].values)
-    np.testing.assert_array_equal(nan_mask1, nan_mask2)
+    # Both should have zeros in the same positions
+    zero_mask1 = out1["position"].values == 0.0
+    zero_mask2 = out2["position"].values == 0.0
+    np.testing.assert_array_equal(zero_mask1, zero_mask2)
 
 
 def test_keypoint_ablation_no_change_when_p_zero():
@@ -899,7 +899,7 @@ def test_randomblockpermutation_boundary_clipping(monkeypatch):
 
 def test_keypoint_ablation_all_space_dims_ablated(monkeypatch):
     """
-    Test that KeypointAblation sets all space dimensions to NaN for selected elements.
+    Test that KeypointAblation sets all space dimensions to 0 for selected elements.
     """
     T, S, K, I = 20, 3, 2, 2  # 3 spatial dimensions  # noqa: E741
     rng = np.random.default_rng(1789)
@@ -917,13 +917,13 @@ def test_keypoint_ablation_all_space_dims_ablated(monkeypatch):
     ds_abl = kp_abl(ds.copy(deep=True))
 
     pos_abl = ds_abl["position"].values
-    # For each (t, k, i), either all space dims are NaN or none are
+    # For each (t, k, i), either all space dims are 0 or none are
     for t in range(T):
         for k in range(K):
             for i in range(I):
                 space_vals = pos_abl[t, :, k, i]
-                # Either all NaN or none NaN
-                assert np.all(np.isnan(space_vals)) or np.all(~np.isnan(space_vals))
+                # Either all zero or none zero
+                assert np.all(space_vals == 0.0) or np.all(space_vals != 0.0)
 
 
 def _make_rotation_ds(n_space=2, n_time=20, n_keypoints=3, n_individuals=2, seed=1789):
