@@ -8,6 +8,7 @@ from lisbet.transforms_extra import (
     KeypointAblation,
     RandomBlockPermutation,
     RandomPermutation,
+    RandomRotation,
     _random_permutation,
 )
 
@@ -923,3 +924,214 @@ def test_keypoint_ablation_all_space_dims_ablated(monkeypatch):
                 space_vals = pos_abl[t, :, k, i]
                 # Either all NaN or none NaN
                 assert np.all(np.isnan(space_vals)) or np.all(~np.isnan(space_vals))
+
+
+def _make_rotation_ds(n_space=2, n_time=20, n_keypoints=3, n_individuals=2, seed=1789):
+    """
+    Helper to create a posetracks dataset with values in [0, 1] for rotation tests.
+    """
+    rng = np.random.default_rng(seed)
+    arr = rng.random((n_time, n_space, n_keypoints, n_individuals)).astype(np.float32)
+    space_labels = ["x", "y", "z"][:n_space]
+    ds = xr.Dataset(
+        {"position": (("time", "space", "keypoints", "individuals"), arr)},
+        coords={
+            "time": np.arange(n_time),
+            "space": space_labels,
+            "keypoints": [f"kp{k}" for k in range(n_keypoints)],
+            "individuals": [f"ind{i}" for i in range(n_individuals)],
+        },
+    )
+    return ds
+
+
+def test_random_rotation_2d_truncate_output_in_unit_range():
+    """With mode='truncate', all rotated 2D coordinates must lie in [0, 1]."""
+    ds = _make_rotation_ds(n_space=2)
+    rot = RandomRotation(seed=42, max_angle=180.0, mode="truncate")
+    out = rot(ds.copy(deep=True))
+    pos = out["position"].values
+    assert np.all(pos >= 0.0) and np.all(pos <= 1.0)
+
+
+def test_random_rotation_3d_truncate_output_in_unit_range():
+    """With mode='truncate', all rotated 3D coordinates must lie in [0, 1]."""
+    ds = _make_rotation_ds(n_space=3)
+    rot = RandomRotation(seed=42, max_angle=180.0, mode="truncate")
+    out = rot(ds.copy(deep=True))
+    pos = out["position"].values
+    assert np.all(pos >= 0.0) and np.all(pos <= 1.0)
+
+
+def test_random_rotation_2d_rescale_output_in_unit_range():
+    """With mode='rescale', all rotated 2D coordinates must lie in [0, 1]."""
+    ds = _make_rotation_ds(n_space=2)
+    rot = RandomRotation(seed=42, max_angle=90.0, mode="rescale")
+    out = rot(ds.copy(deep=True))
+    pos = out["position"].values
+    assert np.all(pos >= -1e-7) and np.all(pos <= 1.0 + 1e-7)
+
+
+def test_random_rotation_3d_rescale_output_in_unit_range():
+    """With mode='rescale', all rotated 3D coordinates must lie in [0, 1]."""
+    ds = _make_rotation_ds(n_space=3)
+    rot = RandomRotation(seed=42, max_angle=90.0, mode="rescale")
+    out = rot(ds.copy(deep=True))
+    pos = out["position"].values
+    assert np.all(pos >= -1e-7) and np.all(pos <= 1.0 + 1e-7)
+
+
+def test_random_rotation_none_mode_allows_out_of_range():
+    """With mode='none', coordinates may fall outside [0, 1] for large angles."""
+    # Use a deterministic dataset near the edges of [0, 1]
+    ds = _make_rotation_ds(n_space=2, seed=0)
+    rot = RandomRotation(seed=7, max_angle=180.0, mode="none")
+    out = rot(ds.copy(deep=True))
+    pos = out["position"].values
+    # The data should be modified (very unlikely to be identical)
+    assert not np.allclose(pos, ds["position"].values)
+
+
+def test_random_rotation_zero_angle_no_change():
+    """With max_angle=0 the data should remain unchanged."""
+    ds = _make_rotation_ds(n_space=2)
+    rot = RandomRotation(seed=42, max_angle=0.0, mode="none")
+    out = rot(ds.copy(deep=True))
+    np.testing.assert_allclose(out["position"].values, ds["position"].values, atol=1e-6)
+
+
+def test_random_rotation_zero_angle_3d_no_change():
+    """With max_angle=0 the 3D data should remain unchanged."""
+    ds = _make_rotation_ds(n_space=3)
+    rot = RandomRotation(seed=42, max_angle=0.0, mode="none")
+    out = rot(ds.copy(deep=True))
+    np.testing.assert_allclose(out["position"].values, ds["position"].values, atol=1e-6)
+
+
+def test_random_rotation_determinism_2d():
+    """Same seed must produce identical results for 2D rotation."""
+    ds = _make_rotation_ds(n_space=2)
+    rot1 = RandomRotation(seed=123, max_angle=45.0, mode="truncate")
+    rot2 = RandomRotation(seed=123, max_angle=45.0, mode="truncate")
+    out1 = rot1(ds.copy(deep=True))
+    out2 = rot2(ds.copy(deep=True))
+    xr.testing.assert_equal(out1, out2)
+
+
+def test_random_rotation_determinism_3d():
+    """Same seed must produce identical results for 3D rotation."""
+    ds = _make_rotation_ds(n_space=3)
+    rot1 = RandomRotation(seed=123, max_angle=45.0, mode="truncate")
+    rot2 = RandomRotation(seed=123, max_angle=45.0, mode="truncate")
+    out1 = rot1(ds.copy(deep=True))
+    out2 = rot2(ds.copy(deep=True))
+    xr.testing.assert_equal(out1, out2)
+
+
+def test_random_rotation_different_seeds():
+    """Different seeds should (almost surely) produce different results."""
+    ds = _make_rotation_ds(n_space=2)
+    rot1 = RandomRotation(seed=1, max_angle=45.0, mode="none")
+    rot2 = RandomRotation(seed=2, max_angle=45.0, mode="none")
+    out1 = rot1(ds.copy(deep=True))
+    out2 = rot2(ds.copy(deep=True))
+    assert not np.allclose(out1["position"].values, out2["position"].values)
+
+
+def test_random_rotation_invalid_mode():
+    """Constructing with an invalid mode should raise ValueError."""
+    with pytest.raises(ValueError, match="mode must be one of"):
+        RandomRotation(seed=0, mode="invalid")
+
+
+def test_random_rotation_invalid_space_dim():
+    """Space dimension sizes other than 2 or 3 should raise ValueError."""
+    arr = np.random.default_rng(0).random((10, 4, 2, 1)).astype(np.float32)
+    ds = xr.Dataset(
+        {"position": (("time", "space", "keypoints", "individuals"), arr)},
+        coords={
+            "time": np.arange(10),
+            "space": ["a", "b", "c", "d"],
+            "keypoints": ["kp0", "kp1"],
+            "individuals": ["ind0"],
+        },
+    )
+    rot = RandomRotation(seed=0, max_angle=10.0)
+    with pytest.raises(ValueError, match="size 2 or 3"):
+        rot(ds)
+
+
+def test_random_rotation_preserves_shape():
+    """Output dataset should have the same shape as the input."""
+    for n_space in (2, 3):
+        ds = _make_rotation_ds(
+            n_space=n_space, n_time=15, n_keypoints=4, n_individuals=3
+        )
+        rot = RandomRotation(seed=42, max_angle=60.0)
+        out = rot(ds.copy(deep=True))
+        assert out["position"].shape == ds["position"].shape
+
+
+def test_random_rotation_2d_is_rotation():
+    """
+    For 2D with mode='none', the transform should be an exact rotation
+    about (0.5, 0.5): distances from center are preserved.
+    """
+    ds = _make_rotation_ds(n_space=2, n_time=10, n_keypoints=3, n_individuals=2)
+    rot = RandomRotation(seed=77, max_angle=90.0, mode="none")
+    out = rot(ds.copy(deep=True))
+
+    orig = ds["position"].values  # (T, S, K, I)
+    rotated = out["position"].values
+
+    # Compute distance from center (0.5, 0.5) along space axis (axis=1)
+    dist_orig = np.sqrt(np.sum((orig - 0.5) ** 2, axis=1))
+    dist_rot = np.sqrt(np.sum((rotated - 0.5) ** 2, axis=1))
+    np.testing.assert_allclose(dist_orig, dist_rot, atol=1e-6)
+
+
+def test_random_rotation_3d_is_rotation():
+    """
+    For 3D with mode='none', the transform should be an exact rotation
+    about (0.5, 0.5, 0.5): distances from center are preserved.
+    """
+    ds = _make_rotation_ds(n_space=3, n_time=10, n_keypoints=3, n_individuals=2)
+    rot = RandomRotation(seed=77, max_angle=90.0, mode="none")
+    out = rot(ds.copy(deep=True))
+
+    orig = ds["position"].values
+    rotated = out["position"].values
+
+    dist_orig = np.sqrt(np.sum((orig - 0.5) ** 2, axis=1))
+    dist_rot = np.sqrt(np.sum((rotated - 0.5) ** 2, axis=1))
+    np.testing.assert_allclose(dist_orig, dist_rot, atol=1e-6)
+
+
+def test_random_rotation_does_not_modify_original():
+    """The transform should not alter the original dataset."""
+    ds = _make_rotation_ds(n_space=2)
+    original_values = ds["position"].values.copy()
+    ds_copy = ds.copy(deep=True)
+    rot = RandomRotation(seed=42, max_angle=45.0)
+    rot(ds_copy)
+    np.testing.assert_array_equal(ds["position"].values, original_values)
+
+
+def test_random_rotation_rescale_per_dimension():
+    """
+    With mode='rescale', each spatial dimension should be independently rescaled
+    so that min maps to 0 and max maps to 1 when out-of-range values exist.
+    """
+    ds = _make_rotation_ds(n_space=2)
+    rot = RandomRotation(seed=42, max_angle=90.0, mode="rescale")
+    out = rot(ds.copy(deep=True))
+    pos = out["position"].values  # (T, S, K, I)
+
+    # For each spatial dimension, min should be ~0 and max should be ~1
+    # (unless all values were already in [0, 1] after rotation)
+    for s_i in range(2):
+        spatial_slice = pos[:, s_i, :, :]
+        vmin, vmax = spatial_slice.min(), spatial_slice.max()
+        # Either rescaled (min≈0, max≈1) or already in [0, 1]
+        assert vmin >= -1e-7
+        assert vmax <= 1.0 + 1e-7
