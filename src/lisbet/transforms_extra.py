@@ -26,11 +26,6 @@ KeypointAblation
     across (time, keypoints, individuals). Simulates missing or occluded keypoints
     for robustness testing.
 
-BlockKeypointAblation
-    Randomly sets keypoint coordinates to NaN within element-specific temporal blocks.
-    Each selected (time, keypoint, individual) element triggers ablation for a block
-    of frames, simulating sustained occlusion or tracking loss.
-
 PoseToTensor
     Converts pose tracking data from xarray.Dataset format to PyTorch tensors by
     stacking spatial dimensions into a single feature dimension.
