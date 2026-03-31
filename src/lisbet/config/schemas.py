@@ -74,9 +74,14 @@ class DataAugmentationConfig(BaseModel):
 
         Ablation-based :
             - kp_ablation: Per-element Bernoulli(pB) mask over (time, keypoints,
-                individuals), sets selected elements to NaN (all space dims).
+                individuals), sets selected elements to 0.0 (all space dims).
                 Simulates missing or occluded keypoints.
 
+        Rotation-based :
+            - rotation: Random rotation of all keypoint coordinates around the
+                center of the normalized coordinate space. Supports 2D and 3D
+                (auto-detected). Uses ``max_angle`` for the rotation range and
+                ``mode`` for post-rotation normalization.
 
 
     Attributes:
@@ -86,6 +91,9 @@ class DataAugmentationConfig(BaseModel):
         frac: Fraction of frames to permute (only for block-based augmentations, 0.0
               to 1.0 exclusive)
         sigma: Standard deviation of Gaussian noise (jitter types only)
+        max_angle: Maximum rotation angle in degrees (rotation only, default 180.0)
+        mode: Post-rotation normalization mode (rotation only). One of "truncate",
+              "rescale", "none". Default "truncate".
     """
 
     model_config = {"extra": "forbid"}  # Reject unknown parameters!
@@ -95,11 +103,14 @@ class DataAugmentationConfig(BaseModel):
         "blk_perm_id",
         "gauss_jitter",
         "kp_ablation",
+        "rotation",
     ]
     p: float = 1.0
     pB: float | None = None
     frac: float | None = None
     sigma: float | None = None
+    max_angle: float | None = None
+    mode: str | None = None
 
     # Define which parameters are valid for each augmentation type
     VALID_PARAMS: ClassVar[dict[str, set[str]]] = {
@@ -108,6 +119,7 @@ class DataAugmentationConfig(BaseModel):
         "blk_perm_id": {"p", "frac"},
         "gauss_jitter": {"p", "sigma"},
         "kp_ablation": {"p", "pB"},
+        "rotation": {"p", "max_angle", "mode"},
     }
 
     @field_validator("p")
@@ -138,6 +150,20 @@ class DataAugmentationConfig(BaseModel):
             raise ValueError("pB must be > 0.0 and <= 1.0")
         return v
 
+    @field_validator("max_angle")
+    @classmethod
+    def validate_max_angle(cls, v):
+        if v is not None and not 0.0 <= v <= 360.0:
+            raise ValueError("max_angle must be between 0.0 and 360.0")
+        return v
+
+    @field_validator("mode")
+    @classmethod
+    def validate_mode(cls, v):
+        if v is not None and v not in ("truncate", "rescale", "none"):
+            raise ValueError("mode must be one of 'truncate', 'rescale', 'none'")
+        return v
+
     @model_validator(mode="after")
     def validate_parameters_for_augmentation(self):
         """
@@ -154,6 +180,10 @@ class DataAugmentationConfig(BaseModel):
             set_params.add("frac")
         if self.sigma is not None:
             set_params.add("sigma")
+        if self.max_angle is not None:
+            set_params.add("max_angle")
+        if self.mode is not None:
+            set_params.add("mode")
 
         # Find invalid parameters
         invalid_params = set_params - valid_params
@@ -181,6 +211,12 @@ class DataAugmentationConfig(BaseModel):
         if self.name == "gauss_jitter" and self.sigma is None:
             # Set default sigma
             self.sigma = 0.01
+
+        if self.name == "rotation":
+            if self.max_angle is None:
+                self.max_angle = 180.0
+            if self.mode is None:
+                self.mode = "truncate"
 
         return self
 
