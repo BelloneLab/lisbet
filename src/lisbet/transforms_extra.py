@@ -22,7 +22,7 @@ RandomRotation
     normalization modes (truncate, rescale, or none).
 
 KeypointAblation
-    Randomly sets keypoint coordinates to NaN with independent Bernoulli sampling
+    Randomly sets keypoint coordinates to 0.0 with independent Bernoulli sampling
     across (time, keypoints, individuals). Simulates missing or occluded keypoints
     for robustness testing.
 
