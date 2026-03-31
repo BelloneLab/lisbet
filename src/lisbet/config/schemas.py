@@ -153,8 +153,8 @@ class DataAugmentationConfig(BaseModel):
     @field_validator("max_angle")
     @classmethod
     def validate_max_angle(cls, v):
-        if v is not None and not 0.0 < v <= 360.0:
-            raise ValueError("max_angle must be > 0.0 and <= 360.0")
+        if v is not None and not 0.0 <= v <= 360.0:
+            raise ValueError("max_angle must be between 0.0 and 360.0")
         return v
 
     @field_validator("mode")
