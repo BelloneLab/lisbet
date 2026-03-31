@@ -74,7 +74,7 @@ class DataAugmentationConfig(BaseModel):
 
         Ablation-based :
             - kp_ablation: Per-element Bernoulli(pB) mask over (time, keypoints,
-                individuals), sets selected elements to NaN (all space dims).
+                individuals), sets selected elements to 0.0 (all space dims).
                 Simulates missing or occluded keypoints.
 
         Rotation-based :
