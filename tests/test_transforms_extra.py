@@ -8,6 +8,7 @@ from lisbet.transforms_extra import (
     KeypointAblation,
     RandomBlockPermutation,
     RandomPermutation,
+    RandomRotation,
     _random_permutation,
     RandomTranslate,
     RandomZoom,
@@ -681,7 +682,7 @@ def test_gaussian_jitter_determinism():
 
 
 def test_keypoint_ablation_basic():
-    """Test KeypointAblation sets selected elements to 0.0."""
+    """Test KeypointAblation sets selected elements to 0."""
     T, S, K, I = 50, 2, 4, 3  # noqa: E741
     rng = np.random.default_rng(1789)
     arr = rng.random((T, S, K, I), dtype=np.float32)
@@ -698,11 +699,11 @@ def test_keypoint_ablation_basic():
     kp_abl = KeypointAblation(seed=123, pB=pB)
     ds_abl = kp_abl(ds.copy(deep=True))
 
-    # Check that some elements are NaN
+    # Check that some elements are 0
     pos_orig = ds["position"].values
     pos_abl = ds_abl["position"].values
 
-    # An element is ablated if all its space coordinates are 0.0
+    # An element is ablated if all its space coordinates are 0
     # Shape: (T, S, K, I)
     ablated_elements = np.all(pos_abl == 0.0, axis=1)  # shape (T, K, I)
 
@@ -743,10 +744,10 @@ def test_keypoint_ablation_determinism():
     out1 = kp_abl1(ds.copy(deep=True))
     out2 = kp_abl2(ds.copy(deep=True))
 
-    # Both should have NaN in the same positions
-    nan_mask1 = np.isnan(out1["position"].values)
-    nan_mask2 = np.isnan(out2["position"].values)
-    np.testing.assert_array_equal(nan_mask1, nan_mask2)
+    # Both should have zeros in the same positions
+    zero_mask1 = out1["position"].values == 0.0
+    zero_mask2 = out2["position"].values == 0.0
+    np.testing.assert_array_equal(zero_mask1, zero_mask2)
 
 
 def test_keypoint_ablation_no_change_when_p_zero():
@@ -901,7 +902,7 @@ def test_randomblockpermutation_boundary_clipping(monkeypatch):
 
 def test_keypoint_ablation_all_space_dims_ablated(monkeypatch):
     """
-    Test that KeypointAblation sets all space dimensions to NaN for selected elements.
+    Test that KeypointAblation sets all space dimensions to 0 for selected elements.
     """
     T, S, K, I = 20, 3, 2, 2  # 3 spatial dimensions  # noqa: E741
     rng = np.random.default_rng(1789)
@@ -919,280 +920,221 @@ def test_keypoint_ablation_all_space_dims_ablated(monkeypatch):
     ds_abl = kp_abl(ds.copy(deep=True))
 
     pos_abl = ds_abl["position"].values
-    # For each (t, k, i), either all space dims are NaN or none are
+    # For each (t, k, i), either all space dims are 0 or none are
     for t in range(T):
         for k in range(K):
             for i in range(I):
                 space_vals = pos_abl[t, :, k, i]
-                # Either all NaN or none NaN
-                assert np.all(np.isnan(space_vals)) or np.all(~np.isnan(space_vals))
+                # Either all zero or none zero
+                assert np.all(space_vals == 0.0) or np.all(space_vals != 0.0)
 
 
-
-
-# Tests for RandomTranslate
-def test_random_translate_basic():
-    """Test RandomTranslate applies same translation to all frames."""
-    T, S, K, I = 30, 2, 3, 2  # noqa: E741
-    rng = np.random.default_rng(42)
-    # Create data with values in [0.2, 0.8] range
-    arr = 0.2 + 0.6 * rng.random((T, S, K, I)).astype(np.float32)
+def _make_rotation_ds(n_space=2, n_time=20, n_keypoints=3, n_individuals=2, seed=1789):
+    """
+    Helper to create a posetracks dataset with values in [0, 1] for rotation tests.
+    """
+    rng = np.random.default_rng(seed)
+    arr = rng.random((n_time, n_space, n_keypoints, n_individuals)).astype(np.float32)
+    space_labels = ["x", "y", "z"][:n_space]
     ds = xr.Dataset(
         {"position": (("time", "space", "keypoints", "individuals"), arr)},
         coords={
-            "time": np.arange(T),
-            "space": ["x", "y"],
-            "keypoints": [f"kp{k}" for k in range(K)],
-            "individuals": [f"ind{i}" for i in range(I)],
+            "time": np.arange(n_time),
+            "space": space_labels,
+            "keypoints": [f"kp{k}" for k in range(n_keypoints)],
+            "individuals": [f"ind{i}" for i in range(n_individuals)],
         },
     )
-
-    translate = RandomTranslate(seed=123)
-    ds_translated = translate(ds.copy(deep=True))
-
-    # Check that all frames are translated
-    diff = ds_translated["position"].values - ds["position"].values
-
-    # All frames should have the same translation
-    # Check x and y translations separately
-    for s_idx in range(S):
-        frame_translations = diff[:, s_idx, 0, 0]  # Translation for first kp and ind
-        # All should be the same (ignoring numerical errors)
-        assert np.allclose(frame_translations, frame_translations[0]), \
-            f"Translation not consistent across frames for space dim {s_idx}"
-
-    # Check that all coordinates remain in [0, 1]
-    assert np.all(ds_translated["position"].values >= 0.0)
-    assert np.all(ds_translated["position"].values <= 1.0)
+    return ds
 
 
-def test_random_translate_determinism():
-    """Test RandomTranslate produces deterministic results with same seed."""
-    T, S, K, I = 20, 2, 2, 2  # noqa: E741
-    rng = np.random.default_rng(42)
-    arr = 0.3 + 0.4 * rng.random((T, S, K, I)).astype(np.float32)
+def test_random_rotation_2d_truncate_output_in_unit_range():
+    """With mode='truncate', all rotated 2D coordinates must lie in [0, 1]."""
+    ds = _make_rotation_ds(n_space=2)
+    rot = RandomRotation(seed=42, max_angle=180.0, mode="truncate")
+    out = rot(ds.copy(deep=True))
+    pos = out["position"].values
+    assert np.all(pos >= 0.0) and np.all(pos <= 1.0)
+
+
+def test_random_rotation_3d_truncate_output_in_unit_range():
+    """With mode='truncate', all rotated 3D coordinates must lie in [0, 1]."""
+    ds = _make_rotation_ds(n_space=3)
+    rot = RandomRotation(seed=42, max_angle=180.0, mode="truncate")
+    out = rot(ds.copy(deep=True))
+    pos = out["position"].values
+    assert np.all(pos >= 0.0) and np.all(pos <= 1.0)
+
+
+def test_random_rotation_2d_rescale_output_in_unit_range():
+    """With mode='rescale', all rotated 2D coordinates must lie in [0, 1]."""
+    ds = _make_rotation_ds(n_space=2)
+    rot = RandomRotation(seed=42, max_angle=90.0, mode="rescale")
+    out = rot(ds.copy(deep=True))
+    pos = out["position"].values
+    assert np.all(pos >= -1e-7) and np.all(pos <= 1.0 + 1e-7)
+
+
+def test_random_rotation_3d_rescale_output_in_unit_range():
+    """With mode='rescale', all rotated 3D coordinates must lie in [0, 1]."""
+    ds = _make_rotation_ds(n_space=3)
+    rot = RandomRotation(seed=42, max_angle=90.0, mode="rescale")
+    out = rot(ds.copy(deep=True))
+    pos = out["position"].values
+    assert np.all(pos >= -1e-7) and np.all(pos <= 1.0 + 1e-7)
+
+
+def test_random_rotation_none_mode_allows_out_of_range():
+    """With mode='none', coordinates may fall outside [0, 1] for large angles."""
+    # Use a deterministic dataset near the edges of [0, 1]
+    ds = _make_rotation_ds(n_space=2, seed=0)
+    rot = RandomRotation(seed=7, max_angle=180.0, mode="none")
+    out = rot(ds.copy(deep=True))
+    pos = out["position"].values
+    # The data should be modified (very unlikely to be identical)
+    assert not np.allclose(pos, ds["position"].values)
+
+
+def test_random_rotation_zero_angle_no_change():
+    """With max_angle=0 the data should remain unchanged."""
+    ds = _make_rotation_ds(n_space=2)
+    rot = RandomRotation(seed=42, max_angle=0.0, mode="none")
+    out = rot(ds.copy(deep=True))
+    np.testing.assert_allclose(out["position"].values, ds["position"].values, atol=1e-6)
+
+
+def test_random_rotation_zero_angle_3d_no_change():
+    """With max_angle=0 the 3D data should remain unchanged."""
+    ds = _make_rotation_ds(n_space=3)
+    rot = RandomRotation(seed=42, max_angle=0.0, mode="none")
+    out = rot(ds.copy(deep=True))
+    np.testing.assert_allclose(out["position"].values, ds["position"].values, atol=1e-6)
+
+
+def test_random_rotation_determinism_2d():
+    """Same seed must produce identical results for 2D rotation."""
+    ds = _make_rotation_ds(n_space=2)
+    rot1 = RandomRotation(seed=123, max_angle=45.0, mode="truncate")
+    rot2 = RandomRotation(seed=123, max_angle=45.0, mode="truncate")
+    out1 = rot1(ds.copy(deep=True))
+    out2 = rot2(ds.copy(deep=True))
+    xr.testing.assert_equal(out1, out2)
+
+
+def test_random_rotation_determinism_3d():
+    """Same seed must produce identical results for 3D rotation."""
+    ds = _make_rotation_ds(n_space=3)
+    rot1 = RandomRotation(seed=123, max_angle=45.0, mode="truncate")
+    rot2 = RandomRotation(seed=123, max_angle=45.0, mode="truncate")
+    out1 = rot1(ds.copy(deep=True))
+    out2 = rot2(ds.copy(deep=True))
+    xr.testing.assert_equal(out1, out2)
+
+
+def test_random_rotation_different_seeds():
+    """Different seeds should (almost surely) produce different results."""
+    ds = _make_rotation_ds(n_space=2)
+    rot1 = RandomRotation(seed=1, max_angle=45.0, mode="none")
+    rot2 = RandomRotation(seed=2, max_angle=45.0, mode="none")
+    out1 = rot1(ds.copy(deep=True))
+    out2 = rot2(ds.copy(deep=True))
+    assert not np.allclose(out1["position"].values, out2["position"].values)
+
+
+def test_random_rotation_invalid_mode():
+    """Constructing with an invalid mode should raise ValueError."""
+    with pytest.raises(ValueError, match="mode must be one of"):
+        RandomRotation(seed=0, mode="invalid")
+
+
+def test_random_rotation_invalid_space_dim():
+    """Space dimension sizes other than 2 or 3 should raise ValueError."""
+    arr = np.random.default_rng(0).random((10, 4, 2, 1)).astype(np.float32)
     ds = xr.Dataset(
         {"position": (("time", "space", "keypoints", "individuals"), arr)},
         coords={
-            "time": np.arange(T),
-            "space": ["x", "y"],
-            "keypoints": [f"kp{k}" for k in range(K)],
-            "individuals": [f"ind{i}" for i in range(I)],
+            "time": np.arange(10),
+            "space": ["a", "b", "c", "d"],
+            "keypoints": ["kp0", "kp1"],
+            "individuals": ["ind0"],
         },
     )
-
-    translate1 = RandomTranslate(seed=42)
-    translate2 = RandomTranslate(seed=42)
-
-    ds1 = translate1(ds.copy(deep=True))
-    ds2 = translate2(ds.copy(deep=True))
-
-    xr.testing.assert_allclose(ds1, ds2)
+    rot = RandomRotation(seed=0, max_angle=10.0)
+    with pytest.raises(ValueError, match="size 2 or 3"):
+        rot(ds)
 
 
-def test_random_translate_with_nans():
-    """Test RandomTranslate preserves NaN values."""
-    T, S, K, I = 15, 2, 3, 2  # noqa: E741
-    rng = np.random.default_rng(42)
-    arr = 0.2 + 0.6 * rng.random((T, S, K, I)).astype(np.float32)
-    # Set some values to NaN
-    arr[5:10, :, 1, :] = np.nan
-
-    ds = xr.Dataset(
-        {"position": (("time", "space", "keypoints", "individuals"), arr)},
-        coords={
-            "time": np.arange(T),
-            "space": ["x", "y"],
-            "keypoints": [f"kp{k}" for k in range(K)],
-            "individuals": [f"ind{i}" for i in range(I)],
-        },
-    )
-
-    translate = RandomTranslate(seed=123)
-    ds_translated = translate(ds.copy(deep=True))
-
-    # NaN pattern should be preserved
-    nan_mask_original = np.isnan(ds["position"].values)
-    nan_mask_translated = np.isnan(ds_translated["position"].values)
-    np.testing.assert_array_equal(nan_mask_original, nan_mask_translated)
+def test_random_rotation_preserves_shape():
+    """Output dataset should have the same shape as the input."""
+    for n_space in (2, 3):
+        ds = _make_rotation_ds(
+            n_space=n_space, n_time=15, n_keypoints=4, n_individuals=3
+        )
+        rot = RandomRotation(seed=42, max_angle=60.0)
+        out = rot(ds.copy(deep=True))
+        assert out["position"].shape == ds["position"].shape
 
 
-# Tests for RandomMirrorX
-def test_random_mirror_x_basic():
-    """Test RandomMirrorX basic functionality."""
-    T, S, K, I = 30, 2, 3, 2  # noqa: E741
-    rng = np.random.default_rng(42)
-    arr = 0.2 + 0.6 * rng.random((T, S, K, I)).astype(np.float32)
-    ds = xr.Dataset(
-        {"position": (("time", "space", "keypoints", "individuals"), arr)},
-        coords={
-            "time": np.arange(T),
-            "space": ["x", "y"],
-            "keypoints": [f"kp{k}" for k in range(K)],
-            "individuals": [f"ind{i}" for i in range(I)],
-        },
-    )
+def test_random_rotation_2d_is_rotation():
+    """
+    For 2D with mode='none', the transform should be an exact rotation
+    about (0.5, 0.5): distances from center are preserved.
+    """
+    ds = _make_rotation_ds(n_space=2, n_time=10, n_keypoints=3, n_individuals=2)
+    rot = RandomRotation(seed=77, max_angle=90.0, mode="none")
+    out = rot(ds.copy(deep=True))
 
-    mirror = RandomMirrorX(seed=123)
-    ds_mirrored = mirror(ds.copy(deep=True))
+    orig = ds["position"].values  # (T, S, K, I)
+    rotated = out["position"].values
 
-    # Check that all frames are mirrored (x becomes 1.0 - x)
-    x_diff = ds_mirrored["position"].sel(space="x").values - ds["position"].sel(space="x").values
-    changed_frames = np.any(np.abs(x_diff) > 1e-9, axis=(1, 2))
-    assert changed_frames.sum() == T, "Not all frames were mirrored"
-
-    # Check that y coordinates are unchanged
-    y_diff = ds_mirrored["position"].sel(space="y").values - ds["position"].sel(space="y").values
-    np.testing.assert_allclose(y_diff, 0.0, atol=1e-9)
-
-    # Check that all coordinates remain in [0, 1]
-    assert np.all(ds_mirrored["position"].values >= 0.0)
-    assert np.all(ds_mirrored["position"].values <= 1.0)
+    # Compute distance from center (0.5, 0.5) along space axis (axis=1)
+    dist_orig = np.sqrt(np.sum((orig - 0.5) ** 2, axis=1))
+    dist_rot = np.sqrt(np.sum((rotated - 0.5) ** 2, axis=1))
+    np.testing.assert_allclose(dist_orig, dist_rot, atol=1e-6)
 
 
-def test_random_mirror_x_symmetry():
-    """Test RandomMirrorX creates proper mirror symmetry around x=0.5."""
-    T, S, K, I = 10, 2, 2, 1  # noqa: E741
-    # Create test data with known x values
-    arr = np.zeros((T, S, K, I), dtype=np.float32)
-    arr[:, 0, :, :] = 0.3  # x = 0.3 should mirror to 0.7
-    arr[:, 1, :, :] = 0.5  # y values
+def test_random_rotation_3d_is_rotation():
+    """
+    For 3D with mode='none', the transform should be an exact rotation
+    about (0.5, 0.5, 0.5): distances from center are preserved.
+    """
+    ds = _make_rotation_ds(n_space=3, n_time=10, n_keypoints=3, n_individuals=2)
+    rot = RandomRotation(seed=77, max_angle=90.0, mode="none")
+    out = rot(ds.copy(deep=True))
 
-    ds = xr.Dataset(
-        {"position": (("time", "space", "keypoints", "individuals"), arr)},
-        coords={
-            "time": np.arange(T),
-            "space": ["x", "y"],
-            "keypoints": [f"kp{k}" for k in range(K)],
-            "individuals": [f"ind{i}" for i in range(I)],
-        },
-    )
+    orig = ds["position"].values
+    rotated = out["position"].values
 
-    mirror = RandomMirrorX(seed=123)
-    ds_mirrored = mirror(ds.copy(deep=True))
-
-    # Check x values are mirrored: x_new = 1.0 - x_old
-    x_original = ds["position"].sel(space="x").values
-    x_mirrored = ds_mirrored["position"].sel(space="x").values
-    np.testing.assert_allclose(x_mirrored, 1.0 - x_original, atol=1e-6)
+    dist_orig = np.sqrt(np.sum((orig - 0.5) ** 2, axis=1))
+    dist_rot = np.sqrt(np.sum((rotated - 0.5) ** 2, axis=1))
+    np.testing.assert_allclose(dist_orig, dist_rot, atol=1e-6)
 
 
-def test_random_mirror_x_with_nans():
-    """Test RandomMirrorX preserves NaN values."""
-    T, S, K, I = 15, 2, 3, 2  # noqa: E741
-    rng = np.random.default_rng(42)
-    arr = 0.2 + 0.6 * rng.random((T, S, K, I)).astype(np.float32)
-    # Set some values to NaN
-    arr[5:10, :, 1, :] = np.nan
-
-    ds = xr.Dataset(
-        {"position": (("time", "space", "keypoints", "individuals"), arr)},
-        coords={
-            "time": np.arange(T),
-            "space": ["x", "y"],
-            "keypoints": [f"kp{k}" for k in range(K)],
-            "individuals": [f"ind{i}" for i in range(I)],
-        },
-    )
-
-    mirror = RandomMirrorX(seed=123)
-    ds_mirrored = mirror(ds.copy(deep=True))
-
-    # NaN pattern should be preserved
-    nan_mask_original = np.isnan(ds["position"].values)
-    nan_mask_mirrored = np.isnan(ds_mirrored["position"].values)
-    np.testing.assert_array_equal(nan_mask_original, nan_mask_mirrored)
+def test_random_rotation_does_not_modify_original():
+    """The transform should not alter the original dataset."""
+    ds = _make_rotation_ds(n_space=2)
+    original_values = ds["position"].values.copy()
+    ds_copy = ds.copy(deep=True)
+    rot = RandomRotation(seed=42, max_angle=45.0)
+    rot(ds_copy)
+    np.testing.assert_array_equal(ds["position"].values, original_values)
 
 
+def test_random_rotation_rescale_per_dimension():
+    """
+    With mode='rescale', each spatial dimension should be independently rescaled
+    so that min maps to 0 and max maps to 1 when out-of-range values exist.
+    """
+    ds = _make_rotation_ds(n_space=2)
+    rot = RandomRotation(seed=42, max_angle=90.0, mode="rescale")
+    out = rot(ds.copy(deep=True))
+    pos = out["position"].values  # (T, S, K, I)
 
-# Tests for RandomZoom
-def test_random_zoom_basic():
-    """Test RandomZoom basic functionality."""
-    T, S, K, I = 30, 2, 3, 2  # noqa: E741
-    rng = np.random.default_rng(42)
-    arr = 0.2 + 0.6 * rng.random((T, S, K, I)).astype(np.float32)
-    ds = xr.Dataset(
-        {"position": (("time", "space", "keypoints", "individuals"), arr)},
-        coords={
-            "time": np.arange(T),
-            "space": ["x", "y"],
-            "keypoints": [f"kp{k}" for k in range(K)],
-            "individuals": [f"ind{i}" for i in range(I)],
-        },
-    )
-
-    zoom = RandomZoom(seed=123)
-    ds_zoomed = zoom(ds.copy(deep=True))
-
-    # Check that all frames are zoomed (same scale applied to all)
-    diff = ds_zoomed["position"].values - ds["position"].values
-    changed_frames = np.any(np.abs(diff) > 1e-9, axis=(1, 2, 3))
-    assert changed_frames.sum() == T, "Not all frames were zoomed"
-
-    # Check that all coordinates remain in [0, 1]
-    assert np.all(ds_zoomed["position"].values >= 0.0)
-    assert np.all(ds_zoomed["position"].values <= 1.0)
-
-
-def test_random_zoom_center():
-    """Test RandomZoom zooms around center (0.5, 0.5)."""
-    T, S, K, I = 10, 2, 3, 2  # noqa: E741
-    # Create test data symmetric around center
-    arr = np.zeros((T, S, K, I), dtype=np.float32)
-    # Create points at equal distances from center
-    arr[:, 0, 0, :] = 0.3  # x = 0.3 (0.2 from center)
-    arr[:, 0, 1, :] = 0.5  # x = 0.5 (at center)
-    arr[:, 0, 2, :] = 0.7  # x = 0.7 (0.2 from center)
-    arr[:, 1, :, :] = 0.5  # y = 0.5 for all
-
-    ds = xr.Dataset(
-        {"position": (("time", "space", "keypoints", "individuals"), arr)},
-        coords={
-            "time": np.arange(T),
-            "space": ["x", "y"],
-            "keypoints": [f"kp{k}" for k in range(K)],
-            "individuals": [f"ind{i}" for i in range(I)],
-        },
-    )
-
-    zoom = RandomZoom(seed=123)
-    ds_zoomed = zoom(ds.copy(deep=True))
-
-    # Center keypoint (kp1) should remain at x=0.5
-    center_kp_x = ds_zoomed["position"].sel(space="x", keypoints="kp1").values
-    np.testing.assert_allclose(center_kp_x, 0.5, atol=1e-6)
-
-    # After zoom, symmetric points should remain symmetric around center
-    # Check that kp0 and kp2 are equidistant from center
-    kp0_x = ds_zoomed["position"].sel(space="x", keypoints="kp0").values
-    kp2_x = ds_zoomed["position"].sel(space="x", keypoints="kp2").values
-    dist0 = np.abs(kp0_x - 0.5)
-    dist2 = np.abs(kp2_x - 0.5)
-    np.testing.assert_allclose(dist0, dist2, atol=1e-6)
-
-
-def test_random_zoom_with_nans():
-    """Test RandomZoom preserves NaN values."""
-    T, S, K, I = 15, 2, 3, 2  # noqa: E741
-    rng = np.random.default_rng(42)
-    arr = 0.2 + 0.6 * rng.random((T, S, K, I)).astype(np.float32)
-    # Set some values to NaN
-    arr[5:10, :, 1, :] = np.nan
-
-    ds = xr.Dataset(
-        {"position": (("time", "space", "keypoints", "individuals"), arr)},
-        coords={
-            "time": np.arange(T),
-            "space": ["x", "y"],
-            "keypoints": [f"kp{k}" for k in range(K)],
-            "individuals": [f"ind{i}" for i in range(I)],
-        },
-    )
-
-    zoom = RandomZoom(seed=123)
-    ds_zoomed = zoom(ds.copy(deep=True))
-
-    # NaN pattern should be preserved
-    nan_mask_original = np.isnan(ds["position"].values)
-    nan_mask_zoomed = np.isnan(ds_zoomed["position"].values)
-    np.testing.assert_array_equal(nan_mask_original, nan_mask_zoomed)
+    # For each spatial dimension, min should be ~0 and max should be ~1
+    # (unless all values were already in [0, 1] after rotation)
+    for s_i in range(2):
+        spatial_slice = pos[:, s_i, :, :]
+        vmin, vmax = spatial_slice.min(), spatial_slice.max()
+        # Either rescaled (min≈0, max≈1) or already in [0, 1]
+        assert vmin >= -1e-7
+        assert vmax <= 1.0 + 1e-7

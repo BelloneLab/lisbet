@@ -29,6 +29,9 @@ def parse_data_augmentation(aug_string):
 
     >>> parse_data_augmentation("all_perm_id:p=0.5,blk_perm_id:frac=0.3")
     [{'name': 'all_perm_id', 'p': 0.5}, {'name': 'blk_perm_id', 'p': 1.0, 'frac': 0.3}]
+
+    >>> parse_data_augmentation("rotation:p=0.5:max_angle=30")
+    [{'name': 'rotation', 'p': 0.5, 'max_angle': 30.0}]
     """
     if not aug_string:
         return None
@@ -144,6 +147,9 @@ def configure_train_model_parser(parser: argparse.ArgumentParser) -> None:
                         Consistently across all frames in a window.
                         Scale computed to keep all keypoints in [0,1] bounds.
                         Provides invariance to depth/distance.
+                - rotation: Randomly rotate keypoint coordinates around the center
+                            of the normalized [0,1] space. Supports 2D and 3D
+                            (auto-detected from data).
 
 
             Parameters (optional):
@@ -153,6 +159,9 @@ def configure_train_model_parser(parser: argparse.ArgumentParser) -> None:
                                 Block size fraction (defaults: 0.5 / 0.05 / 0.1)
                 - sigma=<float>: Jitter noise std for gauss_jitter and
                                  blk_gauss_jitter (default 0.01).
+                - max_angle=<float>: Maximum rotation angle in degrees for rotation
+                                     (default 180.0). Angle sampled from
+                                     [-max_angle, +max_angle].
 
 
             Examples:
@@ -163,6 +172,7 @@ def configure_train_model_parser(parser: argparse.ArgumentParser) -> None:
                 --data_augmentation="gauss_jitter:p=0.02:sigma=0.01"
                 --data_augmentation="kp_ablation:p=0.05:pB=0.01"
                 --data_augmentation="all_perm_id:p=0.5,kp_ablation:p=0.03:pB=0.01"
+                --data_augmentation="rotation:p=0.5:max_angle=30"
 
             """
         ),
