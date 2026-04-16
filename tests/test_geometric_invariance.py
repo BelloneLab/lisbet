@@ -86,7 +86,7 @@ class TestProjectionHead:
 
         # Create random input
         x = torch.randn(batch_size, sequence_length, input_dim)
-        print("Input shape:", x.shape)
+        # print("Input shape:", x.shape)
 
         # Forward pass
         output = head(x)
@@ -125,7 +125,7 @@ class TestProjectionHead:
 
         # Create random input
         x = torch.randn(batch_size, sequence_length, input_dim)
-        print("Input shape:", x.shape)
+        # print("Input shape:", x.shape)
 
         # Forward pass
         output = head(x)
@@ -313,7 +313,7 @@ class TestGeometricInvarianceDataset:
         x_orig, x_transform = next(iterator)
 
         # Check both views are xarray DataArrays
-        print(type(x_orig))
+        # print(type(x_orig))
         assert isinstance(x_orig, xr.Dataset)
         assert isinstance(x_transform, xr.Dataset)
 
@@ -341,7 +341,7 @@ class TestGeometricInvarianceDataset:
         assert "zoom" in x_transform.attrs['geometric_transforms_applied']
 
         # Check that values differ (transformation was applied)
-        print(type(x_orig.position.values))
-        print(x_orig.position.values)
+        # print(type(x_orig.position.values))
+        # print(x_orig.position.values)
         assert not np.allclose(x_orig.position.values, x_transform.position.values)
 
