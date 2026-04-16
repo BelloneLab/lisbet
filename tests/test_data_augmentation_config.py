@@ -168,11 +168,11 @@ def test_data_augmentation_config_mirror_x():
 def test_data_augmentation_config_zoom():
     """Test creating zoom augmentation configs."""
     # zoom without parameters
-    cfg1 = DataAugmentationConfig(name="zoom")
-    assert cfg1.name == "zoom"
+    cfg1 = DataAugmentationConfig(name="all_zoom")
+    assert cfg1.name == "all_zoom"
     assert cfg1.p == 1.0
     assert cfg1.frac is None
 
     # zoom with probability
-    cfg2 = DataAugmentationConfig(name="zoom", p=0.3)
+    cfg2 = DataAugmentationConfig(name="all_zoom", p=0.3)
     assert cfg2.p == 0.3
