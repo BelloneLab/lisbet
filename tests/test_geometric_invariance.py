@@ -100,17 +100,6 @@ class TestProjectionHead:
 
     def test_no_batch_norm(self):
         """Test ProjectionHead without batch normalization."""
-        # head = ProjectionHead(
-        #     input_dim=256,
-        #     hidden_dim=512,
-        #     projection_dim=128,
-        #     normalize=False,
-        # )
-
-        # x = torch.randn(8, 256)
-        # output = head(x)
-
-        # assert output.shape == (8, 128)
         batch_size = 8
         input_dim = 256
         output_dim = 128
