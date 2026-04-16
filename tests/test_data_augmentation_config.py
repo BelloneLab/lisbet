@@ -144,25 +144,25 @@ def test_parse_data_augmentation_with_jitter_params():
 def test_data_augmentation_config_translate():
     """Test creating translate augmentation configs."""
     # translate without parameters
-    cfg1 = DataAugmentationConfig(name="translate")
-    assert cfg1.name == "translate"
+    cfg1 = DataAugmentationConfig(name="all_translate")
+    assert cfg1.name == "all_translate"
     assert cfg1.p == 1.0
     assert cfg1.frac is None
 
     # translate with probability
-    cfg2 = DataAugmentationConfig(name="translate", p=0.5)
+    cfg2 = DataAugmentationConfig(name="all_translate", p=0.5)
     assert cfg2.p == 0.5
 
 def test_data_augmentation_config_mirror_x():
     """Test creating mirror_x augmentation configs."""
     # mirror_x without parameters
-    cfg1 = DataAugmentationConfig(name="mirror_x")
-    assert cfg1.name == "mirror_x"
+    cfg1 = DataAugmentationConfig(name="all_mirror_x")
+    assert cfg1.name == "all_mirror_x"
     assert cfg1.p == 1.0
     assert cfg1.frac is None
 
     # mirror_x with probability
-    cfg2 = DataAugmentationConfig(name="mirror_x", p=0.4)
+    cfg2 = DataAugmentationConfig(name="all_mirror_x", p=0.4)
     assert cfg2.p == 0.4
 
 def test_data_augmentation_config_zoom():
