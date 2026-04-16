@@ -324,10 +324,14 @@ class TestGeometricInvarianceDataset:
         iterator = iter(dataset)
         x_orig, x_transform = next(iterator)
 
-        # Check transformation attributes are present
-        assert "mirror_x" in x_transform.attrs['geometric_transforms_applied']
-        assert "translate" in x_transform.attrs['geometric_transforms_applied']
-        assert "zoom" in x_transform.attrs['geometric_transforms_applied']
+        # Check transformation attributes are present and valid
+        applied = x_transform.attrs.get("geometric_transforms_applied", [])
+        assert applied, "No geometric transformations were recorded as applied."
+        # Implementation randomly selects between 1 and 3 transforms from this set
+        expected_transforms = {"mirror_x", "translate", "zoom"}
+        assert 1 <= len(applied) <= len(expected_transforms)
+        for transform_name in applied:
+            assert transform_name in expected_transforms
 
         # Check that values differ (transformation was applied)
         # print(type(x_orig.position.values))
