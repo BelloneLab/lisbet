@@ -107,8 +107,6 @@ def _build_augmentation_transforms(data_augmentation, seed):
                 transform = RandomMirrorX(
                     seed=aug_seed,
                 )
-            else:
-                raise ValueError(f"Unknown augmentation type: {aug_config.name}")
                                  
             elif aug_config.name == "rotation":
                 transform = RandomRotation(
@@ -116,6 +114,9 @@ def _build_augmentation_transforms(data_augmentation, seed):
                     max_angle=aug_config.max_angle,
                     mode=aug_config.mode,
                 )
+            
+            else:
+                raise ValueError(f"Unknown augmentation type: {aug_config.name}")
 
             if aug_config.p < 1.0:
                 transform = transforms.RandomApply([transform], p=aug_config.p)
