@@ -46,7 +46,6 @@ class LSTMBackbone(BackboneInterface):
             bidirectional=False,
         )
         self.output_proj = nn.Linear(hidden_dim, embedding_dim)
-        print("LSTMBackbone initialized")
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
