@@ -77,6 +77,11 @@ class DataAugmentationConfig(BaseModel):
                 individuals), sets selected elements to 0.0 (all space dims).
                 Simulates missing or occluded keypoints.
 
+        Horizontal Transformations:
+            - all_translate: Randomly translate all individuals together in x,y.
+            - all_mirror_x: Randomly mirror horizontally around x=0.5.
+            - all_zoom: Randomly zoom/dezoom around center (0.5, 0.5).
+
         Rotation-based :
             - rotation: Random rotation of all keypoint coordinates around the
                 center of the normalized coordinate space. Supports 2D and 3D
@@ -103,6 +108,9 @@ class DataAugmentationConfig(BaseModel):
         "blk_perm_id",
         "gauss_jitter",
         "kp_ablation",
+        "all_translate",
+        "all_mirror_x",
+        "all_zoom",
         "rotation",
     ]
     p: float = 1.0
@@ -119,6 +127,9 @@ class DataAugmentationConfig(BaseModel):
         "blk_perm_id": {"p", "frac"},
         "gauss_jitter": {"p", "sigma"},
         "kp_ablation": {"p", "pB"},
+        "all_translate": {"p"},
+        "all_mirror_x": {"p"},
+        "all_zoom": {"p"},
         "rotation": {"p", "max_angle", "mode"},
     }
 

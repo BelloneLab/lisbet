@@ -178,19 +178,41 @@ def _train_one_epoch(
         # Iterate over all tasks
         # NOTE: strict=False to allow for different iterable lengths
         for task, dataloader in zip(tasks, dl_iter, strict=False):
-            data, target = next(dataloader)
+            batch = next(dataloader)
 
-            # Forward pass
-            output = model(data, task.task_id)
-            loss = task.loss_function(output, target)
+            # Contrastive tasks return pairs of views instead of (data, target)
+            if task.task_id == "geom":
+                data_orig, data_transform = batch
+
+                # Forward pass for both views
+                output_orig = model(data_orig, task.task_id)
+                output_transform = model(data_transform, task.task_id)
+
+                # InfoNCE loss expects both projections
+                loss = task.loss_function(output_orig, output_transform)
+
+
+                # Store loss value and metrics for stats
+                if batch_idx % 10 == 0:
+                    task.train_loss.update(loss)
+                    # Alignment metric expects both projections
+                    task.train_score.update(output_orig, output_transform)
+
+            else:
+                data, target = batch
+
+                # Forward pass
+                output = model(data, task.task_id)
+                loss = task.loss_function(output, target)
+
+                # Store loss value and metrics for stats
+                if batch_idx % 10 == 0:
+                    task.train_loss.update(loss)
+                    task.train_score.update(output, target)
 
             # Backward pass
             fabric.backward(loss)
 
-            # Store loss value and metrics for stats
-            if batch_idx % 10 == 0:
-                task.train_loss.update(loss)
-                task.train_score.update(output, target)
 
             # Step profiler
             if prof is not None:
@@ -215,16 +237,36 @@ def _evaluate(model, dataloaders, n_batches, tasks):
             # Iterate over all tasks
             # NOTE: strict=False to allow for different iterable lengths
             for task, dataloader in zip(tasks, dl_iter, strict=False):
-                data, target = next(dataloader)
+                batch = next(dataloader)
 
-                # Forward pass
-                output = model(data, task.task_id)
-                loss = task.loss_function(output, target)
+                # Contrastive tasks return pairs of views instead of (data, target)
+                if task.task_id == "geom":
+                    data_orig, data_transform = batch
 
-                # Store loss value and metrics for stats
-                if batch_idx % 10 == 0:
-                    task.dev_loss.update(loss)
-                    task.dev_score.update(output, target)
+                    # Forward pass for both views
+                    output_orig = model(data_orig, task.task_id)
+                    output_transform = model(data_transform, task.task_id)
+
+                    # InfoNCE loss expects both projections
+                    loss = task.loss_function(output_orig, output_transform)
+
+                    # Store loss value and metrics for stats
+                    if batch_idx % 10 == 0:
+                        task.dev_loss.update(loss)
+                        # Alignment metric expects both projections
+                        task.dev_score.update(output_orig, output_transform)
+                else:
+                    # Classification tasks return (data, target)
+                    data, target = batch
+
+                    # Forward pass
+                    output = model(data, task.task_id)
+                    loss = task.loss_function(output, target)
+
+                    # Store loss value and metrics for stats
+                    if batch_idx % 10 == 0:
+                        task.dev_loss.update(loss)
+                        task.dev_score.update(output, target)
 
 
 def _compute_epoch_logs(group_id, tasks):
