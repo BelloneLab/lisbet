@@ -67,3 +67,81 @@ Make sure your dataset matches this specification using the selection and renami
 
 While this requirement may seem restrictive, it ensures reproducibility and reliable behavior classification.
 Future releases may provide more flexibility for custom keypoint sets and automatic mapping between conventions.
+
+
+Annotation formats
+------------------
+
+LISBET supports multiple annotation input formats through the ``annot_format``
+option. This option specifies how annotation files are read from each sequence
+directory and converted into the internal LISBET annotation representation.
+
+The default value is ``movement``, which preserves the original LISBET behavior.
+
+Supported annotation formats are:
+
+``movement``
+    The default LISBET annotation format. This option loads NetCDF annotation
+    files from each sequence directory. Annotation files are detected when their
+    file names contain ``annotations`` or ``manual_scoring`` and end with
+    ``.nc``. This format is expected to already follow the internal LISBET
+    annotation structure.
+
+``csv``
+    A generic interval-based CSV annotation format. The CSV file must contain at
+    least the following columns:
+
+    - ``behavior``
+    - ``start_time``
+    - ``end_time``
+
+    Times are expected in seconds. They are converted to frame indices using the
+    FPS information from the corresponding pose-tracking data when available.
+
+``boris``
+    A BORIS tabular CSV export format. This option supports BORIS event tables
+    in which state behaviors are represented by paired ``START`` and ``STOP``
+    rows. The required BORIS columns are:
+
+    - ``Time``
+    - ``Media file path``
+    - ``Behavior``
+    - ``Status``
+
+    The optional ``FPS`` column is used to infer the frame rate when available.
+    If no FPS information is available, LISBET falls back to the default FPS
+    used by the annotation loader.
+
+All supported annotation formats are converted internally to the LISBET
+annotation representation:
+
+.. code-block:: text
+
+    xarray.Dataset
+        Dimensions:
+            time
+            behaviors
+            annotators
+
+        Data variable:
+            target_cls(time, behaviors, annotators)
+
+For example, BORIS annotations can be used during model training with:
+
+.. code-block:: bash
+
+    betman train_model /path/to/dataset --data_format movement --annot_format boris
+
+The same option can also be used for evaluation:
+
+.. code-block:: bash
+
+    betman evaluate_model /path/to/dataset /path/to/model_config.yml /path/to/weights.pt --data_format movement --annot_format boris
+
+If ``annot_format`` is not provided, LISBET uses:
+
+.. code-block:: text
+
+    annot_format = movement
+
+This ensures backward compatibility with existing LISBET datasets and workflows.

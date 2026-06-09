@@ -223,6 +223,7 @@ def predict(
     *,
     data_scale: str | None = None,
     data_filter: str | None = None,
+    annot_format: str = "movement",
     window_size: int = 200,
     window_offset: int = 0,
     fps_scaling: float = 1.0,
@@ -289,8 +290,8 @@ def predict(
         data_scale=data_scale,
         select_coords=select_coords,
         rename_coords=rename_coords,
+        annot_format=annot_format,
     )
-
     # Input features compatibility check
     check_feature_compatibility(config, records)
 

@@ -19,6 +19,7 @@ from tqdm.auto import tqdm
 
 from lisbet.config.schemas import ModelConfig
 from lisbet.modeling.factory import create_model_from_config
+from lisbet.io.annotation_formats import load_annotations as _load_annotations
 
 
 @dataclass
@@ -224,36 +225,6 @@ def _load_posetracks(seq_path, data_format, data_scale, select_coords, rename_co
     return ds
 
 
-def _load_annotations(seq_path):
-    """
-    Load annotations from a sequence directory, if present.
-
-    Returns
-    -------
-    xarray.Dataset or None
-        The loaded annotations, or None if not found.
-
-    """
-    # Find all files matching the annotations regex and load them
-    rx = re.compile(r"(?i)(manual_scoring|annotations).*\.nc$")
-    annotations = [
-        xr.open_dataset(pth, engine="scipy")
-        for pth in seq_path.iterdir()
-        if rx.search(pth.name)
-    ]
-
-    # Check if any annotations were found
-    if len(annotations) == 0:
-        return None
-
-    # Merge all annotations into a single one
-    annotations = xr.concat(annotations, dim="annotators")
-
-    logging.debug("Annotations: %s", annotations.coords["behaviors"].values)
-
-    return annotations
-
-
 def load_records(
     data_format,
     data_path,
@@ -261,56 +232,112 @@ def load_records(
     data_filter=None,
     select_coords=None,
     rename_coords=None,
+    annot_format="movement",
 ):
     """
-    Load pose-tracking records from a directory, with optional filtering, coordinate
-    selection and renaming.
+    Load pose-tracking records from a directory, with optional filtering,
+    coordinate selection, coordinate renaming, and annotation-format selection.
 
     Parameters
     ----------
     data_format : {'movement', 'DLC', 'SLEAP'}
-        Dataset format to load.
+        Pose-tracking dataset format to load.
     data_path : str or Path
         Root directory containing the sequence sub-directories.
     data_scale : str, optional
-        If supplied as WIDTHxHEIGHT or WIDTHxHEIGHTxDEPTH, every input coordinate is
-        assumed to be in data units and is divided by the given scale to obtain
-        normalized coordinates in the range [0, 1]. Otherwise, the algorithm infers the
-        active extent directly from the data.
+        If supplied as WIDTHxHEIGHT or WIDTHxHEIGHTxDEPTH, every input coordinate
+        is assumed to be in data units and is divided by the given scale to obtain
+        normalized coordinates in the range [0, 1]. Otherwise, the algorithm infers
+        the active extent directly from the data.
     data_filter : str, optional
-        Comma-separated substrings; a record is kept if any substring occurs in its
-        relative path. By default, all records are kept.
-    select_coords : str or None
-        Optional subset string in the format 'INDIVIDUALS;AXES;KEYPOINTS', where each
-        field is a comma-separated list or '*' for all. If None, all data is loaded.
-        Example: 'mouse1,mouse2;x,y;nose,tail'.
-    rename_coords : str or None
-        Optional coordinate names remapping in the format 'INDIVIDUALS;AXES;KEYPOINTS',
-        where each field is a comma-separated list of maps 'old_id:new_id' or '*' for
-        no remapping at that level. If None, original dataset names are used.
-        Example: 'mouse1:resident,mouse2:intruder;*;nose:snout,tail:tailbase'.
+        Comma-separated substrings used to filter records. A record is kept if any
+        substring occurs in its relative path. By default, all records are kept.
+    select_coords : str or None, optional
+        Optional subset string in the format 'INDIVIDUALS;AXES;KEYPOINTS', where
+        each field is a comma-separated list or '*' for all. If None, all data is
+        loaded.
+
+        Example:
+            'mouse1,mouse2;x,y;nose,tail'
+
+    rename_coords : str or None, optional
+        Optional coordinate-name remapping in the format
+        'INDIVIDUALS;AXES;KEYPOINTS', where each field is a comma-separated list
+        of maps 'old_id:new_id' or '*' for no remapping at that level. If None,
+        original dataset names are used.
+
+        Example:
+            'mouse1:resident,mouse2:intruder;*;nose:snout,tail:tailbase'
+
+    annot_format : {'movement', 'csv', 'boris'}, optional
+        Annotation format to load. The default is 'movement', which preserves the
+        current LISBET behavior and loads NetCDF annotation files such as
+        annotations.nc or manual_scoring.nc.
+
+        Supported values are:
+
+        - 'movement':
+            Current/default LISBET annotation format based on NetCDF files.
+        - 'csv':
+            Generic interval-based CSV annotation format with columns such as
+            behavior, start_time, and end_time.
+        - 'boris':
+            BORIS tabular CSV export format, where state behaviors are represented
+            by paired START and STOP rows.
+
+        All supported annotation formats are converted internally to the LISBET
+        annotation representation:
+
+            xarray.Dataset with dimensions:
+                time, behaviors, annotators
+
+            and data variable:
+                target_cls(time, behaviors, annotators)
 
     Returns
     -------
     list[Record]
-        A list of Record objects, each containing id, posetracks, and optionally
-        annotations.
+        A list of Record objects. Each Record contains:
+
+        - id : str
+            Record identifier relative to data_path.
+        - posetracks : xarray.Dataset
+            Loaded and preprocessed pose-tracking data.
+        - annotations : xarray.Dataset or None
+            Loaded annotations in the internal LISBET format, or None if no
+            annotation file is found for the requested annotation format.
 
     Raises
     ------
     ValueError
-        If data_format is unsupported, or if select_coords/rename_coords are invalid.
+        If data_format is unsupported, if annot_format is unsupported, if
+        select_coords or rename_coords are invalid, or if no valid records are
+        found in the specified directory.
     NotImplementedError
-        For recognized but unimplemented formats.
+        For recognized but unimplemented pose-tracking formats.
 
     Examples
     --------
+    Load records using the default LISBET/movement annotation format:
+
     >>> records = load_records(
     ...     data_format="movement",
     ...     data_path="~/datasets/mice",
     ...     select_coords="mouse1,mouse2;x,y;nose,tail",
     ...     rename_coords="mouse1:resident,mouse2:intruder;*;nose:snout,tail:tailbase",
+    ...     annot_format="movement",
     ... )
+
+    Load records with BORIS CSV annotations:
+
+    >>> records = load_records(
+    ...     data_format="movement",
+    ...     data_path="~/datasets/mice",
+    ...     annot_format="boris",
+    ... )
+
+    Inspect the first loaded record:
+
     >>> print(len(records))
     42
     >>> print(records[0].id)
@@ -342,49 +369,67 @@ def load_records(
     for seq_path in tqdm(seq_paths, desc="Loading dataset"):
         # Load pose-tracking data
         posetracks = _load_posetracks(
-            seq_path, data_format, data_scale, select_coords, rename_coords
+            seq_path,
+            data_format,
+            data_scale,
+            select_coords,
+            rename_coords,
         )
+
         if posetracks is None:
             logging.debug("Skipping %s, no tracking data found", str(seq_path))
             continue
 
-        # Load annotations
-        annotations = _load_annotations(seq_path)
+        # Load annotations using the requested annotation format
+        annotations = _load_annotations(
+            seq_path,
+            annot_format=annot_format,
+            posetracks=posetracks,
+        )
 
         # Create record id
         rec_id = str(seq_path.relative_to(data_path))
 
         # Add Record object to the list
         records.append(
-            Record(id=rec_id, posetracks=posetracks, annotations=annotations)
+            Record(
+                id=rec_id,
+                posetracks=posetracks,
+                annotations=annotations,
+            )
         )
 
-    # Sanity check: All posetracks must have the same 'features' coordinate (summary of
-    #               individuals/keypoints/space)
+    # Sanity check: all posetracks must have the same coordinate structure
     if records:
         ref_coords = {
             dim: records[0].posetracks.coords[dim].values.tolist()
             for dim in ("individuals", "keypoints", "space")
         }
+
         for rec in records:
             for dim in ("individuals", "keypoints", "space"):
                 ds_coords = rec.posetracks.coords[dim].values.tolist()
+
                 if ds_coords != ref_coords[dim]:
                     raise ValueError(
                         f"Inconsistent posetracks coordinates in record '{rec.id}':\n"
                         f"Reference {dim}:\n{ref_coords[dim]}\n"
                         f"Record {dim}:\n{ds_coords}"
                     )
+
     else:
         raise ValueError(
             "No valid records found in the specified directory. Please check the data "
-            "path, format and filters to ensure they match the dataset structure.\n"
-            f"Current values are: \n data_path = {data_path}\n "
-            f"data_format = {data_format}\n data_filter = {data_filter}\n"
+            "path, format, filters, and annotation format to ensure they match the "
+            "dataset structure.\n"
+            f"Current values are:\n"
+            f"  data_path = {data_path}\n"
+            f"  data_format = {data_format}\n"
+            f"  data_filter = {data_filter}\n"
+            f"  annot_format = {annot_format}\n"
         )
 
     return records
-
 
 def load_multi_records(data_config):
     """Internal helper. Loads and splits records for all tasks."""
@@ -402,6 +447,8 @@ def load_multi_records(data_config):
     logging.debug(datasources)
 
     # Load records
+    # Use getattr for annot_format to preserve backward compatibility with older
+    # configuration objects that do not yet define this field.
     multi_records = [
         load_records(
             dataset,
@@ -410,6 +457,7 @@ def load_multi_records(data_config):
             data_filter=data_config.data_filter,
             select_coords=data_config.select_coords,
             rename_coords=data_config.rename_coords,
+            annot_format=getattr(data_config, "annot_format", "movement"),
         )
         for dataset, datapath in datasources
     ]

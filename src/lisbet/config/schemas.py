@@ -42,6 +42,7 @@ BackboneConfig = Annotated[
 class DataConfig(BaseModel):
     data_path: str
     data_format: str = "DLC"
+    annot_format: str = "movement"
     data_scale: str | None = None
     data_filter: str | None = None
     select_coords: str | None = None

@@ -37,6 +37,7 @@ def annotate_behavior(
     data_path: str,
     data_scale: str | None = None,
     data_filter: str | None = None,
+    annot_format: str = "movement",
     mode: str = "multiclass",
     threshold: float = 0.5,
     window_size: int = 200,
@@ -118,6 +119,7 @@ def annotate_behavior(
         fps_scaling=fps_scaling,
         batch_size=batch_size,
         data_filter=data_filter,
+        annot_format=annot_format,
         select_coords=select_coords,
         rename_coords=rename_coords,
     )
