@@ -292,6 +292,7 @@ def predict(
         rename_coords=rename_coords,
         annot_format=annot_format,
     )
+
     # Input features compatibility check
     check_feature_compatibility(config, records)
 

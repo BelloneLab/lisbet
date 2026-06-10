@@ -127,14 +127,14 @@ def add_data_io_args(parser: argparse.ArgumentParser, data_help: str) -> None:
         "--annot_format",
         type=str,
         default="movement",
-        choices=["movement", "csv", "boris"],
+        choices=["movement", "csv-events", "boris"],
         help=textwrap.dedent(
             """\
             Annotation format to load.
 
             - movement: current/default LISBET annotation format using NetCDF files
               such as annotations.nc or manual_scoring.nc.
-            - csv: generic interval-based CSV annotation format with behavior,
+            - csv-events: generic interval-based CSV annotation format with behavior,
               start_time, and end_time columns.
             - boris: BORIS tabular CSV export with paired START/STOP rows.
 
@@ -152,4 +152,7 @@ def add_data_io_args(parser: argparse.ArgumentParser, data_help: str) -> None:
             For example, 'mouse001,mouse002' or 'approach'
             """
         ),
+    )
+    parser.add_argument(
+        "--output_path", type=Path, default=Path("."), help="Output path"
     )

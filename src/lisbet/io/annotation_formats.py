@@ -13,8 +13,8 @@ movement
     Current/default LISBET annotation format. Loads NetCDF files such as
     annotations.nc or manual_scoring.nc.
 
-csv
-    Generic interval-based CSV annotation format with at least:
+csv-events
+    Generic interval-based CSV event annotation format with at least:
     behavior,start_time,end_time
 
 boris
@@ -23,8 +23,8 @@ boris
 
 Notes
 -----
-The csv and boris loaders expect annotation times in seconds and convert them
-to frame indices using fps inferred from posetracks, the BORIS FPS column, or a
+The csv-events and boris loaders expect annotation times in seconds and convert them
+to frame indices using the provided fps value, the BORIS FPS column, or a
 default value.
 """
 
@@ -49,32 +49,30 @@ BORIS_EVENT_HEADER = (
 
 
 def _infer_n_frames(
-    posetracks: Optional[xr.Dataset] = None,
+    n_frames: Optional[int] = None,
     intervals_df: Optional[pd.DataFrame] = None,
     fps: float = 30,
 ) -> int:
-    """Infer the number of frames from posetracks or annotation intervals."""
-    if posetracks is not None and "time" in posetracks.sizes:
-        return int(posetracks.sizes["time"])
+    """Infer the number of frames from metadata or annotation intervals."""
+    if n_frames is not None:
+        return int(n_frames)
 
     if intervals_df is not None and len(intervals_df) > 0:
         return int(np.ceil(intervals_df["end_time"].max() * fps))
 
     raise ValueError(
-        "Could not infer the number of frames. Provide posetracks or valid intervals."
+        "Could not infer the number of frames. Provide n_frames or valid intervals."
     )
 
 
 def _infer_fps(
-    posetracks: Optional[xr.Dataset] = None,
+    fps: Optional[float] = None,
     boris_events: Optional[pd.DataFrame] = None,
     default_fps: float = 30,
 ) -> float:
-    """Infer FPS from posetracks attributes, BORIS table, or fallback."""
-    if posetracks is not None:
-        fps = posetracks.attrs.get("fps", None)
-        if fps is not None:
-            return float(fps)
+    """Infer FPS from explicit metadata, BORIS table, or fallback."""
+    if fps is not None:
+        return float(fps)
 
     if boris_events is not None and "FPS" in boris_events.columns:
         fps_values = pd.to_numeric(boris_events["FPS"], errors="coerce").dropna()
@@ -214,9 +212,10 @@ def load_movement_annotations(seq_path: Path) -> Optional[xr.Dataset]:
     return annotations
 
 
-def load_csv_annotations(
+def load_csv_event_annotations(
     seq_path: Path,
-    posetracks: Optional[xr.Dataset] = None,
+    n_frames: Optional[int] = None,
+    fps: Optional[float] = None,
 ) -> Optional[xr.Dataset]:
     """Load a generic interval-based CSV annotation format.
 
@@ -247,13 +246,17 @@ def load_csv_annotations(
             else f"annotator{idx}"
         )
 
-        fps = _infer_fps(posetracks=posetracks, default_fps=30)
-        n_frames = _infer_n_frames(posetracks=posetracks, intervals_df=df, fps=fps)
+        ann_fps = _infer_fps(fps=fps, default_fps=30)
+        ann_n_frames = _infer_n_frames(
+            n_frames=n_frames,
+            intervals_df=df,
+            fps=ann_fps,
+        )
 
         ann = intervals_to_lisbet_xarray(
             df,
-            fps=fps,
-            n_frames=n_frames,
+            fps=ann_fps,
+            n_frames=ann_n_frames,
             annotator=annotator,
             source_software="CSV",
         )
@@ -381,7 +384,8 @@ def boris_events_to_intervals(boris_events: pd.DataFrame) -> pd.DataFrame:
 
 def load_boris_annotations(
     seq_path: Path,
-    posetracks: Optional[xr.Dataset] = None,
+    n_frames: Optional[int] = None,
+    fps: Optional[float] = None,
 ) -> Optional[xr.Dataset]:
     """Load BORIS tabular CSV annotations and convert them to LISBET format."""
     rx = re.compile(r"(?i)(boris|manual_scoring|annotations).*\.csv$")
@@ -396,22 +400,22 @@ def load_boris_annotations(
         boris_events = read_boris_csv(boris_file)
         intervals = boris_events_to_intervals(boris_events)
 
-        fps = _infer_fps(
-            posetracks=posetracks,
+        ann_fps = _infer_fps(
+            fps=fps,
             boris_events=boris_events,
             default_fps=30,
         )
 
-        n_frames = _infer_n_frames(
-            posetracks=posetracks,
+        ann_n_frames = _infer_n_frames(
+            n_frames=n_frames,
             intervals_df=intervals,
-            fps=fps,
+            fps=ann_fps,
         )
 
         ann = intervals_to_lisbet_xarray(
             intervals,
-            fps=fps,
-            n_frames=n_frames,
+            fps=ann_fps,
+            n_frames=ann_n_frames,
             annotator=f"annotator{idx}",
             source_software="BORIS",
         )
@@ -427,7 +431,8 @@ def load_boris_annotations(
 def load_annotations(
     seq_path: Path,
     annot_format: str = "movement",
-    posetracks: Optional[xr.Dataset] = None,
+    n_frames: Optional[int] = None,
+    fps: Optional[float] = None,
 ) -> Optional[xr.Dataset]:
     """Load annotations from a sequence directory using the requested format.
 
@@ -437,10 +442,12 @@ def load_annotations(
         Sequence directory.
     annot_format
         Annotation format to load. Supported values are:
-        "movement", "csv", and "boris".
-    posetracks
-        Pose-tracking data used to infer number of frames and FPS for CSV or
-        BORIS interval annotations.
+        "movement", "csv-events", and "boris".
+    n_frames
+        Number of frames in the corresponding pose-tracking sequence.
+    fps
+        Frames per second used to convert interval times to frame indices.
+        If missing, BORIS FPS metadata or a default value may be used.
 
     Returns
     -------
@@ -453,13 +460,13 @@ def load_annotations(
     if annot_format == "movement":
         return load_movement_annotations(seq_path)
 
-    if annot_format == "csv":
-        return load_csv_annotations(seq_path, posetracks=posetracks)
+    if annot_format == "csv-events":
+        return load_csv_event_annotations(seq_path, n_frames=n_frames, fps=fps)
 
     if annot_format == "boris":
-        return load_boris_annotations(seq_path, posetracks=posetracks)
+        return load_boris_annotations(seq_path, n_frames=n_frames, fps=fps)
 
     raise ValueError(
         f"Unsupported annot_format='{annot_format}'. "
-        "Expected one of: movement, csv, boris."
+        "Expected one of: movement, csv-events, boris."
     )

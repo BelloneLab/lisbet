@@ -73,10 +73,16 @@ Annotation formats
 ------------------
 
 LISBET supports multiple annotation input formats through the ``annot_format``
-option. This option specifies how annotation files are read from each sequence
-directory and converted into the internal LISBET annotation representation.
-
-The default value is ``movement``, which preserves the original LISBET behavior.
+option, which determines how manual annotations are read from each sequence
+directory and converted into the internal LISBET representation. For existing
+LISBET datasets or workflows, users should normally keep the default
+``movement`` format, which expects annotations already stored in the
+LISBET/NetCDF structure. Use ``csv-events`` for simple manual annotation tables
+in which each row defines a behavior with a start and end time, and use
+``boris`` for BORIS tabular CSV exports with paired ``START`` and ``STOP``
+events. All supported formats are converted internally to the same xarray
+annotation structure, so the downstream training and evaluation workflow remains
+unchanged.
 
 Supported annotation formats are:
 
@@ -87,7 +93,7 @@ Supported annotation formats are:
     ``.nc``. This format is expected to already follow the internal LISBET
     annotation structure.
 
-``csv``
+``csv-events``
     A generic interval-based CSV annotation format. The CSV file must contain at
     least the following columns:
 

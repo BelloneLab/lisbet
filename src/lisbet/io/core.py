@@ -269,7 +269,7 @@ def load_records(
         Example:
             'mouse1:resident,mouse2:intruder;*;nose:snout,tail:tailbase'
 
-    annot_format : {'movement', 'csv', 'boris'}, optional
+    annot_format : {'movement', 'csv-events', 'boris'}, optional
         Annotation format to load. The default is 'movement', which preserves the
         current LISBET behavior and loads NetCDF annotation files such as
         annotations.nc or manual_scoring.nc.
@@ -278,7 +278,7 @@ def load_records(
 
         - 'movement':
             Current/default LISBET annotation format based on NetCDF files.
-        - 'csv':
+        - 'csv-events':
             Generic interval-based CSV annotation format with columns such as
             behavior, start_time, and end_time.
         - 'boris':
@@ -380,11 +380,18 @@ def load_records(
             logging.debug("Skipping %s, no tracking data found", str(seq_path))
             continue
 
-        # Load annotations using the requested annotation format
+        # Load annotations using the requested annotation format.
+        # Pass only the metadata required to align interval annotations to
+        # the tracking sequence.
+        n_frames = int(posetracks.sizes["time"])
+        fps = posetracks.attrs.get("fps", None)
+        fps = float(fps) if fps is not None else None
+
         annotations = _load_annotations(
             seq_path,
             annot_format=annot_format,
-            posetracks=posetracks,
+            n_frames=n_frames,
+            fps=fps,
         )
 
         # Create record id
