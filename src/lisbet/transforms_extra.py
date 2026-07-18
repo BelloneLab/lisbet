@@ -1,11 +1,16 @@
 """Augmentation module for transforming samples in a dataset.
 
 This module provides data augmentation and preprocessing transforms for pose tracking
-datasets stored as xarray.Dataset objects. The transforms can be used in training
-pipelines to improve model robustness and generalization.
+datasets stored as xarray.Dataset objects or canonical NumPy arrays. NumPy pose arrays
+must have shape ``(time, individuals, keypoints, space)``. The transforms can be used
+in training pipelines to improve model robustness and generalization.
 
 Available Transforms
 --------------------
+GaussianJitter
+    Adds independent Gaussian noise to every pose coordinate across the full time
+    window and clamps the result to the normalized [0, 1] range.
+
 RandomPermutation
     Randomly permutes both coordinate labels and their associated data together across
     the entire time window. Useful for making models invariant to coordinate ordering
@@ -22,17 +27,18 @@ RandomRotation
     normalization modes (truncate, rescale, or none).
 
 KeypointAblation
-    Randomly sets keypoint coordinates to 0.0 with independent Bernoulli sampling
-    across (time, keypoints, individuals). Simulates missing or occluded keypoints
+    Independently selects (keypoint, individual) pairs and sets their coordinates to
+    0.0 across the full time window. Simulates sustained missing or occluded keypoints
     for robustness testing.
 
 PoseToTensor
-    Converts pose tracking data from xarray.Dataset format to PyTorch tensors by
+    Converts xarray or canonical NumPy pose tracking data to PyTorch tensors by
     stacking spatial dimensions into a single feature dimension.
 
 PoseToVideo
     Renders pose tracking data as video frames (RGB images) using OpenCV, with
-    customizable body specifications for visualization.
+    customizable body specifications for visualization. Coordinate labels are
+    required, so this transform is xarray-only.
 
 VideoToTensor
     Converts video frames from NumPy arrays to PyTorch tensors with optional
@@ -70,7 +76,7 @@ Usage Examples
 >>> from lisbet.transforms_extra import KeypointAblation
 >>> transform = transforms.Compose([
 ...     transforms.RandomApply([
-...         KeypointAblation(seed=42, p=0.05)
+...         KeypointAblation(seed=42, pB=0.05)
 ...     ], p=1.0),
 ...     PoseToTensor(),
 ... ])
@@ -97,6 +103,43 @@ import torch
 import xarray as xr
 
 from lisbet.drawing import BodySpecs, body_specs_registry, color_to_bgr
+
+_CANONICAL_DIMS = ("time", "individuals", "keypoints", "space")
+_NUMPY_AXES = {dim: axis for axis, dim in enumerate(_CANONICAL_DIMS)}
+
+
+def _canonical_position(posetracks):
+    """Return position values in canonical NumPy axis order."""
+    if isinstance(posetracks, np.ndarray):
+        if posetracks.ndim != 4:
+            raise ValueError(
+                "NumPy pose arrays must have shape "
+                "(time, individuals, keypoints, space)."
+            )
+        return posetracks
+
+    if not isinstance(posetracks, xr.Dataset):
+        raise TypeError("Pose transforms require an xarray Dataset or NumPy array.")
+
+    pos_var = posetracks["position"]
+    missing_dims = set(_CANONICAL_DIMS) - set(pos_var.dims)
+    if missing_dims:
+        raise ValueError(
+            f"Position variable must contain {set(_CANONICAL_DIMS)} dimensions. "
+            f"Missing: {missing_dims}"
+        )
+    return pos_var.transpose(*_CANONICAL_DIMS).values
+
+
+def _restore_position(posetracks, position):
+    """Return transformed values in the same container type as the input."""
+    if isinstance(posetracks, np.ndarray):
+        return np.ascontiguousarray(position, dtype=posetracks.dtype)
+
+    original_dims = posetracks["position"].dims
+    axes = tuple(_NUMPY_AXES[dim] for dim in original_dims)
+    posetracks["position"].values[...] = np.transpose(position, axes)
+    return posetracks
 
 
 def _random_permutation(n, generator, exclude_identity=False):
@@ -135,11 +178,11 @@ def _random_permutation(n, generator, exclude_identity=False):
 
 
 class GaussianJitter:
-    """Apply Gaussian jitter with across the full window.
+    """Apply Gaussian jitter across the full window.
 
-    Apply a Gaussian noise N(0, sigma^2) is added across all dimension.
-    Coordinates are assumed normalized in [0, 1] and
-    are clamped to that range post-perturbation.
+    Gaussian noise drawn from N(0, sigma^2) is added independently to every
+    coordinate. Coordinates are assumed normalized in [0, 1] and are clamped to that
+    range post-perturbation.
 
     Parameters
     ----------
@@ -154,53 +197,33 @@ class GaussianJitter:
         self.sigma = float(sigma)
         self.g = torch.Generator().manual_seed(seed)
 
-    def __call__(self, posetracks: xr.Dataset) -> xr.Dataset:
-        pos_var = posetracks["position"]
-
-        dims = list(pos_var.dims)
-
-        # Validate dataset dimensions
-        required_dims = {"time", "keypoints", "individuals"}
-        missing_dims = required_dims - set(dims)
-        if missing_dims:
-            raise ValueError(
-                f"Position variable must contain {required_dims} dimensions. "
-                f"Missing: {missing_dims}"
-            )
-
-        shape = pos_var.shape
-        # Mask shape excludes space dimension(s) for independence semantics.
-        mask_shape = [shape[d] for d in range(len(shape))]
-        # Replace space dimension size(s) by 1 for broadcasting (space may be before
-        # keypoints as per dataset examples)
-        for s_name in ["space"]:
-            if s_name in dims:
-                s_idx = dims.index(s_name)
-                mask_shape[s_idx] = 1
-        # Ensure independence only over time,keypoints,individuals by collapsing non
-        # listed dims to 1
-        for d_name in dims:
-            if d_name not in ("time", "keypoints", "individuals", "space"):
-                mask_shape[dims.index(d_name)] = 1
-
-        # Create noise tensor same full shape
-        noise = torch.randn(shape, generator=self.g) * self.sigma
-        # Apply
-        pos = torch.from_numpy(pos_var.values)
-        pos = pos + noise
-        # Clamp to [0,1]
-        pos.clamp_(0.0, 1.0)
-        # print('clamped pos:', pos)
-        pos_var = pos.numpy()
-        posetracks["position"].values[:] = pos_var
-        return posetracks
+    def __call__(self, posetracks):
+        position = _canonical_position(posetracks)
+        # Draw in movement's xarray storage order (time, space, keypoints,
+        # individuals), then transpose to canonical order. This preserves the exact
+        # seeded output of the pre-NumPy implementation for this minor release.
+        # TODO: In the next major release, replace the legacy_shape/noise block with
+        # ``noise = torch.randn(position.shape, generator=self.g) * self.sigma``
+        # and document the resulting reproducibility change.
+        legacy_shape = (
+            position.shape[0],
+            position.shape[3],
+            position.shape[2],
+            position.shape[1],
+        )
+        noise = (torch.randn(legacy_shape, generator=self.g) * self.sigma).permute(
+            0, 3, 2, 1
+        )
+        transformed = torch.from_numpy(np.ascontiguousarray(position)) + noise
+        transformed.clamp_(0.0, 1.0)
+        return _restore_position(posetracks, transformed.numpy())
 
 
 class KeypointAblation:
     """Apply keypoint ablation with per-(keypoint, individual) Bernoulli sampling.
 
     Probability ``pB`` is applied independently to each (keypoint, individual) pair.
-    For every selected pair, all spatial coordinates (x, y, z, etc.) are set to NaN
+    For every selected pair, all spatial coordinates (x, y, z, etc.) are set to zero
     across the entire time window, simulating sustained missing or occluded keypoints.
 
     This augmentation helps models become robust to missing data, which commonly occurs
@@ -226,46 +249,35 @@ class KeypointAblation:
         self.pB = float(pB)
         self.g = torch.Generator().manual_seed(seed)
 
-    def __call__(self, posetracks: xr.Dataset) -> xr.Dataset:
-        pos_var = posetracks["position"]
-        dims = list(pos_var.dims)
+    def __call__(self, posetracks):
+        position = _canonical_position(posetracks)
+        # Draw in movement's xarray mask layout (time, space, keypoints,
+        # individuals), then transpose to canonical order. This preserves the exact
+        # seeded output of the pre-NumPy implementation for this minor release.
+        # TODO: In the next major release, replace the legacy_mask_shape/bern block
+        # with:
+        # bern = torch.rand(
+        #     (1, position.shape[1], position.shape[2], 1),
+        #     generator=self.g,
+        # ) < self.pB
+        legacy_mask_shape = (1, 1, position.shape[2], position.shape[1])
+        bern = (torch.rand(legacy_mask_shape, generator=self.g) < self.pB).permute(
+            0, 3, 2, 1
+        )
 
-        # Validate dataset dimensions
-        required_dims = {"time", "keypoints", "individuals"}
-        missing_dims = required_dims - set(dims)
-        if missing_dims:
-            raise ValueError(
-                f"Position variable must contain {required_dims} dimensions. "
-                f"Missing: {missing_dims}"
-            )
-
-        shape = pos_var.shape
-        # Create mask shape for (keypoints, individuals) only, broadcast over time and
-        # space
-        mask_shape = []
-        for d_name in dims:
-            if d_name in ("keypoints", "individuals"):
-                mask_shape.append(shape[dims.index(d_name)])
-            else:
-                # Set to 1 for broadcasting (time, space, etc.)
-                mask_shape.append(1)
-
-        # Generate Bernoulli mask for (keypoint, individual) pairs
-        bern = torch.rand(mask_shape, generator=self.g) < self.pB
-
-        # Apply ablation by setting selected (keypoint, individual) pairs to NaN
-        # across all time
-        pos = torch.from_numpy(pos_var.values)
-        pos = torch.where(bern, torch.tensor(0.0), pos)
-        pos_var.values[:] = pos.numpy()
-        return posetracks
+        pos = torch.from_numpy(np.ascontiguousarray(position))
+        transformed = torch.where(bern, torch.zeros((), dtype=pos.dtype), pos)
+        return _restore_position(posetracks, transformed.numpy())
 
 
 class RandomPermutation:
     """
-    Randomly permutes the order of a specified coordinate (e.g., 'individuals') in an
-    xarray.Dataset, reordering both the coordinate labels and their associated data
-    together.
+    Randomly permute the order of a specified pose coordinate.
+
+    For an xarray dataset, both the coordinate labels and their associated data are
+    reordered. For a NumPy array, ``coordinate`` identifies the corresponding axis in
+    the canonical ``(time, individuals, keypoints, space)`` layout; raw arrays have no
+    coordinate labels to reorder.
 
     This augmentation can be used to increase invariance to coordinate order (e.g.,
     fixed identity, axis orientation). The permutation is applied to the entire dataset.
@@ -276,6 +288,7 @@ class RandomPermutation:
         Random seed for reproducibility.
     coordinate : str
         Name of the coordinate to permute (e.g., 'individuals', 'keypoints', 'space').
+        For NumPy input, this must name an axis in the canonical pose layout.
     exclude_identity : bool
         If True, the identity permutation (no change) is excluded. This guarantees
         that at least one element will be moved. Default is False.
@@ -283,8 +296,7 @@ class RandomPermutation:
     Methods
     -------
     __call__(posetracks)
-        Applies the random permutation to the specified coordinate of the input
-        xarray.Dataset.
+        Apply the random permutation and return the same container type as the input.
 
     Examples
     --------
@@ -307,31 +319,49 @@ class RandomPermutation:
 
         Parameters
         ----------
-        posetracks : xarray.Dataset
-            Pose tracks dataset with a 'position' variable.
+        posetracks : xarray.Dataset or numpy.ndarray
+            Pose tracks represented by an xarray dataset with a ``position`` variable,
+            or by a NumPy array in canonical
+            ``(time, individuals, keypoints, space)`` order.
 
         Returns
         -------
-        xarray.Dataset
-            Dataset with permuted coordinate and data.
+        xarray.Dataset or numpy.ndarray
+            Pose tracks with the selected coordinate or canonical axis permuted. The
+            returned container type matches ``posetracks``.
         """
-        # Get current coordinate values
-        coord_vals = list(posetracks.coords[self.coordinate].values)
+        if isinstance(posetracks, np.ndarray):
+            _canonical_position(posetracks)
+            if self.coordinate not in _NUMPY_AXES:
+                raise ValueError(f"Unknown NumPy pose coordinate '{self.coordinate}'.")
+            coordinate_axis = _NUMPY_AXES[self.coordinate]
+            coordinate_size = posetracks.shape[coordinate_axis]
+        elif isinstance(posetracks, xr.Dataset):
+            coordinate_size = posetracks.coords[self.coordinate].size
+        else:
+            raise TypeError("Pose transforms require an xarray Dataset or NumPy array.")
 
         # Generate a random permutation
-        perm = _random_permutation(len(coord_vals), self.g, self.exclude_identity)
+        perm = _random_permutation(coordinate_size, self.g, self.exclude_identity)
 
-        # Apply permutation to the entire dataset
-        # NOTE: This reorders both coordinates and data together
-        posetracks = posetracks.isel({self.coordinate: perm})
+        if isinstance(posetracks, np.ndarray):
+            return np.take(posetracks, perm, axis=coordinate_axis)
 
-        return posetracks
+        # For xarray, retain the public behavior of reordering coordinate labels and
+        # every variable that uses the selected coordinate.
+        return posetracks.isel({self.coordinate: perm})
 
 
 class RandomBlockPermutation:
     """
     Randomly permutes the data (but not coordinate labels) of a specified coordinate
-    within a random contiguous block of frames in an xarray.Dataset.
+    within a random contiguous block of frames.
+
+    For an xarray dataset, coordinate labels remain fixed while the associated pose
+    data are permuted inside the block. For a NumPy array, ``coordinate`` identifies
+    the corresponding axis in the canonical
+    ``(time, individuals, keypoints, space)`` layout; raw arrays have no coordinate
+    labels.
 
     This augmentation is useful to create identity swaps within a portion of the time
     series, mimicking the effects of a tracking error, while maintaining consistent
@@ -343,6 +373,7 @@ class RandomBlockPermutation:
         Random seed for reproducibility.
     coordinate : str
         Name of the coordinate to permute (e.g., 'individuals', 'keypoints').
+        For NumPy input, this must name an axis in the canonical pose layout.
     permute_fraction : float
         Fraction of the time window to which the permutation is applied.
         Must be in (0, 1]. A continuous block of frames of this relative size will be
@@ -355,8 +386,8 @@ class RandomBlockPermutation:
     Methods
     -------
     __call__(posetracks)
-        Applies the random block permutation to the specified coordinate of the input
-        xarray.Dataset.
+        Apply the random block permutation and return the same container type as the
+        input.
 
     Notes
     -----
@@ -413,14 +444,26 @@ class RandomBlockPermutation:
 
         Parameters
         ----------
-        posetracks : xarray.Dataset
-            Pose tracks dataset with a 'position' variable.
+        posetracks : xarray.Dataset or numpy.ndarray
+            Pose tracks represented by an xarray dataset with a ``position`` variable,
+            or by a NumPy array in canonical
+            ``(time, individuals, keypoints, space)`` order.
 
         Returns
         -------
-        xarray.Dataset
-            Dataset with permuted data in a random block, coordinates unchanged.
+        xarray.Dataset or numpy.ndarray
+            Pose tracks with data permuted inside a random block. The returned
+            container type matches ``posetracks``; xarray coordinates remain
+            unchanged.
         """
+        if isinstance(posetracks, xr.Dataset):
+            return self._apply_xarray(posetracks)
+        if isinstance(posetracks, np.ndarray):
+            return self._apply_numpy(posetracks)
+        raise TypeError("Pose transforms require an xarray Dataset or NumPy array.")
+
+    def _apply_xarray(self, posetracks):
+        """Apply the legacy xarray implementation without changing its semantics."""
         # Get current coordinate values
         coord_vals = list(posetracks.coords[self.coordinate].values)
 
@@ -471,9 +514,48 @@ class RandomBlockPermutation:
 
         return posetracks
 
+    def _apply_numpy(self, posetracks):
+        """Apply a block permutation to a canonical NumPy pose array."""
+        position = _canonical_position(posetracks)
+        if self.coordinate not in _NUMPY_AXES:
+            raise ValueError(f"Unknown pose coordinate '{self.coordinate}'.")
+        coordinate_axis = _NUMPY_AXES[self.coordinate]
+
+        # Generate a random permutation
+        perm = _random_permutation(
+            position.shape[coordinate_axis], self.g, self.exclude_identity
+        )
+
+        window_size = position.shape[0]
+        block_size = int(self.permute_fraction * window_size)
+
+        if block_size == 0:
+            return _restore_position(posetracks, position)
+
+        # Sample start_idx from extended range to ensure uniform frame probability.
+        # Range: [1 - block_size, window_size - 1] gives each frame exactly
+        # block_size chances to be included in the block.
+        start_idx = torch.randint(
+            1 - block_size, window_size, (1,), generator=self.g
+        ).item()
+
+        # Clip to valid range
+        actual_start = max(0, start_idx)
+        actual_end = min(window_size, start_idx + block_size)
+
+        transformed = np.array(position, copy=True)
+        transformed[actual_start:actual_end] = np.take(
+            position[actual_start:actual_end], perm, axis=coordinate_axis
+        )
+        return _restore_position(posetracks, transformed)
+
 
 class RandomRotation:
     """Apply a random rotation to keypoint coordinates in normalized [0, 1] space.
+
+    The input may be an xarray dataset or a NumPy array in canonical
+    ``(time, individuals, keypoints, space)`` order. The returned container type
+    matches the input.
 
     Samples a rotation angle uniformly from [-max_angle, +max_angle] and applies it
     consistently across all frames in the window. For 2D data, rotates around the
@@ -525,29 +607,30 @@ class RandomRotation:
         self.mode = mode
         self.g = torch.Generator().manual_seed(seed)
 
-    def __call__(self, posetracks: xr.Dataset) -> xr.Dataset:
+    def __call__(self, posetracks):
         """
         Apply random rotation to keypoint coordinates.
 
         Parameters
         ----------
-        posetracks : xarray.Dataset
-            Pose tracks dataset with a 'position' variable containing dimensions
-            (time, keypoints, individuals, space).
+        posetracks : xarray.Dataset or numpy.ndarray
+            Pose tracks represented by an xarray dataset with a ``position`` variable,
+            or by a NumPy array in canonical
+            ``(time, individuals, keypoints, space)`` order.
 
         Returns
         -------
-        xarray.Dataset
-            Dataset with rotated position coordinates.
+        xarray.Dataset or numpy.ndarray
+            Pose tracks with rotated position coordinates. The returned container type
+            matches ``posetracks``.
 
         Raises
         ------
         ValueError
             If the 'space' dimension has a size other than 2 or 3.
         """
-        dims = list(posetracks["position"].dims)
-        space_idx = dims.index("space")
-        n_space = posetracks["position"].shape[space_idx]
+        position = _canonical_position(posetracks)
+        n_space = position.shape[3]
 
         if n_space not in (2, 3):
             raise ValueError(f"'space' dimension must have size 2 or 3, got {n_space}")
@@ -572,29 +655,24 @@ class RandomRotation:
             R = np.eye(3) + s * K + (1.0 - c) * (K @ K)
 
         # Rotate around center of the [0, 1] space
-        pos = np.moveaxis(posetracks["position"].values - 0.5, space_idx, -1) @ R.T
-        pos = np.moveaxis(pos, -1, space_idx) + 0.5
+        pos = (position - 0.5) @ R.T + 0.5
 
         # Apply normalization mode
         if self.mode == "truncate":
             np.clip(pos, 0.0, 1.0, out=pos)
         elif self.mode == "rescale" and (np.any(pos < 0.0) or np.any(pos > 1.0)):
             for s_i in range(n_space):
-                slices = [slice(None)] * pos.ndim
-                slices[space_idx] = s_i
-                spatial_slice = pos[tuple(slices)]
+                spatial_slice = pos[..., s_i]
                 vmin, vmax = spatial_slice.min(), spatial_slice.max()
                 if vmin != vmax:
-                    pos[tuple(slices)] = (spatial_slice - vmin) / (vmax - vmin)
+                    pos[..., s_i] = (spatial_slice - vmin) / (vmax - vmin)
 
-        posetracks["position"].values[:] = pos
-        return posetracks
+        return _restore_position(posetracks, pos)
 
 
 class PoseToTensor:
     """
-    Convert the 'position' variable from a posetracks xarray.Dataset into a PyTorch
-    tensor.
+    Convert xarray or canonical NumPy pose data into a PyTorch tensor.
 
     This transformation stacks the 'individuals', 'keypoints', and 'space' dimensions
     into a single 'features' dimension, resulting in a tensor of shape
@@ -620,13 +698,13 @@ class PoseToTensor:
     def __call__(self, posetracks):
         """
         Stack the 'individuals', 'keypoints', and 'space' dimensions of the 'position'
-        variable in the input xarray.Dataset and return as a PyTorch tensor.
+        data and return them as a PyTorch tensor.
 
         Parameters
         ----------
-        posetracks : xarray.Dataset
-            Pose tracks dataset with a 'position' variable of shape
-            (time, individuals, keypoints, space).
+        posetracks : xarray.Dataset or numpy.ndarray
+            Pose tracks dataset, or a NumPy array with canonical shape
+            ``(time, individuals, keypoints, space)``.
 
         Returns
         -------
@@ -634,6 +712,15 @@ class PoseToTensor:
             Tensor of shape (time, features), where features =
             individuals * keypoints * space, containing the stacked position data.
         """
+        if isinstance(posetracks, np.ndarray):
+            _canonical_position(posetracks)
+            values = np.ascontiguousarray(
+                posetracks.reshape(posetracks.shape[0], -1), dtype=np.float32
+            )
+            return torch.from_numpy(values)
+
+        if not isinstance(posetracks, xr.Dataset):
+            raise TypeError("PoseToTensor requires an xarray Dataset or NumPy array.")
         return torch.from_numpy(
             posetracks.stack(
                 features=("individuals", "keypoints", "space")
@@ -643,7 +730,7 @@ class PoseToTensor:
 
 class PoseToVideo:
     """
-    Fast OpenCV-based transformation: posetracks (xarray.Dataset) to a sequence of BGR
+    Fast OpenCV-based transformation: posetracks (xarray.Dataset) to a sequence of RGB
     images.
     """
 
@@ -670,6 +757,10 @@ class PoseToVideo:
         self.bg_color = color_to_bgr(bg_color)
 
     def __call__(self, posetracks, show_progress=False):
+        if not isinstance(posetracks, xr.Dataset):
+            raise TypeError(
+                "PoseToVideo requires an xarray Dataset with coordinate labels."
+            )
         frames = [
             self.render_frame(posetracks, t) for t in range(posetracks.sizes["time"])
         ]
@@ -683,7 +774,7 @@ class PoseToVideo:
 
     def render_frame(self, posetracks, t_idx):
         """
-        Render a single frame of pose tracks as a BGR image.
+        Render a single frame of pose tracks as an RGB image.
 
         Parameters
         ----------

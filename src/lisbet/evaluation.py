@@ -107,6 +107,7 @@ def evaluate(
         fps_scaling=fps_scaling,
         transform=PoseToTensor(),
         annot_format=mode,
+        engine="numpy",
     )
     num_workers = min(suggested_max_num_workers(1), batch_size // 8)
     prefetch_factor = 4 if num_workers > 0 else None

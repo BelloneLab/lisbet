@@ -11,7 +11,7 @@ from lisbet.io import Record, dump_model_config, dump_weights, load_multi_record
 from lisbet.training.core import _compute_epoch_logs, _configure_dataloaders
 from lisbet.training.preprocessing import split_multi_records
 from lisbet.training.tasks import Task
-from lisbet.training.utils import generate_seeds
+from lisbet.training.utils import estimate_num_workers, generate_seeds
 
 
 @pytest.fixture
@@ -207,6 +207,14 @@ def test_generate_seeds_deterministic_and_override():
     assert "torch" in seeds1
 
 
+def test_estimate_num_workers_default_target(monkeypatch):
+    monkeypatch.setattr(
+        "lisbet.training.utils.suggested_max_num_workers", lambda _world_size: 15
+    )
+
+    assert estimate_num_workers(n_tasks=4, batch_size=32) == 2
+
+
 def test_configure_dataloaders_min_samples(monkeypatch):
     # Mock a minimal dataset and dataloader
     class DummyDataset:
@@ -229,6 +237,10 @@ def test_configure_dataloaders_min_samples(monkeypatch):
 
     monkeypatch.setattr("torch.utils.data.RandomSampler", DummySampler)
     monkeypatch.setattr("lisbet.training.core.DataLoader", DummyDataLoader)
+    monkeypatch.setattr(
+        "lisbet.training.core.estimate_num_workers",
+        lambda n_tasks, batch_size: 1,
+    )
 
     # Use Task dataclass with train_dataset attribute
     task1 = Task(

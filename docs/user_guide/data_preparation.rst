@@ -69,6 +69,42 @@ While this requirement may seem restrictive, it ensures reproducibility and reli
 Future releases may provide more flexibility for custom keypoint sets and automatic mapping between conventions.
 
 
+Window processing engines
+-------------------------
+
+The public window selectors and datasets accept an ``engine`` argument with two
+choices. Before any user-supplied transform is applied, the representations are:
+
+``xarray``
+    The backward-compatible default. Samples are ``xarray.Dataset`` objects and keep
+    coordinate labels, additional data variables, and the debugging attributes added
+    by self-supervised datasets.
+
+``numpy``
+    Samples are writable, independent ``numpy.ndarray`` objects containing only the
+    ``position`` values. Their canonical shape is ``(time, individuals, keypoints,
+    space)``. Coordinate labels, additional xarray data variables, and debugging
+    attributes are not available on this representation.
+
+For example:
+
+.. code-block:: python
+
+    from lisbet.datasets import WindowDataset
+
+    dataset = WindowDataset(records, window_size=200, engine="numpy")
+    window = dataset[0]
+    assert window.shape == (200, n_individuals, n_keypoints, n_space)
+
+LISBET's built-in training, development validation, evaluation, and prediction
+pipelines use the NumPy engine internally. This is an implementation choice rather
+than a command-line setting; direct users of the dataset classes continue to get
+``xarray`` unless they explicitly request ``engine="numpy"``. Custom transforms used
+with the NumPy engine must accept the canonical array described above and should
+return either another canonical array or the model-ready value expected by the next
+transform.
+
+
 Annotation formats
 ------------------
 
