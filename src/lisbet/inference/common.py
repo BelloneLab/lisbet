@@ -190,6 +190,7 @@ def predict_record(
         window_offset=window_offset,
         fps_scaling=fps_scaling,
         transform=transforms.Compose([PoseToTensor()]),
+        engine="numpy",
     )
 
     num_workers = min(suggested_max_num_workers(1), batch_size // 8)

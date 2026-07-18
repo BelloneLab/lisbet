@@ -127,13 +127,13 @@ def configure_train_model_parser(parser: argparse.ArgumentParser) -> None:
                 - blk_perm_id: Randomly permute identities of individuals, applied
                                to a contiguous block of frames within a window.
 
-                - gauss_jitter: Randomly add N(0,sigma) noise applied consistently in
-                                a window.
+                - gauss_jitter: Add independent N(0,sigma) noise to every coordinate
+                                in a selected window.
 
-                - kp_ablation: Randomly set keypoint coordinates to NaN (missing data)
-                               applied consistently across all frames in a window.
-                               Use Bernoulli(pB) to select which keypoints to ablate.
-                               Simulates sporadic occlusions or tracking failures.
+                - kp_ablation: Use Bernoulli(pB) to select (keypoint, individual)
+                               pairs, then set all of their coordinates to zero across
+                               the selected window. Simulates sustained occlusions or
+                               tracking failures.
 
                 - rotation: Randomly rotate keypoint coordinates around the center
                             of the normalized [0,1] space. Supports 2D and 3D
@@ -141,12 +141,14 @@ def configure_train_model_parser(parser: argparse.ArgumentParser) -> None:
 
 
             Parameters (optional):
-                - p=<float>: Probability of applying the transformation (default: 1.0)
-                - frac=<float>: For block-based augmentations (blk_perm_id,
-                                blk_gauss_jitter).
-                                Block size fraction (defaults: 0.5 / 0.05 / 0.1)
-                - sigma=<float>: Jitter noise std for gauss_jitter and
-                                 blk_gauss_jitter (default 0.01).
+                - p=<float>: Probability of applying the entire transformation
+                             (default: 1.0).
+                - pB=<float>: Per-(keypoint, individual) ablation probability;
+                              required for kp_ablation.
+                - frac=<float>: Nominal block size fraction for blk_perm_id
+                                (default: 0.5).
+                - sigma=<float>: Noise standard deviation for gauss_jitter
+                                 (default: 0.01).
                 - max_angle=<float>: Maximum rotation angle in degrees for rotation
                                      (default 180.0). Angle sampled from
                                      [-max_angle, +max_angle].

@@ -2,6 +2,8 @@
 Map-style dataset for extracting windows of frames from records.
 """
 
+from typing import Literal
+
 from torch.utils.data import Dataset
 
 from lisbet.datasets.common import AnnotatedWindowSelector, WindowSelector
@@ -25,6 +27,7 @@ class WindowDataset(Dataset):
         window_offset=0,
         fps_scaling=1.0,
         transform=None,
+        engine: Literal["xarray", "numpy"] = "xarray",
     ):
         """
         Initialize a WindowDataset instance.
@@ -41,13 +44,17 @@ class WindowDataset(Dataset):
             Scaling factor for the frames per second (default is 1.0).
         transform : callable, optional
             A function/transform to apply to the data (default is None).
+        engine : {"xarray", "numpy"}, optional
+            Window representation. NumPy windows use canonical shape ``(time,
+            individuals, keypoints, space)`` (default is ``"xarray"``).
         """
         super().__init__()
 
         self.window_selector = WindowSelector(
-            records, window_size, window_offset, fps_scaling
+            records, window_size, window_offset, fps_scaling, engine
         )
 
+        self.engine = engine
         self.transform = transform
 
     def __len__(self):
@@ -72,7 +79,7 @@ class WindowDataset(Dataset):
 
         Returns
         -------
-        x : xarray.Dataset or torch.Tensor
+        x : xarray.Dataset, numpy.ndarray, or torch.Tensor
             The window of frames, possibly transformed.
         """
         # Map global index to (record_index, frame_index)
@@ -105,6 +112,7 @@ class AnnotatedWindowDataset(Dataset):
         fps_scaling=1.0,
         transform=None,
         annot_format="multiclass",
+        engine: Literal["xarray", "numpy"] = "xarray",
     ):
         """
         Initialize an AnnotatedWindowDataset instance.
@@ -125,13 +133,17 @@ class AnnotatedWindowDataset(Dataset):
             Format of the labels. Valid options are 'binary', 'multiclass', or
             'multilabel' for the respective classification tasks (default is
             'multiclass').
+        engine : {"xarray", "numpy"}, optional
+            Window representation. NumPy windows use canonical shape ``(time,
+            individuals, keypoints, space)`` (default is ``"xarray"``).
         """
         super().__init__()
 
         self.window_selector = AnnotatedWindowSelector(
-            records, window_size, window_offset, fps_scaling, annot_format
+            records, window_size, window_offset, fps_scaling, annot_format, engine
         )
 
+        self.engine = engine
         self.transform = transform
 
     def __len__(self):
@@ -157,7 +169,7 @@ class AnnotatedWindowDataset(Dataset):
 
         Returns
         -------
-        x : xarray.Dataset or torch.Tensor
+        x : xarray.Dataset, numpy.ndarray, or torch.Tensor
             The window of frames, possibly transformed.
         y : int, np.ndarray, or torch.Tensor
             The label(s) for the window, format depends on annot_format.
