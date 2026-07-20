@@ -19,6 +19,7 @@ def fetch_dataset(dataset_id, download_path):
     dataset_id : str
         Identifier for the dataset to fetch. Currently supported datasets:
         - "CalMS21_Task1": Mouse behavior classification dataset
+        - "CalMS21_Task2": Annotation style transfer dataset
         - "CalMS21_Unlabeled": Unlabeled mouse behavior videos
         - "SampleData": Sample dataset for testing
         Additional datasets may be supported in future versions.
@@ -72,6 +73,35 @@ def fetch_dataset(dataset_id, download_path):
             / "datasets"
             / "CalMS21"
             / "task1_classic_classification"
+        )
+        dump_records(data_path, train_records)
+        dump_records(data_path, test_records)
+
+    elif dataset_id == "CalMS21_Task2":
+        # Get data from Caltech repo
+        fnames = pooch.retrieve(
+            url=(
+                "https://data.caltech.edu/records/s0vdx-0k302/files/"
+                "task2_annotation_styles.zip?download=1"
+            ),
+            known_hash="md5:c97e87e13e77ffb80c073e05c05a4683",
+            path=Path(download_path) / "datasets" / ".cache" / "lisbet",
+            processor=pooch.Unzip(
+                members=[
+                    "task2_annotation_styles/calms21_task2_train.json",
+                    "task2_annotation_styles/calms21_task2_test.json",
+                ],
+            ),
+            progressbar=True,
+        )
+
+        # Preprocess keypoints
+        rawdata_path = Path(fnames[0]).parents[1]
+        train_records, test_records = calms21.load_taskx(rawdata_path, taskid=2)
+
+        # Store data in LISBET-compatible format
+        data_path = (
+            Path(download_path) / "datasets" / "CalMS21" / "task2_annotation_styles"
         )
         dump_records(data_path, train_records)
         dump_records(data_path, test_records)

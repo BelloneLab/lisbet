@@ -13,6 +13,7 @@ def configure_fetch_dataset_parser(parser: argparse.ArgumentParser) -> None:
         "dataset_id",
         choices=(
             "CalMS21_Task1",
+            "CalMS21_Task2",
             "CalMS21_Unlabeled",
             "MABe22_MouseTriplets",
             "SampleData",

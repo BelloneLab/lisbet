@@ -12,6 +12,10 @@ from tqdm.auto import trange
 
 from lisbet.io import Record
 
+# TODO: When the CalMS JSON converters are consolidated, consider using a streaming
+# parser such as ijson so records can be converted without loading each source file in
+# full.
+
 
 def _preprocess_calms21(raw_data):
     """Preprocess body pose in the CalMS21 records."""

@@ -18,6 +18,38 @@ The CalMS21 dataset - Task 1 can be loaded using the ``betman fetch_dataset`` co
 
 The dataset is stored in the ``datasets/CalMS21/task1_classic_classification`` directory.
 
+CalMS21 Task 2 data
+-------------------
+
+CalMS21 Task 2 contains the same four behavior classes as Task 1, annotated in
+the individual styles of five additional annotators. Download and convert it with:
+
+.. code-block:: bash
+
+   betman fetch_dataset CalMS21_Task2
+
+The converted data is stored under
+``datasets/CalMS21/task2_annotation_styles``. Each video remains an independent
+movement record, organized using the hierarchy provided by CalMS21:
+
+.. code-block:: text
+
+   task2/annotator1/train/<video-id>/
+   task2/annotator1/test/<video-id>/
+   ...
+   task2/annotator5/train/<video-id>/
+   task2/annotator5/test/<video-id>/
+
+Each leaf directory contains ``tracking.nc`` and ``annotations.nc``. The hierarchy
+also enables selection through ``--data_filter``, for example
+``--data_filter=annotator1/train``.
+
+The source archive is approximately 912 MB and the two extracted keypoint JSON
+files require several gigabytes of disk space. Conversion uses the standard Python
+JSON loader, so its peak memory use can be substantially larger than the compressed
+download. The command prepares the dataset in LISBET's standard format; it does not
+train an annotator-conditioned model or implement the Task 2 benchmark protocol.
+
 Step 2: Fine-tune the model
 ---------------------------
 
