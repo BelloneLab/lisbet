@@ -12,7 +12,7 @@ from tqdm.auto import trange
 
 from lisbet.io import Record
 
-# TODO: When the CalMS JSON converters are consolidated, consider using a streaming
+# TODO: When the CalMS21 JSON converters are consolidated, consider using a streaming
 # parser such as ijson so records can be converted without loading each source file in
 # full.
 
