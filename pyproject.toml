@@ -15,7 +15,7 @@ dependencies = [
     "h5py",
     "hmmlearn",
     "huggingface_hub",
-    "joblib",
+    "joblib>=1.5.0",
     "lightning",
     "matplotlib",
     "movement<0.17.0",
