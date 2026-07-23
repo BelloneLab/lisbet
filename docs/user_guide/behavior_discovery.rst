@@ -116,10 +116,7 @@ Please use ``betman segment_motifs --help`` for a list of all available option.
 After running ``segment_motifs``, you should find the annotations (i.e., labels) for your dataset in the OUTPUT_PATH directory.
 
 .. note::
-   By default, ``joblib`` uses the ``loky`` backend to fit HMM models in separate
-   processes on the local machine. This provides multi-core parallelism, but it does
-   not distribute work across multiple cluster nodes. Multi-node execution requires
-   external orchestration or a separately configured distributed backend.
+   LISBET leaves backend selection to ``joblib``. When HMM fitting uses more than one worker, the default ``loky`` backend fits models in separate processes on the local machine. This provides local multi-core parallelism, but it does not distribute work across multiple cluster nodes. Multi-node execution requires external orchestration or a separately configured distributed backend.
 
 Step 3: Prototype selection
 --------------------------------------
