@@ -781,6 +781,9 @@ class GeometricInvarianceDataset(IterableDataset):
        which are handled internally.
     5. Both views (original and transformed) go through the same augmentation pipeline
        for consistency.
+    6. Supports both the ``xarray`` and ``numpy`` window engines (see ``engine``
+       parameter); debugging attrs are only attached for the ``xarray`` engine, since
+       raw NumPy arrays carry no attrs.
     """
 
     def __init__(
@@ -791,6 +794,7 @@ class GeometricInvarianceDataset(IterableDataset):
         fps_scaling=1.0,
         transform=None,
         base_seed=None,
+        engine: Literal["xarray", "numpy"] = "xarray",
     ):
         """
         Initialize the GeometricInvarianceDataset.
@@ -811,13 +815,17 @@ class GeometricInvarianceDataset(IterableDataset):
         base_seed : int, optional
             Base seed for random number generation (default is None, which generates a
             random seed).
+        engine : {"xarray", "numpy"}, optional
+            Window representation (default is ``"xarray"``). NumPy windows have shape
+            ``(time, individuals, keypoints, space)``.
         """
         super().__init__()
 
         self.window_selector = WindowSelector(
-            records, window_size, window_offset, fps_scaling
+            records, window_size, window_offset, fps_scaling, engine
         )
         self.n_frames = self.window_selector.n_frames
+        self.engine = engine
         self.transform = transform
 
         self.base_seed = (
@@ -846,15 +854,15 @@ class GeometricInvarianceDataset(IterableDataset):
         Randomly selects 1 to 3 transformations and applies them in random order.
         Parameters
         ----------
-        x : xr.Dataset
-            Window dataset with "position" variable.
+        x : xr.Dataset or numpy.ndarray
+            Window with "position" data, in whichever container matches ``self.engine``.
         Returns
         -------
-        xr.Dataset
-            Transformed window with the same shape.
+        xr.Dataset or numpy.ndarray
+            Transformed window with the same shape and container type as the input.
         """
-        # x is already a Dataset from window_selector.select()
-        x_ds = x.copy(deep=True)
+        # Copy so the source window (and, for xarray, its cache) is left untouched.
+        x_ds = x.copy(deep=True) if self.engine == "xarray" else x.copy()
 
         # Available transformations
         available_transforms = [
@@ -874,8 +882,12 @@ class GeometricInvarianceDataset(IterableDataset):
         for name, transform in selected_transforms:
             x_ds = transform(x_ds)
 
-        # Store transformation info for debugging
-        x_ds.attrs["geometric_transforms_applied"] = [name for name, _ in selected_transforms]
+        # Store transformation info for debugging (xarray only; raw NumPy arrays
+        # carry no attrs, matching the other self-supervised datasets).
+        if self.engine == "xarray":
+            x_ds.attrs["geometric_transforms_applied"] = [
+                name for name, _ in selected_transforms
+            ]
 
         return x_ds
 
@@ -894,8 +906,9 @@ class GeometricInvarianceDataset(IterableDataset):
             x_transform = self._apply_geometric_transform(x_orig)
 
             # Add debugging information
-            x_orig.attrs["orig_coords"] = [rec_idx, frame_idx]
-            x_transform.attrs["orig_coords"] = [rec_idx, frame_idx]
+            if self.engine == "xarray":
+                x_orig.attrs["orig_coords"] = [rec_idx, frame_idx]
+                x_transform.attrs["orig_coords"] = [rec_idx, frame_idx]
 
             # Apply standard augmentation pipeline to BOTH views
             if self.transform:

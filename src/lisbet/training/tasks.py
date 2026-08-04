@@ -395,6 +395,7 @@ def _configure_geometric_invariance_task(
         window_offset=window_offset,
         transform=train_transform,
         base_seed=run_seeds["dataset_geom"],
+        engine="numpy",
     )
 
     # Create task as dataclass with default dev attributes
@@ -418,6 +419,7 @@ def _configure_geometric_invariance_task(
             window_offset=window_offset,
             transform=dev_transform,
             base_seed=run_seeds["dataset_geom"],
+            engine="numpy",
         )
         task.dev_loss = MeanMetric().to(device)
         task.dev_score = modeling.AlignmentMetric().to(device)

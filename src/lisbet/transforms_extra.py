@@ -659,6 +659,8 @@ class RandomTranslate:
     """Apply random translation to entire window.
     Same translation applied to all frames in the window, computed to keep all
     keypoints within [0, 1] bounds. Provides invariance to location within frame.
+    Accepts either an xarray.Dataset or a canonical NumPy pose array of shape
+    (time, individuals, keypoints, space), and returns the same container type.
     Parameters
     ----------
     seed : int
@@ -674,34 +676,24 @@ class RandomTranslate:
         self.seed = seed
         self.g = torch.Generator().manual_seed(seed)
 
-    def __call__(self, posetracks: xr.Dataset) -> xr.Dataset:
-        pos_var = posetracks["position"]
-        dims = list(pos_var.dims)
-        if "time" not in dims:
-            raise ValueError("Position variable must have 'time' dimension.")
-        t_idx = dims.index("time")
-        T = pos_var.shape[t_idx]
+    def __call__(self, posetracks):
+        position = _canonical_position(posetracks)
+        T, n_space = position.shape[0], position.shape[3]
         if T == 0:
             return posetracks
 
-        # Find space dimension indices
-        space_dims = []
-        if "space" in dims:
-            space_coords = list(posetracks.coords["space"].values)
-            for coord_name in ["x", "y"]:
-                if coord_name in space_coords:
-                    space_dims.append(space_coords.index(coord_name))
-
+        # Canonical space axis order is always (x, y[, z, ...]).
+        space_dims = list(range(min(n_space, 2)))
         if len(space_dims) == 0:
             return posetracks
 
-        pos = torch.from_numpy(pos_var.values)
+        pos = torch.from_numpy(np.ascontiguousarray(position))
 
         # Compute translation for the entire window
         # Find min/max across all frames
         translations = []
-        for s_local_idx, s_global_idx in enumerate(space_dims):
-            all_coords = pos[:, s_global_idx, :, :]
+        for s_idx in space_dims:
+            all_coords = pos[:, :, :, s_idx]
             valid_coords = all_coords[~torch.isnan(all_coords)]
 
             if valid_coords.numel() == 0:
@@ -722,18 +714,19 @@ class RandomTranslate:
 
             translations.append(translation)
 
-        # Apply to all frames
-        for t in range(T):
-            for s_local_idx, s_global_idx in enumerate(space_dims):
-                pos[t, s_global_idx, :, :] += translations[s_local_idx]
+        # Apply the same scalar translation to every frame, for each space axis
+        for s_local_idx, s_idx in enumerate(space_dims):
+            pos[:, :, :, s_idx] += translations[s_local_idx]
 
-        pos_var.values[:] = pos.numpy()
-        return posetracks
-    
+        return _restore_position(posetracks, pos.numpy())
+
+
 class RandomMirrorX:
     """Apply horizontal mirroring to entire window.
     All frames in the window have x coordinates mirrored around x=0.5
     (flip left/right). Provides invariance to lateral orientation. No coordinate have NaN value
+    Accepts either an xarray.Dataset or a canonical NumPy pose array of shape
+    (time, individuals, keypoints, space), and returns the same container type.
     Parameters
     ----------
     seed : int
@@ -749,34 +742,17 @@ class RandomMirrorX:
         self.seed = seed
         self.g = torch.Generator().manual_seed(seed)
 
-    def __call__(self, posetracks: xr.Dataset) -> xr.Dataset:
-        pos_var = posetracks["position"]
-        dims = list(pos_var.dims)
-        if "time" not in dims:
-            raise ValueError("Position variable must have 'time' dimension.")
-        t_idx = dims.index("time")
-        T = pos_var.shape[t_idx]
-        if T == 0:
+    def __call__(self, posetracks):
+        position = _canonical_position(posetracks)
+        T, n_space = position.shape[0], position.shape[3]
+        if T == 0 or n_space == 0:
             return posetracks
 
-        # Find x coordinate index
-        x_idx = None
-        if "space" in dims:
-            space_coords = list(posetracks.coords["space"].values)
-            if "x" in space_coords:
-                x_idx = space_coords.index("x")
+        # Canonical space axis 0 is always "x".
+        pos = torch.from_numpy(np.ascontiguousarray(position))
+        pos[:, :, :, 0] = 1.0 - pos[:, :, :, 0]
 
-        if x_idx is None:
-            return posetracks
-
-        pos = torch.from_numpy(pos_var.values)
-
-        # Mirror all frames
-        for t in range(T):
-            pos[t, x_idx, :, :] = 1.0 - pos[t, x_idx, :, :]
-
-        pos_var.values[:] = pos.numpy()
-        return posetracks
+        return _restore_position(posetracks, pos.numpy())
 
 
 class RandomZoom:
@@ -785,6 +761,8 @@ class RandomZoom:
     (0.5, 0.5). Scale computed to keep all keypoints within [0, 1] bounds.
     Formula: keypoints_new = 0.5 + scale * (keypoints_old - 0.5).
     Provides invariance to depth/distance.
+    Accepts either an xarray.Dataset or a canonical NumPy pose array of shape
+    (time, individuals, keypoints, space), and returns the same container type.
     Parameters
     ----------
     seed : int
@@ -800,66 +778,48 @@ class RandomZoom:
         self.seed = seed
         self.g = torch.Generator().manual_seed(seed)
 
-    def __call__(self, posetracks: xr.Dataset) -> xr.Dataset:
-        pos_var = posetracks["position"]
-        dims = list(pos_var.dims)
-        if "time" not in dims:
-            raise ValueError("Position variable must have 'time' dimension.")
-        t_idx = dims.index("time")
-        T = pos_var.shape[t_idx]
+    def __call__(self, posetracks):
+        position = _canonical_position(posetracks)
+        T, n_space = position.shape[0], position.shape[3]
         if T == 0:
             return posetracks
 
-        # Find x and y coordinate indices
-        space_dims = []
-        if "space" in dims:
-            space_coords = list(posetracks.coords["space"].values)
-            for coord_name in ["x", "y"]:
-                if coord_name in space_coords:
-                    space_dims.append(space_coords.index(coord_name))
-
+        # Canonical space axis order is always (x, y[, z, ...]).
+        space_dims = list(range(min(n_space, 2)))
         if len(space_dims) == 0:
             return posetracks
 
-        pos = torch.from_numpy(pos_var.values)
+        pos = torch.from_numpy(np.ascontiguousarray(position))
         center = 0.5
 
         # Find valid scale range across all frames in the window
         min_scale = 0.0
         max_scale = float('inf')
 
-        for t in range(T):
-            for s_idx in space_dims:
-                coords = pos[t, s_idx, :, :]
-                valid_coords = coords[~torch.isnan(coords)]
+        for s_idx in space_dims:
+            diffs = pos[:, :, :, s_idx] - center
+            valid = ~torch.isnan(diffs) & (diffs.abs() >= 1e-9)
 
-                if valid_coords.numel() == 0:
-                    continue
+            pos_diffs = diffs[valid & (diffs > 0)]
+            if pos_diffs.numel() > 0:
+                max_scale = min(max_scale, ((1.0 - center) / pos_diffs).min().item())
+                min_scale = max(min_scale, (-center / pos_diffs).max().item())
 
-                for coord in valid_coords:
-                    diff = coord.item() - center
-                    if abs(diff) < 1e-9:
-                        continue
-
-                    if diff > 0:
-                        max_scale = min(max_scale, (1.0 - center) / diff)
-                        min_scale = max(min_scale, -center / diff)
-                    else:
-                        min_scale = max(min_scale, (1.0 - center) / diff)
-                        max_scale = min(max_scale, -center / diff)
+            neg_diffs = diffs[valid & (diffs < 0)]
+            if neg_diffs.numel() > 0:
+                min_scale = max(min_scale, ((1.0 - center) / neg_diffs).max().item())
+                max_scale = min(max_scale, (-center / neg_diffs).min().item())
 
         # Sample random scale for entire window
         if min_scale < max_scale and max_scale > 0:
             scale = min_scale + torch.rand(1, generator=self.g).item() * (max_scale - min_scale)
 
             # Apply to all frames
-            for t in range(T):
-                for s_idx in space_dims:
-                    pos[t, s_idx, :, :] = center + scale * (pos[t, s_idx, :, :] - center)
+            for s_idx in space_dims:
+                pos[:, :, :, s_idx] = center + scale * (pos[:, :, :, s_idx] - center)
 
-        pos_var.values[:] = pos.numpy()
-        return posetracks
-    
+        return _restore_position(posetracks, pos.numpy())
+
 
 class PoseToTensor:
     """
