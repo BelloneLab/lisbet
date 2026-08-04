@@ -67,3 +67,123 @@ Make sure your dataset matches this specification using the selection and renami
 
 While this requirement may seem restrictive, it ensures reproducibility and reliable behavior classification.
 Future releases may provide more flexibility for custom keypoint sets and automatic mapping between conventions.
+
+
+Window processing engines
+-------------------------
+
+The public window selectors and datasets accept an ``engine`` argument with two
+choices. Before any user-supplied transform is applied, the representations are:
+
+``xarray``
+    The backward-compatible default. Samples are ``xarray.Dataset`` objects and keep
+    coordinate labels, additional data variables, and the debugging attributes added
+    by self-supervised datasets.
+
+``numpy``
+    Samples are writable, independent ``numpy.ndarray`` objects containing only the
+    ``position`` values. Their canonical shape is ``(time, individuals, keypoints,
+    space)``. Coordinate labels, additional xarray data variables, and debugging
+    attributes are not available on this representation.
+
+For example:
+
+.. code-block:: python
+
+    from lisbet.datasets import WindowDataset
+
+    dataset = WindowDataset(records, window_size=200, engine="numpy")
+    window = dataset[0]
+    assert window.shape == (200, n_individuals, n_keypoints, n_space)
+
+LISBET's built-in training, development validation, evaluation, and prediction
+pipelines use the NumPy engine internally. This is an implementation choice rather
+than a command-line setting; direct users of the dataset classes continue to get
+``xarray`` unless they explicitly request ``engine="numpy"``. Custom transforms used
+with the NumPy engine must accept the canonical array described above and should
+return either another canonical array or the model-ready value expected by the next
+transform.
+
+
+Annotation formats
+------------------
+
+LISBET supports multiple annotation input formats through the ``annot_format``
+option, which determines how manual annotations are read from each sequence
+directory and converted into the internal LISBET representation. For existing
+LISBET datasets or workflows, users should normally keep the default
+``movement`` format, which expects annotations already stored in the
+LISBET/NetCDF structure. Use ``csv-events`` for simple manual annotation tables
+in which each row defines a behavior with a start and end time, and use
+``boris`` for BORIS tabular CSV exports with paired ``START`` and ``STOP``
+events. All supported formats are converted internally to the same xarray
+annotation structure, so the downstream training and evaluation workflow remains
+unchanged.
+
+Supported annotation formats are:
+
+``movement``
+    The default LISBET annotation format. This option loads NetCDF annotation
+    files from each sequence directory. Annotation files are detected when their
+    file names contain ``annotations`` or ``manual_scoring`` and end with
+    ``.nc``. This format is expected to already follow the internal LISBET
+    annotation structure.
+
+``csv-events``
+    A generic interval-based CSV annotation format. The CSV file must contain at
+    least the following columns:
+
+    - ``behavior``
+    - ``start_time``
+    - ``end_time``
+
+    Times are expected in seconds. They are converted to frame indices using the
+    FPS information from the corresponding pose-tracking data when available.
+
+``boris``
+    A BORIS tabular CSV export format. This option supports BORIS event tables
+    in which state behaviors are represented by paired ``START`` and ``STOP``
+    rows. The required BORIS columns are:
+
+    - ``Time``
+    - ``Media file path``
+    - ``Behavior``
+    - ``Status``
+
+    The optional ``FPS`` column is used to infer the frame rate when available.
+    If no FPS information is available, LISBET falls back to the default FPS
+    used by the annotation loader.
+
+All supported annotation formats are converted internally to the LISBET
+annotation representation:
+
+.. code-block:: text
+
+    xarray.Dataset
+        Dimensions:
+            time
+            behaviors
+            annotators
+
+        Data variable:
+            target_cls(time, behaviors, annotators)
+
+For example, BORIS annotations can be used during model training with:
+
+.. code-block:: bash
+
+    betman train_model /path/to/dataset --data_format movement --annot_format boris
+
+The same option can also be used for evaluation:
+
+.. code-block:: bash
+
+    betman evaluate_model /path/to/dataset /path/to/model_config.yml /path/to/weights.pt --data_format movement --annot_format boris
+
+If ``annot_format`` is not provided, LISBET uses:
+
+.. code-block:: text
+
+    annot_format = movement
+
+This ensures backward compatibility with existing LISBET datasets and workflows.

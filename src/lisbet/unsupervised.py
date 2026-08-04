@@ -123,14 +123,7 @@ def _fit_hmm(
     # NOTE: We are only parallelizing HMM fitting, not the prediction step or the disk
     #       I/O. This is because the latter two steps are not CPU-bound and we wanted to
     #       keep the parallelized code as simple as possible.
-    # NOTE: Using the default loky backend raises an Exception due to a bug in joblib
-    #       (see https://github.com/joblib/joblib/issues/1707). The issue has been
-    #       fixed, but the patch will not be available until the next release of joblib,
-    #       currently at version 1.4.2. In the meantime, we can use the threading
-    #       backend via prefer="threads".
-    parallel = joblib.Parallel(
-        n_jobs=n_jobs, return_as="generator_unordered", prefer="threads"
-    )
+    parallel = joblib.Parallel(n_jobs=n_jobs, return_as="generator_unordered")
     fitting_results = parallel(
         joblib.delayed(_fit_hmm_func)(
             n_components, num_iter, fit_embeddings, fit_lengths, seed

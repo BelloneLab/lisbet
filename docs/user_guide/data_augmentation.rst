@@ -6,6 +6,21 @@ Data augmentation
 Data augmentation can improve model robustness and generalization by introducing variations during training.
 LISBET supports several augmentation techniques that can be combined and applied with configurable probabilities.
 
+Python container support
+------------------------
+
+The pose augmentations automatically accept either an ``xarray.Dataset`` or a NumPy
+pose array; there is no transform-specific engine option. NumPy input must use the
+canonical shape ``(time, individuals, keypoints, space)``, and each augmentation
+returns the same container type that it received. For xarray input, coordinate labels
+are preserved (or permuted together with their data for a full coordinate
+permutation). ``PoseToTensor`` accepts both representations and produces a float32
+tensor with shape ``(time, features)``.
+
+Raw NumPy arrays do not contain coordinate labels or metadata. Consequently,
+visualization with ``PoseToVideo`` remains xarray-only, and custom NumPy transforms
+must use the canonical axis order rather than looking up coordinate names.
+
 .. figure:: ../_static/comparison_augmentations.gif
    :alt: Comparison of data augmentation effects
    :align: center
@@ -15,6 +30,9 @@ LISBET supports several augmentation techniques that can be combined and applied
 
 Available augmentation techniques
 ---------------------------------
+
+For every technique, ``p`` is the probability of applying the entire augmentation to
+a training sample.
 
 * **all_perm_id**: Randomly permute individual identities across all frames in a window
     - Use this to make the model invariant to individual labels (e.g., "mouse1" vs "mouse2")
@@ -36,18 +54,24 @@ Available augmentation techniques
     - **Note**: ``frac`` controls the nominal block size, not the expected affected fraction. Even ``frac=1.0`` yields ~50% probability per frame (not 100%), because the block can "hang off" either edge of the window. This is the tradeoff for achieving uniform frame probability.
     - See the visualization above (fourth panel) for an example of block permutation
 
-* **gauss_jitter**: Inject sparse Gaussian coordinate noise
-    - Per-element Bernoulli(p) over (frame, keypoint, individual) selects positions to jitter
+* **gauss_jitter**: Add Gaussian coordinate noise across the full window
+    - When applied, adds independent noise to every coordinate
     - Adds zero-mean Gaussian noise with standard deviation ``sigma`` (default 0.01)
-    - Robustifies against sporadic tracking jitter / keypoint mislocalization
+    - Robustifies against tracking jitter and keypoint mislocalization
     - Coordinates are clamped to [0, 1] after noise
 
-* **kp_ablation**: Randomly set keypoint coordinates to NaN (missing data simulation) accros all frames in a window
-    - Select the keypoints to ablate using a Bernoulli(pB) over (keypoint, individual)
-    - Sets all spatial coordinates (x, y, z) to NaN for selected elements
+* **kp_ablation**: Set selected keypoints to zero across the full window
+    - Independently selects each (keypoint, individual) pair using Bernoulli(``pB``)
+    - Sets every spatial coordinate (x, y, z) to zero for the selected pairs in every frame
     - Simulates missing or occluded keypoints commonly occurring in real tracking data
     - Helps models become robust to incomplete data / tracking failures
-    - Recommended p values: 0.01–0.1 depending on desired robustness level
+    - Tune ``pB`` according to the desired ablation rate
+
+* **rotation**: Randomly rotate all keypoint coordinates consistently across a window
+    - Rotates around the center of the normalized [0, 1] coordinate space
+    - Supports 2D and 3D pose data
+    - ``max_angle`` controls the sampled range from ``-max_angle`` to ``+max_angle``
+    - Post-rotation normalization can truncate, rescale, or retain out-of-range values
 
 Usage examples
 --------------
@@ -81,7 +105,7 @@ This applies identity permutation to 50% of training samples.
         --data_augmentation="all_perm_id:p=0.5,all_perm_ax:p=0.7" \
         ... # other parameters
 
-**Gaussian jitter (sparse) + permutation:**
+**Gaussian jitter + permutation:**
 
 .. code-block:: console
 
@@ -89,23 +113,15 @@ This applies identity permutation to 50% of training samples.
         --data_augmentation="all_perm_id:p=0.5,gauss_jitter:p=0.02:sigma=0.01" \
         ... # other parameters
 
-**Block jitter (bursts) example:**
-
-.. code-block:: console
-
-    $ betman train_model \
-        --data_augmentation="blk_gauss_jitter:p=0.05:sigma=0.02:frac=0.1" \
-        ... # other parameters
-
 **Combined full pipeline:**
 
 .. code-block:: console
 
     $ betman train_model \
-        --data_augmentation="all_perm_id:p=0.5,blk_perm_id:p=0.3:frac=0.2,gauss_jitter:p=0.02:sigma=0.01,blk_gauss_jitter:p=0.05:sigma=0.02:frac=0.1" \
+        --data_augmentation="all_perm_id:p=0.5,blk_perm_id:p=0.3:frac=0.2,gauss_jitter:p=0.02:sigma=0.01" \
         ... # other parameters
 
-**Keypoint ablation (sparse missing data):**
+**Keypoint ablation:**
 
 .. code-block:: console
 
@@ -113,7 +129,8 @@ This applies identity permutation to 50% of training samples.
         --data_augmentation="kp_ablation:p=0.05:pB=0.01" \
         ... # other parameters
 
-This randomly sets 5% of keypoint coordinates to NaN (missing), simulating sporadic occlusions.
+This applies ablation to 5% of training windows. Within each selected window, every
+(keypoint, individual) pair has a 1% chance of being set to zero for all frames.
 
 **Combined augmentation pipeline with ablation:**
 
@@ -131,7 +148,19 @@ This randomly sets 5% of keypoint coordinates to NaN (missing), simulating spora
         --data_augmentation="blk_perm_id:p=0.3:frac=0.2" \
         ... # other parameters
 
-This applies identity permutation to a random 20% block of frames, with 30% probability.
+This applies identity permutation to a nominal 20%-sized block, with 30% probability.
+Boundary clipping can reduce the number of affected frames.
+
+**Random rotation:**
+
+.. code-block:: console
+
+    $ betman train_model \
+        --data_augmentation="rotation:p=0.5:max_angle=30" \
+        ... # other parameters
+
+This applies a rotation sampled between -30 and +30 degrees to 50% of training
+windows.
 
 **Combined augmentations for top-down view datasets:**
 
@@ -161,11 +190,11 @@ Important considerations
 * **Task compatibility**: Identity permutations (``all_perm_id``, ``blk_perm_id``) are most beneficial for self-supervised tasks and datasets where individual identities are interchangeable.
 
 * **Probability tuning**: Start with moderate probabilities (0.3-0.7) and adjust based on validation performance. Higher probabilities increase variability but may make training less stable.
-    - For jitter augmentations, recommended initial values: ``gauss_jitter`` p≈0.01–0.05, ``blk_gauss_jitter`` p≈0.02 with frac≈0.05–0.15.
-    - Increase ``sigma`` gradually (e.g., 0.005 → 0.02) monitoring degradation in dev metrics.
-    - For ablation augmentations, recommended initial values: ``kp_ablation`` p≈0.01–0.05 with pB≈0.01–0.02.
+    - For Gaussian jitter, tune the window-level ``p`` and noise scale ``sigma`` independently.
+    - Increase ``sigma`` gradually (e.g., 0.005 → 0.02), monitoring degradation in dev metrics.
+    - For keypoint ablation, tune the window-level ``p`` separately from the pair-level ``pB``.
     - Higher ablation rates train models that are more robust to missing data but may reduce performance on clean data.
 
 * **Computational cost**: Augmentations are applied on-the-fly during training and add minimal overhead. Block permutations (``blk_perm_id``) are slightly more expensive than full permutations.
-    - Jitter augmentations add negligible overhead (vectorized operations). Window jitter scales linearly with number of sampled starts; low p keeps cost minimal.
+    - Gaussian jitter adds negligible overhead through vectorized operations.
     - Ablation augmentations are extremely efficient (simple masking operations with negligible overhead).

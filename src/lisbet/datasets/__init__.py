@@ -1,3 +1,4 @@
+from lisbet.datasets.common import AnnotatedWindowSelector, WindowSelector
 from lisbet.datasets.iterable_style import (
     GroupConsistencyDataset,
     SocialBehaviorDataset,
@@ -9,6 +10,8 @@ from lisbet.datasets.iterable_style import (
 from lisbet.datasets.map_style import AnnotatedWindowDataset, WindowDataset
 
 __all__ = [
+    "AnnotatedWindowSelector",
+    "WindowSelector",
     "GroupConsistencyDataset",
     "SocialBehaviorDataset",
     "TemporalOrderDataset",

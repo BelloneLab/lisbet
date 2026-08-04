@@ -179,6 +179,7 @@ def _configure_supervised_multilabel_task(
         transform=train_transform,
         annot_format="multilabel",
         base_seed=run_seeds["dataset_multilabel"],
+        engine="numpy",
     )
 
     # Create task as dataclass with default dev attributes
@@ -202,6 +203,7 @@ def _configure_supervised_multilabel_task(
             transform=dev_transform,
             annot_format="multilabel",
             base_seed=run_seeds["dataset_multilabel"],
+            engine="numpy",
         )
         task.dev_loss = MeanMetric().to(device)
         task.dev_score = MultilabelF1Score(num_labels, average="macro").to(device)
@@ -261,6 +263,7 @@ def _configure_supervised_multiclass_task(
         window_offset=window_offset,
         transform=train_transform,
         base_seed=run_seeds["dataset_multiclass"],
+        engine="numpy",
     )
 
     # Create task as dataclass with default dev attributes
@@ -283,6 +286,7 @@ def _configure_supervised_multiclass_task(
             window_offset=window_offset,
             transform=dev_transform,
             base_seed=run_seeds["dataset_multiclass"],
+            engine="numpy",
         )
         task.dev_loss = MeanMetric().to(device)
         task.dev_score = MulticlassF1Score(num_classes, average="macro").to(device)
@@ -326,6 +330,7 @@ def _configure_selfsupervised_task(
         window_offset=window_offset,
         transform=train_transform,
         base_seed=run_seeds[f"dataset_{task_id}"],
+        engine="numpy",
     )
 
     # Create task as dataclass with default dev attributes
@@ -348,6 +353,7 @@ def _configure_selfsupervised_task(
             window_offset=window_offset,
             transform=dev_transform,
             base_seed=run_seeds[f"dataset_{task_id}"],
+            engine="numpy",
         )
         task.dev_loss = MeanMetric().to(device)
         task.dev_score = BinaryAccuracy().to(device)

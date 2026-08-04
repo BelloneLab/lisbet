@@ -116,10 +116,11 @@ Please use ``betman segment_motifs --help`` for a list of all available option.
 After running ``segment_motifs``, you should find the annotations (i.e., labels) for your dataset in the OUTPUT_PATH directory.
 
 .. note::
-   In theory one could run the HMM scan on a multi-node computing cluster for even shorter processing time.
-   However, due to a bug in ``joblib`` (see https://github.com/joblib/joblib/issues/1707), we are currently forced to use threads rather than processes, and so bound to a single node.
-   The issue has already been fixed at the time of writing, but the patch will not be available until the next release of ``joblib``, currently at version 1.4.2.
-   In the meantime, if using a SLURM cluster or similar, a simple workaround is to run multiple instances of ``betman segment_motifs`` in a job array.
+   LISBET leaves backend selection to ``joblib``.
+   When HMM fitting uses more than one worker, the default ``loky`` backend fits models in separate processes on the local machine.
+   This provides local multi-core parallelism, but it does not distribute work across multiple cluster nodes.
+   Multi-node execution requires external orchestration or a separately configured distributed backend.
+   On a SLURM cluster or similar, a simple approach is to run multiple instances of ``betman segment_motifs`` in a job array.
 
    In practice, considering that the HMM scan rarely requires more than a few dozens of models, using multiple nodes is probably overkill anyway, and a single node should be sufficient.
 

@@ -42,6 +42,7 @@ BackboneConfig = Annotated[
 class DataConfig(BaseModel):
     data_path: str
     data_format: str = "DLC"
+    annot_format: str = "movement"
     data_scale: str | None = None
     data_filter: str | None = None
     select_coords: str | None = None
@@ -59,23 +60,23 @@ class DataAugmentationConfig(BaseModel):
 
     Augmentation families and parameter semantics:
 
+        For every family, ``p`` is the probability of applying the entire transform
+        (implemented via ``RandomApply`` in the pipeline).
+
         Permutation-based :
             - all_perm_id: Full-window permutation of individual identities.
             - all_perm_ax: Full-window permutation of spatial axes.
             - blk_perm_id: Block (contiguous frames) permutation of individual
                 identities. Uses ``frac`` for relative block length.
 
-        For these, ``p`` is the probability of applying the *entire* transform
-        (implemented via ``RandomApply`` in the pipeline).
-
         Jitter-based :
-            - gauss_jitter: For the full window  (time, keypoints,
-                individuals), adds N(0, sigma) noise.
+            - gauss_jitter: Adds independent N(0, sigma) noise to every coordinate in
+                the full window.
 
         Ablation-based :
-            - kp_ablation: Per-element Bernoulli(pB) mask over (time, keypoints,
-                individuals), sets selected elements to 0.0 (all space dims).
-                Simulates missing or occluded keypoints.
+            - kp_ablation: Samples a Bernoulli(pB) mask for each (keypoint,
+                individual) pair and sets all of its spatial coordinates to 0.0 for
+                the full window. Simulates sustained missing or occluded keypoints.
 
         Horizontal Transformations:
             - all_translate: Randomly translate all individuals together in x,y.
@@ -92,13 +93,11 @@ class DataAugmentationConfig(BaseModel):
     Attributes:
         name: Name of the augmentation technique
         p: Probability of applying this transformation (0.0 to 1.0)
-        pB: When applicable, per-element Bernoulli probability (kp_ablation types only)
-        frac: Fraction of frames to permute (only for block-based augmentations, 0.0
-              to 1.0 exclusive)
+        pB: Per-(keypoint, individual) Bernoulli probability (kp_ablation only)
+        frac: Nominal fraction of frames to permute (block augmentations only, (0, 1])
         sigma: Standard deviation of Gaussian noise (jitter types only)
         max_angle: Maximum rotation angle in degrees (rotation only, default 180.0)
-        mode: Post-rotation normalization mode (rotation only). One of "truncate",
-              "rescale", "none". Default "truncate".
+        mode: Rotation normalization: "truncate", "rescale", or "none" (default).
     """
 
     model_config = {"extra": "forbid"}  # Reject unknown parameters!

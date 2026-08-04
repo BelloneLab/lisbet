@@ -134,7 +134,7 @@ def _configure_dataloaders(tasks, group, batch_size, sample_ratio, pin_memory):
     logging.info("Using %d samples from the %s group", n_batches * batch_size, group)
 
     # Estimate number of workers
-    num_workers = estimate_num_workers(len(tasks), batch_size, batch_size_per_worker=4)
+    num_workers = estimate_num_workers(len(tasks), batch_size)
 
     # Create a dataloader for each task
     dataloaders = []

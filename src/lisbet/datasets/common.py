@@ -1,5 +1,7 @@
 """Common code for selecting windows from a dataset of records."""
 
+from typing import Literal
+
 import numpy as np
 import torch
 
@@ -14,7 +16,14 @@ class WindowSelector:
     (fps) scaling factor.
     """
 
-    def __init__(self, records, window_size, window_offset=0, fps_scaling=1.0):
+    def __init__(
+        self,
+        records,
+        window_size,
+        window_offset=0,
+        fps_scaling=1.0,
+        engine: Literal["xarray", "numpy"] = "xarray",
+    ):
         """
         Initialize the WindowSelector.
 
@@ -28,21 +37,30 @@ class WindowSelector:
             Offset for the window in frames (default is 0).
         fps_scaling : float, optional
             Scaling factor for the frames per second (default is 1.0).
+        engine : {"xarray", "numpy"}, optional
+            Output engine. The default ``"xarray"`` returns an xarray Dataset with
+            coordinates and data variables intact. ``"numpy"`` returns an owned,
+            writable array with shape ``(time, individuals, keypoints, space)``.
 
         Raises
         ------
         ValueError
             If no records are provided or if any record contains fewer than 2
-            individuals.
+            individuals, or if ``engine`` is unsupported.
         """
         # Validate input parameters
         if not records:
             raise ValueError("No records provided to the dataset.")
         if any([rec.posetracks["individuals"].size < 2 for rec in records]):
             raise ValueError("LISBET requires at least 2 individuals in each record.")
+        if engine not in ("xarray", "numpy"):
+            raise ValueError(
+                f"Invalid engine '{engine}'. Choose either 'xarray' or 'numpy'."
+            )
 
         self.records = records
         self.n_records = len(records)
+        self.engine = engine
 
         self.window_size = window_size
         self.window_offset = window_offset
@@ -59,6 +77,18 @@ class WindowSelector:
         )
         self.cumlens = torch.cumsum(self.lengths, dim=0)
         self.n_frames = int(self.cumlens[-1])
+
+        # NumPy selection only needs the position variable. Transpose and obtain its
+        # backing array once so every sample can be sliced on canonical axes without
+        # repeatedly asking xarray to index or materialize the record.
+        self._position_arrays = None
+        if self.engine == "numpy":
+            self._position_arrays = tuple(
+                rec.posetracks["position"]
+                .transpose("time", "individuals", "keypoints", "space")
+                .values
+                for rec in self.records
+            )
 
     def global_to_local(self, global_idx):
         """
@@ -86,9 +116,9 @@ class WindowSelector:
         """
         Select a window from the dataset, applying padding and interpolation as needed.
 
-        The selected window is returned as a new xarray.Dataset to avoid unintentional
-        changes to the records in the window dictionary (e.g., by the self-supervised
-        tasks).
+        The selected window is returned as an independent xarray Dataset or NumPy
+        array to avoid unintentional changes to source records (for example, by a
+        self-supervised task or augmentation).
 
         Parameters
         ----------
@@ -102,8 +132,9 @@ class WindowSelector:
 
         Returns
         -------
-        x : xarray.Dataset
-            The selected and interpolated window.
+        x : xarray.Dataset or numpy.ndarray
+            The selected and interpolated window. NumPy output has shape ``(time,
+            individuals, keypoints, space)``.
 
         Notes
         -----
@@ -114,6 +145,14 @@ class WindowSelector:
         """
         if fps_scaling is None:
             fps_scaling = self.fps_scaling
+
+        if self.engine == "numpy":
+            return self._select_numpy(rec_idx, frame_idx, fps_scaling)
+
+        return self._select_xarray(rec_idx, frame_idx, fps_scaling)
+
+    def _select_xarray(self, rec_idx, frame_idx, fps_scaling):
+        """Select a window using the original xarray implementation."""
 
         x = self.records[rec_idx].posetracks
 
@@ -155,6 +194,60 @@ class WindowSelector:
 
         return x
 
+    def _select_numpy(self, rec_idx, frame_idx, fps_scaling):
+        """Select a canonical NumPy window without constructing xarray objects."""
+        source = self._position_arrays[rec_idx]
+
+        if fps_scaling == 1.0:
+            start_idx = frame_idx - self.window_size + self.window_offset + 1
+            return self._copy_padded_interval(source, start_idx, self.window_size)
+
+        scaled_window_size = int(np.rint(fps_scaling * self.window_size))
+        scaled_window_offset = int(np.rint(fps_scaling * self.window_offset))
+        scaled_start_idx = frame_idx - scaled_window_size + scaled_window_offset + 1
+
+        if scaled_window_size <= 0:
+            raise ValueError("fps_scaling produces an empty source window.")
+
+        scaled = self._copy_padded_interval(
+            source, scaled_start_idx, scaled_window_size
+        )
+
+        # xarray's linear interpolation produces floating-point values even when the
+        # source is integral or float32. A single source point is an underdetermined
+        # linear interpolation and xarray returns NaNs for it.
+        # TODO: In a future release, prefer an "at least float32" policy over xarray
+        # parity: promote integer and float16 inputs to float32 while preserving
+        # floating-point dtypes that are already float32 or higher.
+        output_shape = (self.window_size, *source.shape[1:])
+        if scaled_window_size == 1:
+            return np.full(output_shape, np.nan, dtype=np.float64)
+
+        interp_coords = np.linspace(
+            0.0, scaled_window_size - 1, self.window_size, dtype=np.float64
+        )
+        lower = np.floor(interp_coords).astype(int)
+        upper = np.ceil(interp_coords).astype(int)
+        weights = interp_coords - lower
+        weights = weights.reshape((-1,) + (1,) * (scaled.ndim - 1))
+
+        scaled = scaled.astype(np.float64, copy=False)
+        return scaled[lower] * (1.0 - weights) + scaled[upper] * weights
+
+    @staticmethod
+    def _copy_padded_interval(source, start_idx, size):
+        """Copy an interval into a zero-padded, writable output buffer."""
+        output = np.zeros((size, *source.shape[1:]), dtype=source.dtype)
+        source_start = max(start_idx, 0)
+        source_stop = min(start_idx + size, source.shape[0])
+
+        if source_start < source_stop:
+            output_start = source_start - start_idx
+            output_stop = output_start + source_stop - source_start
+            output[output_start:output_stop] = source[source_start:source_stop]
+
+        return output
+
 
 class AnnotatedWindowSelector(WindowSelector):
     """
@@ -171,6 +264,7 @@ class AnnotatedWindowSelector(WindowSelector):
         window_offset=0,
         fps_scaling=1.0,
         annot_format="multiclass",
+        engine: Literal["xarray", "numpy"] = "xarray",
     ):
         """
         Initialize the AnnotatedWindowSelector.
@@ -187,11 +281,14 @@ class AnnotatedWindowSelector(WindowSelector):
             Scaling factor for the frames per second (default is 1.0).
         annot_format : str, optional
             Format of the annotations ('binary', 'multiclass', or 'multilabel').
+        engine : {"xarray", "numpy"}, optional
+            Output engine (default is ``"xarray"``).
 
         Raises
         ------
         ValueError
-            If annot_format is not one of 'binary', 'multiclass', or 'multilabel'.
+            If ``annot_format`` is not one of ``"binary"``, ``"multiclass"``, or
+            ``"multilabel"``, or if ``engine`` is unsupported.
         """
         # Validate input parameters
         if annot_format not in ("binary", "multiclass", "multilabel"):
@@ -200,9 +297,21 @@ class AnnotatedWindowSelector(WindowSelector):
                 "Choose either 'binary', 'multiclass', or 'multilabel'."
             )
 
-        super().__init__(records, window_size, window_offset, fps_scaling)
+        super().__init__(records, window_size, window_offset, fps_scaling, engine)
 
         self.annot_format = annot_format
+        self._annotation_arrays = None
+        # NOTE: Keep annotation caching specific to the NumPy engine. Annotation files
+        # opened by xarray may be lazy, so caching their full ``.values`` arrays would
+        # change the xarray engine's initialization cost and memory use. Test lazy I/O
+        # behavior explicitly before considering a shared eager cache in the future.
+        if self.engine == "numpy":
+            self._annotation_arrays = tuple(
+                rec.annotations["target_cls"]
+                .transpose("time", "behaviors", "annotators")
+                .values
+                for rec in self.records
+            )
 
     def select(self, rec_idx, frame_idx, fps_scaling=None):
         """
@@ -220,15 +329,26 @@ class AnnotatedWindowSelector(WindowSelector):
 
         Returns
         -------
-        x : xarray.Dataset
-            The selected and interpolated window.
+        x : xarray.Dataset or numpy.ndarray
+            The selected and interpolated window. NumPy output has shape ``(time,
+            individuals, keypoints, space)``.
         y : numpy.ndarray
             The annotation target(s) for the selected window, format depends on
             annot_format.
         """
         x = super().select(rec_idx, frame_idx, fps_scaling)
 
-        if self.annot_format == "binary":
+        if self.engine == "numpy":
+            target = self._annotation_arrays[rec_idx][frame_idx]
+            if self.annot_format == "binary":
+                y = target.copy()
+            elif self.annot_format == "multiclass":
+                # xarray skips NaNs by default when reducing floating-point arrays.
+                y = np.asarray(np.nanargmax(target, axis=0)).squeeze().copy()
+            else:
+                y = target.squeeze().copy()
+
+        elif self.annot_format == "binary":
             y = self.records[rec_idx].annotations.target_cls.isel(time=frame_idx).values
 
         elif self.annot_format == "multiclass":

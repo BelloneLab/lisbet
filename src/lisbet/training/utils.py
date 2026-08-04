@@ -31,7 +31,7 @@ def generate_seeds(seed, task_ids):
     return run_seeds
 
 
-def estimate_num_workers(n_tasks, batch_size, batch_size_per_worker=8):
+def estimate_num_workers(n_tasks, batch_size, batch_size_per_worker=16):
     """
     Estimate the optimal number of DataLoader worker processes to use, based on the
     number of training tasks, the batch size, and the desired batch size per worker.
@@ -43,7 +43,7 @@ def estimate_num_workers(n_tasks, batch_size, batch_size_per_worker=8):
     batch_size : int
         The total batch size used for loading data.
     batch_size_per_worker : int, optional
-        The target batch size to be handled by each worker process (default: 8).
+        The target batch size to be handled by each worker process (default: 16).
 
     Returns
     -------

@@ -2,6 +2,8 @@
 Iterable-style datasets for social behavior classification and self-supervised tasks.
 """
 
+from typing import Literal
+
 import numpy as np
 import torch
 import xarray as xr
@@ -30,6 +32,7 @@ class SocialBehaviorDataset(IterableDataset):
         transform=None,
         annot_format="multiclass",
         base_seed=None,
+        engine: Literal["xarray", "numpy"] = "xarray",
     ):
         """
         Initialize the SocialBehaviorDataset.
@@ -53,13 +56,22 @@ class SocialBehaviorDataset(IterableDataset):
         base_seed : int, optional
             Base seed for random number generation (default is None, which generates a
             random seed).
+        engine : {"xarray", "numpy"}, optional
+            Window representation (default is ``"xarray"``). NumPy windows have shape
+            ``(time, individuals, keypoints, space)``.
         """
         super().__init__()
 
         self.window_selector = AnnotatedWindowSelector(
-            records, window_size, window_offset, fps_scaling, annot_format
+            records,
+            window_size,
+            window_offset,
+            fps_scaling,
+            annot_format,
+            engine,
         )
         self.n_frames = self.window_selector.n_frames
+        self.engine = engine
         self.transform = transform
 
         self.base_seed = (
@@ -124,6 +136,7 @@ class GroupConsistencyDataset(IterableDataset):
         fps_scaling=1.0,
         transform=None,
         base_seed=None,
+        engine: Literal["xarray", "numpy"] = "xarray",
     ):
         """
         Initialize the GroupConsistencyDataset.
@@ -143,13 +156,17 @@ class GroupConsistencyDataset(IterableDataset):
         base_seed : int, optional
             Base seed for random number generation (default is None, which generates a
             random seed).
+        engine : {"xarray", "numpy"}, optional
+            Window representation (default is ``"xarray"``). NumPy windows have shape
+            ``(time, individuals, keypoints, space)``.
         """
         super().__init__()
 
         self.window_selector = WindowSelector(
-            records, window_size, window_offset, fps_scaling
+            records, window_size, window_offset, fps_scaling, engine
         )
         self.n_frames = self.window_selector.n_frames
+        self.engine = engine
         self.transform = transform
 
         self.base_seed = (
@@ -191,16 +208,28 @@ class GroupConsistencyDataset(IterableDataset):
                 x_swap = self.window_selector.select(rec_idx_swap, frame_idx_swap)
 
                 # Swap individuals splitting the group at a random index
-                split_idx = torch.randint(
-                    1, x_orig.coords["individuals"].size, (1,), generator=self.g
-                ).item()
-                x = xr.concat(
-                    [
-                        x_orig.isel(individuals=slice(0, split_idx)),
-                        x_swap.isel(individuals=slice(split_idx, None)),
-                    ],
-                    dim="individuals",
+                n_individuals = (
+                    x_orig.shape[1]
+                    if self.engine == "numpy"
+                    else x_orig.coords["individuals"].size
                 )
+                split_idx = torch.randint(
+                    1, n_individuals, (1,), generator=self.g
+                ).item()
+                if self.engine == "numpy":
+                    # Canonical NumPy axis 1 corresponds to "individuals".
+                    x = np.concatenate(
+                        [x_orig[:, :split_idx], x_swap[:, split_idx:]], axis=1
+                    )
+                else:
+                    x = xr.concat(
+                        [
+                            x_orig.isel(individuals=slice(0, split_idx)),
+                            x_swap.isel(individuals=slice(split_idx, None)),
+                        ],
+                        dim="individuals",
+                        data_vars="all",
+                    )
 
                 y = np.array(1, ndmin=1, dtype=np.float32)
 
@@ -211,8 +240,10 @@ class GroupConsistencyDataset(IterableDataset):
                 y = np.array(0, ndmin=1, dtype=np.float32)
 
             # Add debugging information
-            x.attrs["orig_coords"] = [rec_idx, frame_idx]
-            x.attrs["swap_coords"] = [rec_idx_swap, frame_idx_swap, split_idx]
+            # Raw NumPy arrays intentionally carry no coordinates or debug metadata.
+            if self.engine == "xarray":
+                x.attrs["orig_coords"] = [rec_idx, frame_idx]
+                x.attrs["swap_coords"] = [rec_idx_swap, frame_idx_swap, split_idx]
 
             if self.transform:
                 x = self.transform(x)
@@ -265,6 +296,7 @@ class TemporalOrderDataset(IterableDataset):
         transform=None,
         method="strict",
         base_seed=None,
+        engine: Literal["xarray", "numpy"] = "xarray",
     ):
         """
         Initialize the TemporalOrderDataset.
@@ -289,6 +321,9 @@ class TemporalOrderDataset(IterableDataset):
         base_seed : int, optional
             Base seed for random number generation (default is None, which generates a
             random seed).
+        engine : {"xarray", "numpy"}, optional
+            Window representation (default is ``"xarray"``). NumPy windows have shape
+            ``(time, individuals, keypoints, space)``.
         """
         # Validate input parameters
         if method not in ("simple", "strict"):
@@ -299,9 +334,10 @@ class TemporalOrderDataset(IterableDataset):
         super().__init__()
 
         self.window_selector = WindowSelector(
-            records, window_size, window_offset, fps_scaling
+            records, window_size, window_offset, fps_scaling, engine
         )
         self.n_frames = self.window_selector.n_frames
+        self.engine = engine
         self.transform = transform
 
         self.method = method
@@ -387,17 +423,23 @@ class TemporalOrderDataset(IterableDataset):
             split_idx = torch.randint(
                 1, self.window_selector.window_size, (1,), generator=self.g
             ).item()
-            x = xr.concat(
-                (
-                    x_pre.isel(time=slice(0, split_idx)),
-                    x_post.isel(time=slice(split_idx, None)),
-                ),
-                dim="time",
-            )
+            if self.engine == "numpy":
+                # Canonical NumPy axis 0 corresponds to "time".
+                x = np.concatenate((x_pre[:split_idx], x_post[split_idx:]), axis=0)
+            else:
+                x = xr.concat(
+                    (
+                        x_pre.isel(time=slice(0, split_idx)),
+                        x_post.isel(time=slice(split_idx, None)),
+                    ),
+                    dim="time",
+                    data_vars="all",
+                )
 
             # Add debugging information
-            x.attrs["pre_coords"] = [rec_idx_pre, frame_idx_pre]
-            x.attrs["post_coords"] = [rec_idx_post, frame_idx_post]
+            if self.engine == "xarray":
+                x.attrs["pre_coords"] = [rec_idx_pre, frame_idx_pre]
+                x.attrs["post_coords"] = [rec_idx_post, frame_idx_post]
 
             if self.transform:
                 x = self.transform(x)
@@ -451,6 +493,7 @@ class TemporalShiftDataset(IterableDataset):
         max_shift=60,
         regression=False,
         base_seed=None,
+        engine: Literal["xarray", "numpy"] = "xarray",
     ):
         """
         Initialize the TemporalShiftDataset.
@@ -475,6 +518,9 @@ class TemporalShiftDataset(IterableDataset):
         base_seed : int, optional
             Base seed for random number generation (default is None, which generates a
             random seed).
+        engine : {"xarray", "numpy"}, optional
+            Window representation (default is ``"xarray"``). NumPy windows have shape
+            ``(time, individuals, keypoints, space)``.
         """
         # Validate input parameters
         if max_shift <= 0:
@@ -483,9 +529,10 @@ class TemporalShiftDataset(IterableDataset):
         super().__init__()
 
         self.window_selector = WindowSelector(
-            records, window_size, window_offset, fps_scaling
+            records, window_size, window_offset, fps_scaling, engine
         )
         self.n_frames = self.window_selector.n_frames
+        self.engine = engine
         self.transform = transform
 
         self.min_delay = -max_shift
@@ -529,16 +576,26 @@ class TemporalShiftDataset(IterableDataset):
             x_shft = self.window_selector.select(rec_idx, frame_idx_delay)
 
             # Apply shifting by swapping individuals in the group at a random index
-            split_idx = torch.randint(
-                1, x_orig.coords["individuals"].size, (1,), generator=self.g
-            ).item()
-            x = xr.concat(
-                [
-                    x_orig.isel(individuals=slice(0, split_idx)),
-                    x_shft.isel(individuals=slice(split_idx, None)),
-                ],
-                dim="individuals",
+            n_individuals = (
+                x_orig.shape[1]
+                if self.engine == "numpy"
+                else x_orig.coords["individuals"].size
             )
+            split_idx = torch.randint(1, n_individuals, (1,), generator=self.g).item()
+            if self.engine == "numpy":
+                # Canonical NumPy axis 1 corresponds to "individuals".
+                x = np.concatenate(
+                    [x_orig[:, :split_idx], x_shft[:, split_idx:]], axis=1
+                )
+            else:
+                x = xr.concat(
+                    [
+                        x_orig.isel(individuals=slice(0, split_idx)),
+                        x_shft.isel(individuals=slice(split_idx, None)),
+                    ],
+                    dim="individuals",
+                    data_vars="all",
+                )
 
             # Compute label
             delta_delay = frame_idx_delay - frame_idx
@@ -552,8 +609,9 @@ class TemporalShiftDataset(IterableDataset):
                 y = np.array(delta_delay > 0, ndmin=1, dtype=np.float32)
 
             # Add debugging information
-            x.attrs["orig_coords"] = [rec_idx, frame_idx]
-            x.attrs["shift_coords"] = [rec_idx, frame_idx_delay, delta_delay]
+            if self.engine == "xarray":
+                x.attrs["orig_coords"] = [rec_idx, frame_idx]
+                x.attrs["shift_coords"] = [rec_idx, frame_idx_delay, delta_delay]
 
             if self.transform:
                 x = self.transform(x)
@@ -604,6 +662,7 @@ class TemporalWarpDataset(IterableDataset):
         max_warp=50.0,
         regression=False,
         base_seed=None,
+        engine: Literal["xarray", "numpy"] = "xarray",
     ):
         """
         Initialize the TemporalWarpDataset.
@@ -628,6 +687,9 @@ class TemporalWarpDataset(IterableDataset):
         base_seed : int, optional
             Base seed for random number generation (default is None, which generates a
             random seed).
+        engine : {"xarray", "numpy"}, optional
+            Window representation (default is ``"xarray"``). NumPy windows have shape
+            ``(time, individuals, keypoints, space)``.
         """
         # Validate input parameters
         if not (0 <= max_warp < 100):
@@ -638,9 +700,10 @@ class TemporalWarpDataset(IterableDataset):
         super().__init__()
 
         self.window_selector = WindowSelector(
-            records, window_size, window_offset, fps_scaling
+            records, window_size, window_offset, fps_scaling, engine
         )
         self.n_frames = self.window_selector.n_frames
+        self.engine = engine
         self.transform = transform
 
         self.min_speed = 1 - max_warp / 100.0
@@ -682,8 +745,9 @@ class TemporalWarpDataset(IterableDataset):
                 y = np.array(speed > 1, ndmin=1, dtype=np.float32)
 
             # Add debugging information
-            x.attrs["orig_coords"] = [rec_idx, frame_idx]
-            x.attrs["warp_coords"] = [rec_idx, frame_idx, speed]
+            if self.engine == "xarray":
+                x.attrs["orig_coords"] = [rec_idx, frame_idx]
+                x.attrs["warp_coords"] = [rec_idx, frame_idx, speed]
 
             if self.transform:
                 x = self.transform(x)

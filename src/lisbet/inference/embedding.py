@@ -22,6 +22,7 @@ def compute_embeddings(
     data_path: str,
     data_scale: str | None = None,
     data_filter: str | None = None,
+    annot_format: str = "movement",
     window_size: int = 200,
     window_offset: int = 0,
     fps_scaling: float = 1.0,
@@ -90,6 +91,7 @@ def compute_embeddings(
         fps_scaling=fps_scaling,
         batch_size=batch_size,
         data_filter=data_filter,
+        annot_format=annot_format,
         select_coords=select_coords,
         rename_coords=rename_coords,
     )
