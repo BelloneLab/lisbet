@@ -30,6 +30,11 @@ from lisbet.transforms_extra import (
 )
 
 
+# Default InfoNCE temperature for the contrastive "geom" task. Single source of
+# truth: overridable from the CLI via ``--set task.geom.temperature=<value>``.
+DEFAULT_GEOM_TEMPERATURE = 0.07
+
+
 @dataclass
 class Task:
     task_id: str
@@ -38,10 +43,12 @@ class Task:
     loss_function: torch.nn.Module
     train_dataset: Dataset
     train_loss: Metric
-    train_score: Metric
+    # A single Metric for most tasks, or a {name: Metric} dict for tasks that
+    # track several scores at once (e.g. "geom": alignment + uniformity).
+    train_score: Metric | dict[str, Metric]
     dev_dataset: Dataset | None = None
     dev_loss: Metric | None = None
-    dev_score: Metric | None = None
+    dev_score: Metric | dict[str, Metric] | None = None
 
 
 def _build_augmentation_transforms(data_augmentation, seed):
@@ -370,10 +377,14 @@ def _configure_geometric_invariance_task(
     data_augmentation,
     run_seeds,
     device,
+    temperature=DEFAULT_GEOM_TEMPERATURE,
 ):
     """Internal helper. Configures the geometric invariance contrastive task.
     This task uses contrastive learning (InfoNCE) to learn that geometric
     transformations preserve scene identity.
+
+    The ``temperature`` argument sets the InfoNCE temperature and is overridable
+    from the CLI via ``--set task.geom.temperature=<value>``.
     """
     # Create projection head for contrastive learning
     head = modeling.ProjectionHead(
@@ -382,6 +393,14 @@ def _configure_geometric_invariance_task(
         hidden_dim=projection_dim,
         normalize=True,
     )
+
+    def _geom_scores():
+        # Alignment and uniformity (Wang & Isola, 2020), both on the unit
+        # hypersphere. Logged separately plus as their mean (see _compute_epoch_logs).
+        return {
+            "alignment": modeling.AlignmentMetric(normalize=True).to(device),
+            "uniformity": modeling.UniformityMetric(normalize=True).to(device),
+        }
 
     # Create data transformers
     train_transform = _build_augmentation_transforms(
@@ -404,10 +423,10 @@ def _configure_geometric_invariance_task(
         task_id="geom",
         head=head,
         out_dim=projection_dim // 2,
-        loss_function=modeling.InfoNCELoss(temperature=0.07),
+        loss_function=modeling.InfoNCELoss(temperature=temperature),
         train_dataset=train_dataset,
         train_loss=MeanMetric().to(device),
-        train_score=modeling.AlignmentMetric().to(device),
+        train_score=_geom_scores(),
     )
 
     # Update dev attributes if dev records are provided
@@ -422,7 +441,7 @@ def _configure_geometric_invariance_task(
             engine="numpy",
         )
         task.dev_loss = MeanMetric().to(device)
-        task.dev_score = modeling.AlignmentMetric().to(device)
+        task.dev_score = _geom_scores()
 
     return task
 
@@ -438,8 +457,26 @@ def configure_tasks(
     data_augmentation,
     run_seeds,
     device,
+    task_configs=None,
 ):
-    """Internal helper. Configures all tasks."""
+    """Internal helper. Configures all tasks.
+
+    Parameters
+    ----------
+    task_configs : dict[str, TaskConfig] or None
+        Optional per-task hyperparameter overrides keyed by task id. Currently
+        only the "geom" task reads it (``temperature``). Keys that do not match a
+        requested task id are ignored with a warning.
+    """
+    task_configs = task_configs or {}
+
+    unused_overrides = set(task_configs) - set(task_ids)
+    if unused_overrides:
+        logging.warning(
+            "Ignoring task override(s) for non-requested task(s): %s",
+            ", ".join(sorted(unused_overrides)),
+        )
+
     tasks = []
     for task_id in task_ids:
         if task_id == "multiclass":
@@ -487,6 +524,12 @@ def configure_tasks(
             )
         elif task_id == "geom":
              # Use hidden_dim as projection_dim for consistency
+            geom_cfg = task_configs.get("geom")
+            geom_temperature = (
+                geom_cfg.temperature
+                if geom_cfg is not None and geom_cfg.temperature is not None
+                else DEFAULT_GEOM_TEMPERATURE
+            )
             tasks.append(
                 _configure_geometric_invariance_task(
                     train_rec,
@@ -498,6 +541,7 @@ def configure_tasks(
                     data_augmentation=data_augmentation,
                     run_seeds=run_seeds,
                     device=device,
+                    temperature=geom_temperature,
                 )
             )
         else:

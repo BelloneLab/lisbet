@@ -788,6 +788,49 @@ def test_all_training_and_development_tasks_use_numpy(records):
         assert x_dev.shape == (6, 12)
 
 
+def _configure_geom_task(records, task_configs=None, dev_records=None):
+    task_ids = ["geom"]
+    return configure_tasks(
+        train_rec={"geom": records},
+        dev_rec={"geom": [] if dev_records is None else dev_records},
+        task_ids=task_ids,
+        window_size=6,
+        window_offset=0,
+        embedding_dim=4,
+        hidden_dim=4,
+        data_augmentation=None,
+        run_seeds=generate_seeds(3, task_ids),
+        device=torch.device("cpu"),
+        task_configs=task_configs,
+    )[0]
+
+
+def test_geom_task_uses_default_temperature(records):
+    task = _configure_geom_task(records)
+    assert task.loss_function.temperature == 0.07
+
+
+def test_geom_task_temperature_override(records):
+    from lisbet.config.schemas import TaskConfig
+
+    task = _configure_geom_task(records, {"geom": TaskConfig(temperature=0.2)})
+    assert task.loss_function.temperature == 0.2
+
+
+def test_geom_task_tracks_alignment_and_uniformity(records):
+    from lisbet import modeling
+
+    task = _configure_geom_task(records, dev_records=records)
+
+    for scores in (task.train_score, task.dev_score):
+        assert isinstance(scores, dict)
+        assert set(scores) == {"alignment", "uniformity"}
+        assert isinstance(scores["alignment"], modeling.AlignmentMetric)
+        assert isinstance(scores["uniformity"], modeling.UniformityMetric)
+        assert scores["alignment"].normalize is True
+        assert scores["uniformity"].normalize is True
+
+
 def test_prediction_dataset_uses_numpy(records, monkeypatch):
     captured = {}
     real_dataset = WindowDataset

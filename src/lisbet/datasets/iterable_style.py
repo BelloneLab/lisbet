@@ -757,34 +757,48 @@ class TemporalWarpDataset(IterableDataset):
 class GeometricInvarianceDataset(IterableDataset):
     """
     Iterable dataset for the Geometric Invariance self-supervised task.
-    Generates pairs of windows for contrastive learning, where the model learns that
-    geometric transformations (translation, flip, zoom) preserve the semantic identity of the
-    scene. Each sample consists of an original window and a geometrically transformed
-    version of the same window.
-    Unlike binary classification tasks, this dataset yields pairs (x_orig, x_transform)
-    for contrastive learning with InfoNCE loss. The model learns to produce similar
-    embeddings for different views of the same scene.
-    Geometric transformations applied:
-    - Translation: Random translation in x and y directions
-    - Flip: Random horizontal flip
-    - Zoom: Random zoom in/out around the center
+
+    Generates pairs of windows for contrastive learning. Each sample is a pair
+    ``(x_orig, x_transform)`` where:
+
+    - ``x_orig`` is a window anchored at a random frame ``t``.
+    - ``x_transform`` is a window anchored at a nearby frame ``t + delta_t``
+      (``delta_t`` a small, symmetric temporal offset within the same record),
+      to which a random geometric transformation is then applied.
+
+    The model learns to produce similar embeddings for both views, i.e. embeddings
+    that are invariant both to a small temporal shift and to geometric
+    transformations of the scene. Unlike binary classification tasks, this dataset
+    yields pairs without explicit labels, for use with the InfoNCE loss.
+
+    Geometric transformations applied (1 to 3, in random order):
+    - Translation: random translation in x and y
+    - Mirror: random horizontal flip around x = 0.5
+    - Zoom: random zoom in/out around the center
+
     Notes
     -----
     1. This is a contrastive learning task, NOT a classification task. The dataset
        returns pairs of views without explicit labels.
-    2. The transformations are applied in the keypoint space (before the general
-       augmentation pipeline).
-    3. The same geometric transformation is applied to all individuals in the group
+    2. The temporal offset ``delta_t`` is sampled symmetrically in
+       ``[-max_delta, +max_delta]`` (excluding 0) and constrained to stay within
+       the bounds of the anchor's record (reflected off the boundary, then clamped
+       for records shorter than the offset).
+    3. The geometric transformation is applied only to ``x_transform``, in keypoint
+       space, before the general augmentation pipeline.
+    4. The same geometric transformation is applied to all individuals in the group
        to preserve relative spatial relationships.
-    4. The transform parameter should only contain the standard augmentation pipeline
-       (normalization, missing data handling, etc.), NOT the geometric transformations
-       which are handled internally.
-    5. Both views (original and transformed) go through the same augmentation pipeline
-       for consistency.
-    6. Supports both the ``xarray`` and ``numpy`` window engines (see ``engine``
+    5. The transform parameter should only contain the standard augmentation
+       pipeline (normalization, missing data handling, etc.), NOT the geometric
+       transformations which are handled internally.
+    6. Both views go through the same standard augmentation pipeline for consistency.
+    7. Supports both the ``xarray`` and ``numpy`` window engines (see ``engine``
        parameter); debugging attrs are only attached for the ``xarray`` engine, since
        raw NumPy arrays carry no attrs.
     """
+
+    #: Maximum magnitude (in frames) of the temporal offset between the two views.
+    MAX_TEMPORAL_DELTA = 5
 
     def __init__(
         self,
@@ -891,29 +905,42 @@ class GeometricInvarianceDataset(IterableDataset):
 
         return x_ds
 
+
     def __iter__(self):
         while True:
-            # Select a random window (global frame index)
+            # 1. Select a random anchor frame (t) within a record.
             global_idx = torch.randint(0, self.n_frames, (1,), generator=self.g).item()
-
-            # Map global index to (record_index, frame_index)
             rec_idx, frame_idx = self.window_selector.global_to_local(global_idx)
-
-            # Extract corresponding window
             x_orig = self.window_selector.select(rec_idx, frame_idx)
 
-            # Apply geometric transformation
-            x_transform = self._apply_geometric_transform(x_orig)
+            # 2. Sample a small, symmetric temporal offset so the second view is a
+            #    nearby frame from the SAME record.
+            record_length = int(self.window_selector.lengths[rec_idx].item())
+            magnitude = torch.randint(
+                1, self.MAX_TEMPORAL_DELTA + 1, (1,), generator=self.g
+            ).item()
+            sign = 1 if torch.randint(0, 2, (1,), generator=self.g).item() else -1
+            target_frame_idx = frame_idx + sign * magnitude
+
+            # Keep the target inside the record: reflect off the boundary, then
+            # clamp for records shorter than the offset.
+            if not 0 <= target_frame_idx < record_length:
+                target_frame_idx = frame_idx - sign * magnitude
+            target_frame_idx = min(max(target_frame_idx, 0), record_length - 1)
+
+            x_target = self.window_selector.select(rec_idx, target_frame_idx)
+
+            # 3. Apply the geometric transformation only to the second view.
+            x_transform = self._apply_geometric_transform(x_target)
 
             # Add debugging information
             if self.engine == "xarray":
                 x_orig.attrs["orig_coords"] = [rec_idx, frame_idx]
-                x_transform.attrs["orig_coords"] = [rec_idx, frame_idx]
+                x_transform.attrs["orig_coords"] = [rec_idx, target_frame_idx]
 
             # Apply standard augmentation pipeline to BOTH views
             if self.transform:
                 x_orig = self.transform(x_orig)
                 x_transform = self.transform(x_transform)
 
-            # Yield pair of views (NOT x, y like classification tasks)
             yield x_orig, x_transform

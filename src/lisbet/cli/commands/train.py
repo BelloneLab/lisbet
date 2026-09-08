@@ -206,7 +206,10 @@ def configure_train_model_parser(parser: argparse.ArgumentParser) -> None:
         "--set",
         metavar="KEY=VALUE",
         action="append",
-        help="Override config values, e.g. --set backbone.num_layers=4",
+        help=(
+            "Override config values, e.g. --set backbone.num_layers=4 "
+            "or --set task.geom.temperature=0.1"
+        ),
     )
 
     # Model weights and saving options
@@ -287,6 +290,15 @@ def train_model(kwargs):
                 overrides[key] = val
     backbone_config_dict.update(overrides)
 
+    # Parse overrides from --set task.<task_id>.<param>=...
+    task_configs: dict[str, dict] = {}
+    for override in kwargs.get("set", []) or []:
+        if override.startswith("task."):
+            path, _, val = override[len("task.") :].partition("=")
+            task_id, _, param = path.partition(".")
+            if task_id and param and val:
+                task_configs.setdefault(task_id, {})[param] = val
+
     # Create backbone config
     adapter = TypeAdapter(BackboneConfig)
     backbone_config = adapter.validate_python(backbone_config_dict)
@@ -321,8 +333,12 @@ def train_model(kwargs):
     else:
         validated_augmentations = parsed_augmentation
 
-    # Update kwargs with parsed augmentation
-    kwargs_for_training = {**kwargs, "data_augmentation": validated_augmentations}
+    # Update kwargs with parsed augmentation and per-task overrides
+    kwargs_for_training = {
+        **kwargs,
+        "data_augmentation": validated_augmentations,
+        "task_configs": task_configs,
+    }
 
     # Configure training
     training_config = TrainingConfig.model_validate(kwargs_for_training)

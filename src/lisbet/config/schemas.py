@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Annotated, ClassVar, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class TransformerBackboneConfig(BaseModel):
@@ -244,11 +244,22 @@ class ModelConfig(BaseModel):
     window_offset: int
 
 
+class TaskConfig(BaseModel):
+    """Per-task hyperparameter overrides (set via ``--set task.<id>.<param>=``)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # InfoNCE temperature for the contrastive "geom" task. None means "use the
+    # task default" (see lisbet.training.tasks.DEFAULT_GEOM_TEMPERATURE).
+    temperature: float | None = Field(default=None, gt=0)
+
+
 class TrainingConfig(BaseModel):
     epochs: int
     batch_size: int
     learning_rate: float
     data_augmentation: list[DataAugmentationConfig] | None = None
+    task_configs: dict[str, TaskConfig] = Field(default_factory=dict)
     save_weights: str | None = None
     save_history: bool = False
     mixed_precision: bool = False

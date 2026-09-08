@@ -2,7 +2,7 @@
 
 import torch
 from torchmetrics import Metric
-
+import torch.nn.functional as F
 
 class AlignmentMetric(Metric):
     """Measures alignment of positive pairs in contrastive learning.
@@ -21,35 +21,25 @@ class AlignmentMetric(Metric):
     https://arxiv.org/abs/2005.10242
     """
 
-    def __init__(self):
+    def __init__(self, normalize: bool = True):
         super().__init__()
+        self.normalize = normalize
         self.add_state("total_dist", default=torch.tensor(0.0), dist_reduce_fx="sum")
-        self.add_state("count", default=torch.tensor(0), dist_reduce_fx="sum")
+        self.add_state("num_samples", default=torch.tensor(0), dist_reduce_fx="sum")
 
     def update(self, z_i: torch.Tensor, z_j: torch.Tensor):
-        """Update metric with a batch of positive pairs.
+        if self.normalize:
+            z_i = F.normalize(z_i, p=2, dim=-1)
+            z_j = F.normalize(z_j, p=2, dim=-1)
+
+        # Sum of squared L2 distances across all pairs in the batch
+        dist = torch.sum((z_i - z_j) ** 2, dim=-1).sum()
         
-        Parameters
-        ----------
-        z_i : torch.Tensor
-            First view embeddings of shape (batch_size, embedding_dim).
-        z_j : torch.Tensor
-            Second view embeddings of shape (batch_size, embedding_dim).
-        """
-        # Squared L2 distance between positive pairs
-        dist = torch.sum((z_i - z_j) ** 2, dim=-1).mean()
         self.total_dist += dist
-        self.count += 1
+        self.num_samples += z_i.shape[0]
 
     def compute(self):
-        """Compute the alignment metric.
-        
-        Returns
-        -------
-        torch.Tensor
-            Average squared L2 distance across all positive pairs.
-        """
-        return self.total_dist / self.count
+        return self.total_dist / torch.clamp(self.num_samples, min=1)
 
 
 class UniformityMetric(Metric):
@@ -75,39 +65,31 @@ class UniformityMetric(Metric):
     https://arxiv.org/abs/2005.10242
     """
 
-    def __init__(self, t: float = 2.0):
+    def __init__(self, t: float = 2.0, normalize: bool = True):
         super().__init__()
         self.t = t
+        self.normalize = normalize
+        
+        # Accumulate total exponential distances and total pair count
         self.add_state(
-            "total_uniform", default=torch.tensor(0.0), dist_reduce_fx="sum"
+            "total_exp_kernel", default=torch.tensor(0.0), dist_reduce_fx="sum"
         )
-        self.add_state("count", default=torch.tensor(0), dist_reduce_fx="sum")
+        self.add_state("num_pairs", default=torch.tensor(0), dist_reduce_fx="sum")
 
     def update(self, z: torch.Tensor):
-        """Update metric with a batch of embeddings.
-        
-        Parameters
-        ----------
-        z : torch.Tensor
-            Normalized embeddings of shape (batch_size, embedding_dim).
-            Should be L2-normalized (on unit hypersphere).
-        """
-        # Compute pairwise squared L2 distances
-        # pdist returns distances for all pairs (i, j) where i < j
+        if self.normalize:
+            z = F.normalize(z, p=2, dim=-1)
+
+        # Compute pairwise squared L2 distances for upper triangle (i < j)
         pdist = torch.pdist(z, p=2)
 
-        # Compute uniformity: log of average exp(-t * distance^2)
-        uniform = torch.log(torch.exp(-self.t * pdist**2).mean() + 1e-8)
+        # Sum of Gaussian kernels for this batch
+        exp_kernel_sum = torch.exp(-self.t * (pdist ** 2)).sum()
 
-        self.total_uniform += uniform
-        self.count += 1
+        self.total_exp_kernel += exp_kernel_sum
+        self.num_pairs += pdist.shape[0]
 
     def compute(self):
-        """Compute the uniformity metric.
-        
-        Returns
-        -------
-        torch.Tensor
-            Average uniformity score (more negative = better uniformity).
-        """
-        return self.total_uniform / self.count
+        # Average over all pairs, then take log once at epoch end
+        avg_kernel = self.total_exp_kernel / torch.clamp(self.num_pairs, min=1)
+        return torch.log(avg_kernel + 1e-8)

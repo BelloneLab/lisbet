@@ -195,8 +195,9 @@ def _train_one_epoch(
                 # Store loss value and metrics for stats
                 if batch_idx % 10 == 0:
                     task.train_loss.update(loss)
-                    # Alignment metric expects both projections
-                    task.train_score.update(output_orig, output_transform)
+                    # Alignment expects both views; uniformity a single view
+                    task.train_score["alignment"].update(output_orig, output_transform)
+                    task.train_score["uniformity"].update(output_orig)
 
             else:
                 data, target = batch
@@ -253,8 +254,9 @@ def _evaluate(model, dataloaders, n_batches, tasks):
                     # Store loss value and metrics for stats
                     if batch_idx % 10 == 0:
                         task.dev_loss.update(loss)
-                        # Alignment metric expects both projections
-                        task.dev_score.update(output_orig, output_transform)
+                        # Alignment expects both views; uniformity a single view
+                        task.dev_score["alignment"].update(output_orig, output_transform)
+                        task.dev_score["uniformity"].update(output_orig)
                 else:
                     # Classification tasks return (data, target)
                     data, target = batch
@@ -273,10 +275,22 @@ def _compute_epoch_logs(group_id, tasks):
     """Internal helper. Computes metrics and mean losses for an epoch."""
     epoch_log = {}
     for task in tasks:
-        # Compute metrics
-        metric_name = f"{task.task_id}_{group_id}_score"
-        epoch_log[metric_name] = getattr(task, f"{group_id}_score").compute()
-        getattr(task, f"{group_id}_score").reset()
+        # Compute metrics. Most tasks expose a single score Metric; tasks that
+        # track several (e.g. geom: alignment + uniformity) expose a dict, and we
+        # log each one plus their mean under the generic "_score" key.
+        score = getattr(task, f"{group_id}_score")
+        if isinstance(score, dict):
+            details = {}
+            for name, metric in score.items():
+                details[name] = metric.compute()
+                metric.reset()
+                epoch_log[f"{task.task_id}_{group_id}_{name}"] = details[name]
+            epoch_log[f"{task.task_id}_{group_id}_score"] = sum(
+                details.values()
+            ) / len(details)
+        else:
+            epoch_log[f"{task.task_id}_{group_id}_score"] = score.compute()
+            score.reset()
 
         # Compute mean losses
         loss_name = f"{task.task_id}_{group_id}_loss"
@@ -399,6 +413,7 @@ def train(experiment_config: ExperimentConfig) -> torch.nn.Module:
         training_config.data_augmentation,
         run_seeds,
         fabric.device,
+        task_configs=training_config.task_configs,
     )
     n_tasks = len(tasks)
 
