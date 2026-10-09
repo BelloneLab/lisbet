@@ -260,6 +260,9 @@ class TrainingConfig(BaseModel):
     learning_rate: float
     data_augmentation: list[DataAugmentationConfig] | None = None
     task_configs: dict[str, TaskConfig] = Field(default_factory=dict)
+    # Self-supervised window sampling: "any" = original (windows may extend past the record
+    # edges, zero padded); "inside" = only windows entirely inside their record.
+    window_sampling: Literal["any", "inside"] = "any"
     save_weights: str | None = None
     save_history: bool = False
     mixed_precision: bool = False

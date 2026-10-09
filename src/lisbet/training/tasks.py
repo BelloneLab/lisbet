@@ -312,6 +312,7 @@ def _configure_selfsupervised_task(
     data_augmentation,
     run_seeds,
     device,
+    window_sampling="any",
 ):
     """Internal helper. Configures a self-supervised task."""
     # Create classification head
@@ -338,6 +339,7 @@ def _configure_selfsupervised_task(
         transform=train_transform,
         base_seed=run_seeds[f"dataset_{task_id}"],
         engine="numpy",
+        window_sampling=window_sampling,
     )
 
     # Create task as dataclass with default dev attributes
@@ -361,6 +363,7 @@ def _configure_selfsupervised_task(
             transform=dev_transform,
             base_seed=run_seeds[f"dataset_{task_id}"],
             engine="numpy",
+            window_sampling=window_sampling,
         )
         task.dev_loss = MeanMetric().to(device)
         task.dev_score = BinaryAccuracy().to(device)
@@ -378,6 +381,7 @@ def _configure_geometric_invariance_task(
     run_seeds,
     device,
     temperature=DEFAULT_GEOM_TEMPERATURE,
+    window_sampling="any",
 ):
     """Internal helper. Configures the geometric invariance contrastive task.
     This task uses contrastive learning (InfoNCE) to learn that geometric
@@ -415,6 +419,7 @@ def _configure_geometric_invariance_task(
         transform=train_transform,
         base_seed=run_seeds["dataset_geom"],
         engine="numpy",
+        window_sampling=window_sampling,
     )
 
     # Create task as dataclass with default dev attributes
@@ -439,6 +444,7 @@ def _configure_geometric_invariance_task(
             transform=dev_transform,
             base_seed=run_seeds["dataset_geom"],
             engine="numpy",
+            window_sampling=window_sampling,
         )
         task.dev_loss = MeanMetric().to(device)
         task.dev_score = _geom_scores()
@@ -458,6 +464,7 @@ def configure_tasks(
     run_seeds,
     device,
     task_configs=None,
+    window_sampling="any",
 ):
     """Internal helper. Configures all tasks.
 
@@ -467,6 +474,9 @@ def configure_tasks(
         Optional per-task hyperparameter overrides keyed by task id. Currently
         only the "geom" task reads it (``temperature``). Keys that do not match a
         requested task id are ignored with a warning.
+    window_sampling : {"any", "inside"}
+        Sampling of the self-supervised windows (see ``lisbet.datasets.common.leakfree_config``);
+        ignored by the supervised tasks.
     """
     task_configs = task_configs or {}
 
@@ -520,6 +530,7 @@ def configure_tasks(
                     data_augmentation,
                     run_seeds,
                     device,
+                    window_sampling=window_sampling,
                 )
             )
         elif task_id == "geom":
@@ -542,6 +553,7 @@ def configure_tasks(
                     run_seeds=run_seeds,
                     device=device,
                     temperature=geom_temperature,
+                    window_sampling=window_sampling,
                 )
             )
         else:

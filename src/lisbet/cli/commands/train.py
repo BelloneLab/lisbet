@@ -109,6 +109,23 @@ def configure_train_model_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--seed", default=1991, type=int, help="Base RNG seed")
     parser.add_argument("--run_id", type=str, help="ID of the run")
     parser.add_argument(
+        "--window_sampling",
+        choices=["any", "inside"],
+        default="any",
+        help=textwrap.dedent(
+            """\
+            Sampling of the windows of the self-supervised tasks (cons, order, shift, warp, geom).
+
+            - any:    original behaviour, a window may extend past the edges of its record and is
+                      zero padded there.
+            - inside: only draw samples whose windows lie entirely inside their record. Removes the
+                      zero padding at record edges, which otherwise leaks the label of the order,
+                      shift and cons tasks. The sign of the shift is drawn 50/50 and the geom views
+                      follow the same rule. Records shorter than the window are never sampled.
+            """
+        ),
+    )
+    parser.add_argument(
         "--data_augmentation",
         type=str,
         help=textwrap.dedent(

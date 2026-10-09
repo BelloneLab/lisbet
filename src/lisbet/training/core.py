@@ -414,6 +414,7 @@ def train(experiment_config: ExperimentConfig) -> torch.nn.Module:
         run_seeds,
         fabric.device,
         task_configs=training_config.task_configs,
+        window_sampling=training_config.window_sampling,
     )
     n_tasks = len(tasks)
 

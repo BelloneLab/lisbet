@@ -1,9 +1,86 @@
 """Common code for selecting windows from a dataset of records."""
 
+import logging
+import os
 from typing import Literal
 
 import numpy as np
 import torch
+
+
+def leakfree_config(window_sampling="any"):
+    """Sampling switches of the self-supervised datasets, resolved when a dataset is built.
+
+    ``window_sampling`` is the public option (``--window_sampling``): "any" keeps the original
+    behaviour (windows may extend past the record edges and are zero padded); "inside" redraws every
+    sample whose windows would touch an edge (see ``LISBET_PAD_MODE=reject`` below), draws the shift
+    sign 50/50 before its size and applies the same rule to the geom views. Zero padding at record
+    edges carries the label of the order, shift and cons tasks (the padded span of a window tells where
+    in the record it sits), which a network can exploit instead of the content.
+
+    The environment variables below are experimental overrides (they win over ``window_sampling``
+    when set); all of them default to the original lisbet behaviour.
+
+    LISBET_PAD_MODE   none | reject | equalise
+        reject: every window a sample uses must lie inside its record (redraw
+        otherwise); equalise (shift, numpy engine): both individuals are zeroed wherever
+        either window was padded, so the two zero-runs are identical.
+    LISBET_SHIFT_MODE signed | magnitude   (magnitude: label 1 if the clinician window
+        is displaced by min_shift..max_shift frames, 0 if synchronous; needs reject)
+    LISBET_SHIFT_SIGN original | balanced  (balanced: sign drawn 50/50 before the
+        size, so P(d > 0 | position in record) = 0.5; d = 0 is never drawn)
+    LISBET_MAX_SHIFT / LISBET_MIN_SHIFT    frames (defaults: dataset value / 20)
+    LISBET_GEOM_PAD   keep | reject        (geom: reject padded anchor / target windows)
+    LISBET_CONS_NEG   other | within        (cons negatives: clinician from another
+        record (original) or from the same record at least LISBET_CONS_MIN_GAP frames
+        away; implies reject, anchors restricted to records long enough for a partner)
+    """
+    if window_sampling not in ("any", "inside"):
+        raise ValueError(f"window_sampling={window_sampling!r}, expected 'any' or 'inside'")
+    base = {
+        "pad_mode": "none",
+        "shift_sign": "original",
+        "geom_pad": "keep",
+    }
+    if window_sampling == "inside":
+        base = {"pad_mode": "reject", "shift_sign": "balanced", "geom_pad": "reject"}
+    env = os.environ.get
+    cfg = {
+        "pad_mode": env("LISBET_PAD_MODE", base["pad_mode"]),
+        "shift_mode": env("LISBET_SHIFT_MODE", "signed"),
+        "shift_sign": env("LISBET_SHIFT_SIGN", base["shift_sign"]),
+        "max_shift": int(env("LISBET_MAX_SHIFT", "0")) or None,
+        "min_shift": int(env("LISBET_MIN_SHIFT", "20")),
+        "geom_pad": env("LISBET_GEOM_PAD", base["geom_pad"]),
+        "cons_neg": env("LISBET_CONS_NEG", "other"),
+        "cons_gap": int(env("LISBET_CONS_MIN_GAP", "600")),
+    }
+    allowed = {
+        "pad_mode": ("none", "reject", "equalise"),
+        "shift_mode": ("signed", "magnitude"),
+        "shift_sign": ("original", "balanced"),
+        "geom_pad": ("keep", "reject"),
+        "cons_neg": ("other", "within"),
+    }
+    for k, v in allowed.items():
+        if cfg[k] not in v:
+            raise ValueError(f"LISBET switch {k}={cfg[k]!r}, expected one of {v}")
+    if cfg["shift_mode"] == "magnitude" and cfg["pad_mode"] != "reject":
+        raise ValueError("LISBET_SHIFT_MODE=magnitude requires LISBET_PAD_MODE=reject")
+    return cfg
+
+
+def log_leakfree_once(name, cfg):
+    """Leave a trace in the training log when any switch is active."""
+    if (
+        cfg["pad_mode"] != "none"
+        or cfg["shift_mode"] != "signed"
+        or cfg["shift_sign"] != "original"
+        or cfg["max_shift"]
+        or cfg["geom_pad"] != "keep"
+        or cfg["cons_neg"] != "other"
+    ):
+        logging.info("leak-free sampling switches active in %s: %s", name, cfg)
 
 
 class WindowSelector:
@@ -111,6 +188,39 @@ class WindowSelector:
         local_idx = global_idx - prev_sum
 
         return rec_idx, local_idx
+
+    def _scaled(self, fps_scaling=None):
+        fs = self.fps_scaling if fps_scaling is None else fps_scaling
+        if fs == 1.0:
+            return self.window_size, self.window_offset
+        return (
+            int(np.rint(fs * self.window_size)),
+            int(np.rint(fs * self.window_offset)),
+        )
+
+    def inside_range(self, rec_idx, fps_scaling=None):
+        """(lo, hi): frames whose window lies entirely inside the record."""
+        W, off = self._scaled(fps_scaling)
+        return W - off - 1, int(self.lengths[rec_idx]) - 1 - off
+
+    def inside(self, rec_idx, frame_idx, fps_scaling=None):
+        lo, hi = self.inside_range(rec_idx, fps_scaling)
+        return lo <= frame_idx <= hi
+
+    def padding_mask(self, rec_idx, frame_idx):
+        """(window_size,) bool, True where the window position is outside the record."""
+        start = frame_idx - self.window_size + self.window_offset + 1
+        pos = start + np.arange(self.window_size)
+        return (pos < 0) | (pos > int(self.lengths[rec_idx]) - 1)
+
+    def draw_inside(self, g, fps_scaling=None, max_tries=1_000_000):
+        """Random frame (uniform over all frames, as the original draw) with an inside window."""
+        for _ in range(max_tries):
+            global_idx = torch.randint(0, self.n_frames, (1,), generator=g).item()
+            rec_idx, frame_idx = self.global_to_local(global_idx)
+            if self.inside(rec_idx, frame_idx, fps_scaling):
+                return rec_idx, frame_idx
+        raise RuntimeError("no record is long enough for a window fully inside it")
 
     def select(self, rec_idx, frame_idx, fps_scaling=None):
         """

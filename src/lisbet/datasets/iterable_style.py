@@ -9,7 +9,12 @@ import torch
 import xarray as xr
 from torch.utils.data import IterableDataset
 
-from lisbet.datasets.common import AnnotatedWindowSelector, WindowSelector
+from lisbet.datasets.common import (
+    AnnotatedWindowSelector,
+    WindowSelector,
+    leakfree_config,
+    log_leakfree_once,
+)
 from lisbet.transforms_extra import RandomMirrorX, RandomTranslate, RandomZoom
 
 
@@ -136,6 +141,7 @@ class GroupConsistencyDataset(IterableDataset):
         fps_scaling=1.0,
         transform=None,
         base_seed=None,
+        window_sampling: Literal["any", "inside"] = "any",
         engine: Literal["xarray", "numpy"] = "xarray",
     ):
         """
@@ -156,6 +162,10 @@ class GroupConsistencyDataset(IterableDataset):
         base_seed : int, optional
             Base seed for random number generation (default is None, which generates a
             random seed).
+        window_sampling : {"any", "inside"}, optional
+            "any" (default) is the original sampling; "inside" only draws samples whose windows lie
+            entirely inside their record (no zero padding at the record edges), see
+            ``lisbet.datasets.common.leakfree_config``.
         engine : {"xarray", "numpy"}, optional
             Window representation (default is ``"xarray"``). NumPy windows have shape
             ``(time, individuals, keypoints, space)``.
@@ -168,6 +178,8 @@ class GroupConsistencyDataset(IterableDataset):
         self.n_frames = self.window_selector.n_frames
         self.engine = engine
         self.transform = transform
+        self.lf = leakfree_config(window_sampling)
+        log_leakfree_once(type(self).__name__, self.lf)
 
         self.base_seed = (
             base_seed
@@ -180,32 +192,65 @@ class GroupConsistencyDataset(IterableDataset):
         #       has a different seed for data shuffling.
         self.g = torch.Generator().manual_seed(self.base_seed)
 
-    def __iter__(self):
-        while True:
-            # Select a random window (global frame index)
-            global_idx = torch.randint(0, self.n_frames, (1,), generator=self.g).item()
+    def _draw_anchor(self, need_partner):
+        """Anchor (rec, frame) with an inside window, and a distant partner if needed."""
+        ws = self.window_selector
+        gap = self.lf["cons_gap"]
+        for _ in range(1_000_000):
+            rec_idx, frame_idx = ws.draw_inside(self.g)
+            if not need_partner:
+                return rec_idx, frame_idx
+            lo, hi = ws.inside_range(rec_idx)
+            if frame_idx - lo >= gap or hi - frame_idx >= gap:
+                return rec_idx, frame_idx
+        raise RuntimeError("no record is long enough for within-record cons negatives")
 
-            # Map global index to (record_index, frame_index)
-            rec_idx, frame_idx = self.window_selector.global_to_local(global_idx)
+    def __iter__(self):
+        ws = self.window_selector
+        within = self.lf["cons_neg"] == "within"
+        strict = self.lf["pad_mode"] == "reject" or within
+        while True:
+            if strict:
+                rec_idx, frame_idx = self._draw_anchor(within)
+            else:
+                # Select a random window (global frame index)
+                global_idx = torch.randint(
+                    0, self.n_frames, (1,), generator=self.g
+                ).item()
+
+                # Map global index to (record_index, frame_index)
+                rec_idx, frame_idx = ws.global_to_local(global_idx)
 
             # Extract corresponding window
-            x_orig = self.window_selector.select(rec_idx, frame_idx)
+            x_orig = ws.select(rec_idx, frame_idx)
 
             if torch.rand((1,), generator=self.g).item() < 0.5:
-                # Swap group, retry if a window from the same sequence was chosen
-                while True:
-                    global_idx_swap = torch.randint(
-                        0, self.n_frames, (1,), generator=self.g
-                    ).item()
-                    rec_idx_swap, frame_idx_swap = self.window_selector.global_to_local(
-                        global_idx_swap
-                    )
+                if within:
+                    lo, hi = ws.inside_range(rec_idx)
+                    while True:
+                        frame_idx_swap = torch.randint(
+                            lo, hi + 1, (1,), generator=self.g
+                        ).item()
+                        if abs(frame_idx_swap - frame_idx) >= self.lf["cons_gap"]:
+                            break
+                    rec_idx_swap = rec_idx
+                else:
+                    # Swap group, retry if a window from the same sequence was chosen
+                    while True:
+                        global_idx_swap = torch.randint(
+                            0, self.n_frames, (1,), generator=self.g
+                        ).item()
+                        rec_idx_swap, frame_idx_swap = ws.global_to_local(
+                            global_idx_swap
+                        )
 
-                    if rec_idx_swap != rec_idx:
-                        break
+                        if rec_idx_swap != rec_idx and (
+                            not strict or ws.inside(rec_idx_swap, frame_idx_swap)
+                        ):
+                            break
 
                 # Extract swap window
-                x_swap = self.window_selector.select(rec_idx_swap, frame_idx_swap)
+                x_swap = ws.select(rec_idx_swap, frame_idx_swap)
 
                 # Swap individuals splitting the group at a random index
                 n_individuals = (
@@ -296,6 +341,7 @@ class TemporalOrderDataset(IterableDataset):
         transform=None,
         method="strict",
         base_seed=None,
+        window_sampling: Literal["any", "inside"] = "any",
         engine: Literal["xarray", "numpy"] = "xarray",
     ):
         """
@@ -321,6 +367,10 @@ class TemporalOrderDataset(IterableDataset):
         base_seed : int, optional
             Base seed for random number generation (default is None, which generates a
             random seed).
+        window_sampling : {"any", "inside"}, optional
+            "any" (default) is the original sampling; "inside" only draws samples whose windows lie
+            entirely inside their record (no zero padding at the record edges), see
+            ``lisbet.datasets.common.leakfree_config``.
         engine : {"xarray", "numpy"}, optional
             Window representation (default is ``"xarray"``). NumPy windows have shape
             ``(time, individuals, keypoints, space)``.
@@ -339,6 +389,10 @@ class TemporalOrderDataset(IterableDataset):
         self.n_frames = self.window_selector.n_frames
         self.engine = engine
         self.transform = transform
+        self.lf = leakfree_config(window_sampling)
+        log_leakfree_once(type(self).__name__, self.lf)
+        if self.lf["pad_mode"] == "reject" and method != "strict":
+            raise ValueError("LISBET_PAD_MODE=reject supports only method='strict'")
 
         self.method = method
 
@@ -354,16 +408,21 @@ class TemporalOrderDataset(IterableDataset):
         self.g = torch.Generator().manual_seed(self.base_seed)
 
     def __iter__(self):
+        ws = self.window_selector
+        reject = self.lf["pad_mode"] == "reject"
         while True:
-            # Select a random window (global frame index)
-            global_idx_pre = torch.randint(
-                0, self.n_frames, (1,), generator=self.g
-            ).item()
+            if reject:
+                rec_idx_pre, frame_idx_pre = ws.draw_inside(self.g)
+                lo, hi = ws.inside_range(rec_idx_pre)
+            else:
+                # Select a random window (global frame index)
+                global_idx_pre = torch.randint(
+                    0, self.n_frames, (1,), generator=self.g
+                ).item()
 
-            # Map global index to (record_index, frame_index)
-            rec_idx_pre, frame_idx_pre = self.window_selector.global_to_local(
-                global_idx_pre
-            )
+                # Map global index to (record_index, frame_index)
+                rec_idx_pre, frame_idx_pre = ws.global_to_local(global_idx_pre)
+                lo, hi = 0, int(ws.lengths[rec_idx_pre]) - 1
 
             if torch.rand((1,), generator=self.g).item() < 0.5:
                 # Positive sample: post window follows pre window in the same record
@@ -371,7 +430,7 @@ class TemporalOrderDataset(IterableDataset):
                 rec_idx_post = rec_idx_pre
                 frame_idx_post = torch.randint(
                     frame_idx_pre,
-                    self.window_selector.lengths[rec_idx_pre],
+                    hi + 1,
                     (1,),
                     generator=self.g,
                 ).item()
@@ -386,15 +445,16 @@ class TemporalOrderDataset(IterableDataset):
                         global_idx_post = torch.randint(
                             0, self.n_frames, (1,), generator=self.g
                         ).item()
-                        rec_idx_post, frame_idx_post = (
-                            self.window_selector.global_to_local(global_idx_post)
+                        rec_idx_post, frame_idx_post = ws.global_to_local(
+                            global_idx_post
                         )
 
                         if (
                             rec_idx_post != rec_idx_pre
                             or frame_idx_post < frame_idx_pre
                         ):
-                            # Valid negative: different record or earlier in same record
+                            # Valid negative: different record or earlier in same
+                            # record
                             break
 
                 elif self.method == "strict":
@@ -402,7 +462,7 @@ class TemporalOrderDataset(IterableDataset):
                     # window
                     rec_idx_post = rec_idx_pre
                     frame_idx_post = torch.randint(
-                        0, frame_idx_pre + 1, (1,), generator=self.g
+                        lo, frame_idx_pre + 1, (1,), generator=self.g
                     ).item()
 
                 else:
@@ -414,15 +474,13 @@ class TemporalOrderDataset(IterableDataset):
                 y = np.array(0, ndmin=1, dtype=np.float32)
 
             # Extract corresponding window
-            x_pre = self.window_selector.select(rec_idx_pre, frame_idx_pre)
+            x_pre = ws.select(rec_idx_pre, frame_idx_pre)
 
             # Extract next window
-            x_post = self.window_selector.select(rec_idx_post, frame_idx_post)
+            x_post = ws.select(rec_idx_post, frame_idx_post)
 
             # Concatenate pre and post partial-windows
-            split_idx = torch.randint(
-                1, self.window_selector.window_size, (1,), generator=self.g
-            ).item()
+            split_idx = torch.randint(1, ws.window_size, (1,), generator=self.g).item()
             if self.engine == "numpy":
                 # Canonical NumPy axis 0 corresponds to "time".
                 x = np.concatenate((x_pre[:split_idx], x_post[split_idx:]), axis=0)
@@ -493,6 +551,7 @@ class TemporalShiftDataset(IterableDataset):
         max_shift=60,
         regression=False,
         base_seed=None,
+        window_sampling: Literal["any", "inside"] = "any",
         engine: Literal["xarray", "numpy"] = "xarray",
     ):
         """
@@ -518,6 +577,10 @@ class TemporalShiftDataset(IterableDataset):
         base_seed : int, optional
             Base seed for random number generation (default is None, which generates a
             random seed).
+        window_sampling : {"any", "inside"}, optional
+            "any" (default) is the original sampling; "inside" only draws samples whose windows lie
+            entirely inside their record (no zero padding at the record edges), see
+            ``lisbet.datasets.common.leakfree_config``.
         engine : {"xarray", "numpy"}, optional
             Window representation (default is ``"xarray"``). NumPy windows have shape
             ``(time, individuals, keypoints, space)``.
@@ -534,6 +597,12 @@ class TemporalShiftDataset(IterableDataset):
         self.n_frames = self.window_selector.n_frames
         self.engine = engine
         self.transform = transform
+        self.lf = leakfree_config(window_sampling)
+        log_leakfree_once(type(self).__name__, self.lf)
+        if self.lf["max_shift"]:
+            max_shift = self.lf["max_shift"]
+        if self.lf["pad_mode"] == "equalise" and engine != "numpy":
+            raise NotImplementedError("LISBET_PAD_MODE=equalise needs engine='numpy'")
 
         self.min_delay = -max_shift
         self.max_delay = max_shift
@@ -550,30 +619,68 @@ class TemporalShiftDataset(IterableDataset):
         #       has a different seed for data shuffling.
         self.g = torch.Generator().manual_seed(self.base_seed)
 
-    def __iter__(self):
-        while True:
-            # Select a random window (global frame index)
-            global_idx = torch.randint(0, self.n_frames, (1,), generator=self.g).item()
+    def _draw_delay(self, frame_idx, lo, hi):
+        """Delay d (frames) for the leak-free modes, or None to redraw the anchor."""
+        lf, g = self.lf, self.g
+        mx_pos = min(self.max_delay, hi - frame_idx)
+        mx_neg = min(self.max_delay, frame_idx - lo)
+        if lf["shift_mode"] == "magnitude":
+            if torch.rand((1,), generator=g).item() < 0.5:
+                return 0  # synchronous
+            mn = lf["min_shift"]
+            sign = 1 if torch.rand((1,), generator=g).item() < 0.5 else -1
+            mx = mx_pos if sign > 0 else mx_neg
+            if mx < mn:
+                return None
+            return sign * torch.randint(mn, mx + 1, (1,), generator=g).item()
+        # signed, balanced: sign first (50/50), then the size within the room on that side
+        sign = 1 if torch.rand((1,), generator=g).item() < 0.5 else -1
+        mx = mx_pos if sign > 0 else mx_neg
+        if mx < 1:
+            return None
+        return sign * torch.randint(1, mx + 1, (1,), generator=g).item()
 
-            # Map global index to (record_index, frame_index)
-            rec_idx, frame_idx = self.window_selector.global_to_local(global_idx)
+    def __iter__(self):
+        ws = self.window_selector
+        lf = self.lf
+        reject = lf["pad_mode"] == "reject"
+        equalise = lf["pad_mode"] == "equalise"
+        new_delay = lf["shift_sign"] == "balanced" or lf["shift_mode"] == "magnitude"
+        while True:
+            if reject:
+                rec_idx, frame_idx = ws.draw_inside(self.g)
+                lo, hi = ws.inside_range(rec_idx)
+            else:
+                # Select a random window (global frame index)
+                global_idx = torch.randint(
+                    0, self.n_frames, (1,), generator=self.g
+                ).item()
+
+                # Map global index to (record_index, frame_index)
+                rec_idx, frame_idx = ws.global_to_local(global_idx)
+                lo, hi = 0, int(ws.lengths[rec_idx]) - 1
 
             # Extract corresponding window
-            x_orig = self.window_selector.select(rec_idx, frame_idx)
+            x_orig = ws.select(rec_idx, frame_idx)
 
-            # Compute shift bounds
-            lower_bound = max(frame_idx + self.min_delay, 0)
-            upper_bound = min(
-                frame_idx + self.max_delay, self.window_selector.lengths[rec_idx]
-            )
+            if new_delay:
+                delta_delay = self._draw_delay(frame_idx, lo, hi)
+                if delta_delay is None:
+                    continue
+                frame_idx_delay = frame_idx + delta_delay
+            else:
+                # Compute shift bounds
+                lower_bound = max(frame_idx + self.min_delay, lo)
+                upper_bound = min(frame_idx + self.max_delay, hi + 1)
 
-            # Select random window from same sequence for the shift
-            frame_idx_delay = torch.randint(
-                lower_bound, upper_bound, (1,), generator=self.g
-            ).item()
+                # Select random window from same sequence for the shift
+                frame_idx_delay = torch.randint(
+                    lower_bound, upper_bound, (1,), generator=self.g
+                ).item()
+                delta_delay = frame_idx_delay - frame_idx
 
             # Get shift data
-            x_shft = self.window_selector.select(rec_idx, frame_idx_delay)
+            x_shft = ws.select(rec_idx, frame_idx_delay)
 
             # Apply shifting by swapping individuals in the group at a random index
             n_individuals = (
@@ -587,6 +694,13 @@ class TemporalShiftDataset(IterableDataset):
                 x = np.concatenate(
                     [x_orig[:, :split_idx], x_shft[:, split_idx:]], axis=1
                 )
+                if equalise:
+                    # identical zero-runs for both individuals: the padding can no
+                    # longer encode the delay
+                    m = ws.padding_mask(rec_idx, frame_idx) | ws.padding_mask(
+                        rec_idx, frame_idx_delay
+                    )
+                    x[m] = 0
             else:
                 x = xr.concat(
                     [
@@ -598,9 +712,9 @@ class TemporalShiftDataset(IterableDataset):
                 )
 
             # Compute label
-            delta_delay = frame_idx_delay - frame_idx
-
-            if self.regression:
+            if lf["shift_mode"] == "magnitude":
+                y = np.array(delta_delay != 0, ndmin=1, dtype=np.float32)
+            elif self.regression:
                 # Set rescaled shift distance as label
                 y = (delta_delay - self.min_delay) / (self.max_delay - self.min_delay)
                 y = np.array(y, ndmin=1, dtype=np.float32)
@@ -662,6 +776,7 @@ class TemporalWarpDataset(IterableDataset):
         max_warp=50.0,
         regression=False,
         base_seed=None,
+        window_sampling: Literal["any", "inside"] = "any",
         engine: Literal["xarray", "numpy"] = "xarray",
     ):
         """
@@ -687,6 +802,10 @@ class TemporalWarpDataset(IterableDataset):
         base_seed : int, optional
             Base seed for random number generation (default is None, which generates a
             random seed).
+        window_sampling : {"any", "inside"}, optional
+            "any" (default) is the original sampling; "inside" only draws samples whose windows lie
+            entirely inside their record (no zero padding at the record edges), see
+            ``lisbet.datasets.common.leakfree_config``.
         engine : {"xarray", "numpy"}, optional
             Window representation (default is ``"xarray"``). NumPy windows have shape
             ``(time, individuals, keypoints, space)``.
@@ -705,6 +824,8 @@ class TemporalWarpDataset(IterableDataset):
         self.n_frames = self.window_selector.n_frames
         self.engine = engine
         self.transform = transform
+        self.lf = leakfree_config(window_sampling)
+        log_leakfree_once(type(self).__name__, self.lf)
 
         self.min_speed = 1 - max_warp / 100.0
         self.max_speed = 1.0 + max_warp / 100.0
@@ -722,19 +843,29 @@ class TemporalWarpDataset(IterableDataset):
         self.g = torch.Generator().manual_seed(self.base_seed)
 
     def __iter__(self):
+        ws = self.window_selector
+        reject = self.lf["pad_mode"] == "reject"
         while True:
-            # Select a random window (global frame index)
-            global_idx = torch.randint(0, self.n_frames, (1,), generator=self.g).item()
+            if reject:
+                # speed first, then a frame whose resampled window lies inside the record
+                rel_speed = torch.rand((1,), generator=self.g).item()
+                speed = rel_speed * (self.max_speed - self.min_speed) + self.min_speed
+                rec_idx, frame_idx = ws.draw_inside(self.g, fps_scaling=speed)
+            else:
+                # Select a random window (global frame index)
+                global_idx = torch.randint(
+                    0, self.n_frames, (1,), generator=self.g
+                ).item()
 
-            # Map global index to (record_index, frame_index)
-            rec_idx, frame_idx = self.window_selector.global_to_local(global_idx)
+                # Map global index to (record_index, frame_index)
+                rec_idx, frame_idx = ws.global_to_local(global_idx)
 
-            # Draw playback speed at random
-            rel_speed = torch.rand((1,), generator=self.g).item()
-            speed = rel_speed * (self.max_speed - self.min_speed) + self.min_speed
+                # Draw playback speed at random
+                rel_speed = torch.rand((1,), generator=self.g).item()
+                speed = rel_speed * (self.max_speed - self.min_speed) + self.min_speed
 
             # Extract corresponding window, resampling at the specified speed
-            x = self.window_selector.select(rec_idx, frame_idx, speed)
+            x = ws.select(rec_idx, frame_idx, speed)
 
             if self.regression:
                 # Set relative speed as label
@@ -753,6 +884,7 @@ class TemporalWarpDataset(IterableDataset):
                 x = self.transform(x)
 
             yield x, y
+
 
 class GeometricInvarianceDataset(IterableDataset):
     """
@@ -808,6 +940,7 @@ class GeometricInvarianceDataset(IterableDataset):
         fps_scaling=1.0,
         transform=None,
         base_seed=None,
+        window_sampling: Literal["any", "inside"] = "any",
         engine: Literal["xarray", "numpy"] = "xarray",
     ):
         """
@@ -829,6 +962,10 @@ class GeometricInvarianceDataset(IterableDataset):
         base_seed : int, optional
             Base seed for random number generation (default is None, which generates a
             random seed).
+        window_sampling : {"any", "inside"}, optional
+            "any" (default) is the original sampling; "inside" only draws samples whose windows lie
+            entirely inside their record (no zero padding at the record edges), see
+            ``lisbet.datasets.common.leakfree_config``.
         engine : {"xarray", "numpy"}, optional
             Window representation (default is ``"xarray"``). NumPy windows have shape
             ``(time, individuals, keypoints, space)``.
@@ -841,6 +978,8 @@ class GeometricInvarianceDataset(IterableDataset):
         self.n_frames = self.window_selector.n_frames
         self.engine = engine
         self.transform = transform
+        self.lf = leakfree_config(window_sampling)
+        log_leakfree_once(type(self).__name__, self.lf)
 
         self.base_seed = (
             base_seed
@@ -909,8 +1048,15 @@ class GeometricInvarianceDataset(IterableDataset):
     def __iter__(self):
         while True:
             # 1. Select a random anchor frame (t) within a record.
-            global_idx = torch.randint(0, self.n_frames, (1,), generator=self.g).item()
-            rec_idx, frame_idx = self.window_selector.global_to_local(global_idx)
+            if self.lf["geom_pad"] == "reject":
+                rec_idx, frame_idx = self.window_selector.draw_inside(self.g)
+            else:
+                global_idx = torch.randint(
+                    0, self.n_frames, (1,), generator=self.g
+                ).item()
+                rec_idx, frame_idx = self.window_selector.global_to_local(
+                    global_idx
+                )
             x_orig = self.window_selector.select(rec_idx, frame_idx)
 
             # 2. Sample a small, symmetric temporal offset so the second view is a
@@ -927,6 +1073,10 @@ class GeometricInvarianceDataset(IterableDataset):
             if not 0 <= target_frame_idx < record_length:
                 target_frame_idx = frame_idx - sign * magnitude
             target_frame_idx = min(max(target_frame_idx, 0), record_length - 1)
+            if self.lf["geom_pad"] == "reject" and not self.window_selector.inside(
+                rec_idx, target_frame_idx
+            ):
+                continue
 
             x_target = self.window_selector.select(rec_idx, target_frame_idx)
 
