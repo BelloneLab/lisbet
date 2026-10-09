@@ -61,6 +61,18 @@ For reference, running the command above required approximatively 1h15 per epoch
 The training process can be monitored using the ``-v`` flag.
 The model configuration, weights and training history are saved in the ``models`` directory in the current working directory, under the given ``run_id`` (i.e., ``lisbet64x8-calms21U`` in this case).
 
+Advanced: overriding config values
+----------------------------------
+
+Individual configuration values can be overridden from the command line with the
+repeatable ``--set KEY=VALUE`` option:
+
+- ``--set backbone.<param>=<value>`` overrides a backbone hyperparameter, e.g.
+  ``--set backbone.num_layers=4``.
+- ``--set task.<task_id>.<param>=<value>`` overrides a task hyperparameter, e.g.
+  ``--set task.geom.temperature=0.1`` sets the InfoNCE temperature of the
+  geometric-invariance (``geom``) contrastive task (default: ``0.07``).
+
 [OPTIONAL] Step 3: Export embedding model
 -----------------------------------------
 

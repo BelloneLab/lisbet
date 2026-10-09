@@ -241,8 +241,11 @@ def test_train_with_multiple_augmentations(tmp_path):
         DataAugmentationConfig(name="all_perm_id", p=0.5),
         DataAugmentationConfig(name="all_perm_ax", p=0.7),
         DataAugmentationConfig(name="blk_perm_id", p=0.3, frac=0.2),
-        DataAugmentationConfig(name="gauss_jitter", sigma=0.01),
+        DataAugmentationConfig(name="gauss_jitter", p=1, sigma=0.01),
         DataAugmentationConfig(name="kp_ablation", p=0.05, pB=0.02),
+        DataAugmentationConfig(name="all_translate", p=0.3),
+        DataAugmentationConfig(name="all_mirror_x", p=0.4),
+        DataAugmentationConfig(name="all_zoom", p=0.3),
     ]
 
     training_config = TrainingConfig(
@@ -401,3 +404,257 @@ def test_train_with_keypoint_ablation(tmp_path):
     assert hasattr(model, "state_dict")
 
 
+@pytest.mark.integration
+def test_train_with_translate_augmentation(tmp_path):
+    """Test training with translate augmentation."""
+    # Download a small sample dataset
+    fetch_dataset("SampleData", download_path=tmp_path)
+    data_path = tmp_path / "datasets" / "sample_keypoints"
+
+    # Configure experiment with translate augmentation
+    backbone_config = TransformerBackboneConfig(
+        embedding_dim=4,
+        hidden_dim=8,
+        num_heads=1,
+        num_layers=1,
+        max_length=4,
+    )
+
+    data_config = DataConfig(
+        data_path=str(data_path),
+        data_format="DLC",
+        window_size=4,
+        window_offset=0,
+        dev_ratio=None,
+    )
+
+    model_config = ModelConfig(
+        model_id="test_aug_translate",
+        backbone=backbone_config,
+        out_heads={},
+        input_features={},
+        window_size=4,
+        window_offset=0,
+    )
+
+    # Use translate augmentation
+    aug_configs = [DataAugmentationConfig(name="all_translate", p=0.5)]
+
+    training_config = TrainingConfig(
+        epochs=1,
+        batch_size=4,
+        learning_rate=1e-3,
+        data_augmentation=aug_configs,
+        save_weights="last",
+        mixed_precision=False,
+    )
+
+    experiment_config = ExperimentConfig(
+        run_id="test_aug_translate",
+        model=model_config,
+        training=training_config,
+        data=data_config,
+        task_ids_list=["cons"],
+        task_data=None,
+        seed=1991,
+        output_path=tmp_path,
+    )
+
+    # Train model
+    model = train(experiment_config)
+
+    # Check that model is returned
+    assert hasattr(model, "state_dict")
+
+
+@pytest.mark.integration
+def test_train_with_mirror_x_augmentation(tmp_path):
+    """Test training with mirror_x augmentation."""
+    # Download a small sample dataset
+    fetch_dataset("SampleData", download_path=tmp_path)
+    data_path = tmp_path / "datasets" / "sample_keypoints"
+
+    # Configure experiment with mirror_x augmentation
+    backbone_config = TransformerBackboneConfig(
+        embedding_dim=4,
+        hidden_dim=8,
+        num_heads=1,
+        num_layers=1,
+        max_length=4,
+    )
+
+    data_config = DataConfig(
+        data_path=str(data_path),
+        data_format="DLC",
+        window_size=4,
+        window_offset=0,
+        dev_ratio=None,
+    )
+
+    model_config = ModelConfig(
+        model_id="test_aug_mirror_x",
+        backbone=backbone_config,
+        out_heads={},
+        input_features={},
+        window_size=4,
+        window_offset=0,
+    )
+
+    # Use mirror_x augmentation
+    aug_configs = [DataAugmentationConfig(name="all_mirror_x", p=0.5)]
+
+    training_config = TrainingConfig(
+        epochs=1,
+        batch_size=4,
+        learning_rate=1e-3,
+        data_augmentation=aug_configs,
+        save_weights="last",
+        mixed_precision=False,
+    )
+
+    experiment_config = ExperimentConfig(
+        run_id="test_aug_mirror_x",
+        model=model_config,
+        training=training_config,
+        data=data_config,
+        task_ids_list=["cons"],
+        task_data=None,
+        seed=1991,
+        output_path=tmp_path,
+    )
+
+    # Train model
+    model = train(experiment_config)
+
+    # Check that model is returned
+    assert hasattr(model, "state_dict")
+
+
+@pytest.mark.integration
+def test_train_with_zoom_augmentation(tmp_path):
+    """Test training with zoom augmentation."""
+    # Download a small sample dataset
+    fetch_dataset("SampleData", download_path=tmp_path)
+    data_path = tmp_path / "datasets" / "sample_keypoints"
+
+    # Configure experiment with zoom augmentation
+    backbone_config = TransformerBackboneConfig(
+        embedding_dim=4,
+        hidden_dim=8,
+        num_heads=1,
+        num_layers=1,
+        max_length=4,
+    )
+
+    data_config = DataConfig(
+        data_path=str(data_path),
+        data_format="DLC",
+        window_size=4,
+        window_offset=0,
+        dev_ratio=None,
+    )
+
+    model_config = ModelConfig(
+        model_id="test_aug_zoom",
+        backbone=backbone_config,
+        out_heads={},
+        input_features={},
+        window_size=4,
+        window_offset=0,
+    )
+
+    # Use zoom augmentation
+    aug_configs = [DataAugmentationConfig(name="all_zoom", p=0.5)]
+
+    training_config = TrainingConfig(
+        epochs=1,
+        batch_size=4,
+        learning_rate=1e-3,
+        data_augmentation=aug_configs,
+        save_weights="last",
+        mixed_precision=False,
+    )
+
+    experiment_config = ExperimentConfig(
+        run_id="test_aug_zoom",
+        model=model_config,
+        training=training_config,
+        data=data_config,
+        task_ids_list=["cons"],
+        task_data=None,
+        seed=1991,
+        output_path=tmp_path,
+    )
+
+    # Train model
+    model = train(experiment_config)
+
+    # Check that model is returned
+    assert hasattr(model, "state_dict")
+
+
+@pytest.mark.integration
+def test_train_with_all_spatial_augmentations(tmp_path):
+    """Test training with all spatial augmentations combined."""
+    # Download a small sample dataset
+    fetch_dataset("SampleData", download_path=tmp_path)
+    data_path = tmp_path / "datasets" / "sample_keypoints"
+
+    # Configure experiment with all spatial augmentations
+    backbone_config = TransformerBackboneConfig(
+        embedding_dim=4,
+        hidden_dim=8,
+        num_heads=1,
+        num_layers=1,
+        max_length=4,
+    )
+
+    data_config = DataConfig(
+        data_path=str(data_path),
+        data_format="DLC",
+        window_size=4,
+        window_offset=0,
+        dev_ratio=None,
+    )
+
+    model_config = ModelConfig(
+        model_id="test_aug_all_spatial",
+        backbone=backbone_config,
+        out_heads={},
+        input_features={},
+        window_size=4,
+        window_offset=0,
+    )
+
+    # Use all spatial augmentations
+    aug_configs = [
+        DataAugmentationConfig(name="all_translate", p=0.3),
+        DataAugmentationConfig(name="all_mirror_x", p=0.4),
+        DataAugmentationConfig(name="all_zoom", p=0.3),
+    ]
+
+    training_config = TrainingConfig(
+        epochs=1,
+        batch_size=4,
+        learning_rate=1e-3,
+        data_augmentation=aug_configs,
+        save_weights="last",
+        mixed_precision=False,
+    )
+
+    experiment_config = ExperimentConfig(
+        run_id="test_aug_all_spatial",
+        model=model_config,
+        training=training_config,
+        data=data_config,
+        task_ids_list=["cons"],
+        task_data=None,
+        seed=1991,
+        output_path=tmp_path,
+    )
+
+    # Train model
+    model = train(experiment_config)
+
+    # Check that model is returned
+    assert hasattr(model, "state_dict")

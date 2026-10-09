@@ -94,6 +94,7 @@ def configure_train_model_parser(parser: argparse.ArgumentParser) -> None:
               - order: Temporal Order Classification
               - shift: Temporal Shift Classification
               - warp: Temporal Warp Classification
+              - geom : Geometric Consistency Classification
 
             Example:
               order,cons
@@ -107,6 +108,23 @@ def configure_train_model_parser(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--seed", default=1991, type=int, help="Base RNG seed")
     parser.add_argument("--run_id", type=str, help="ID of the run")
+    parser.add_argument(
+        "--window_sampling",
+        choices=["any", "inside"],
+        default="any",
+        help=textwrap.dedent(
+            """\
+            Sampling of the windows of the self-supervised tasks (cons, order, shift, warp, geom).
+
+            - any:    original behaviour, a window may extend past the edges of its record and is
+                      zero padded there.
+            - inside: only draw samples whose windows lie entirely inside their record. Removes the
+                      zero padding at record edges, which otherwise leaks the label of the order,
+                      shift and cons tasks. The sign of the shift is drawn 50/50 and the geom views
+                      follow the same rule. Records shorter than the window are never sampled.
+            """
+        ),
+    )
     parser.add_argument(
         "--data_augmentation",
         type=str,
@@ -135,6 +153,17 @@ def configure_train_model_parser(parser: argparse.ArgumentParser) -> None:
                                the selected window. Simulates sustained occlusions or
                                tracking failures.
 
+                - all_translate: Randomly translate all individuals together in x,y
+                            consistently across all frames in a window. 
+                            Translation computed to keep all keypoints in [0,1] bounds.
+                            Provides invariance to location within frame.
+                - all_mirror_x: Randomly mirror horizontally around x=0.5.
+                            Consistently across all frames in a window.
+                            Provides invariance to lateral orientation.
+                - all_zoom: Randomly zoom/dezoom around center (0.5, 0.5).
+                        Consistently across all frames in a window.
+                        Scale computed to keep all keypoints in [0,1] bounds.
+                        Provides invariance to depth/distance.
                 - rotation: Randomly rotate keypoint coordinates around the center
                             of the normalized [0,1] space. Supports 2D and 3D
                             (auto-detected from data).
@@ -194,7 +223,10 @@ def configure_train_model_parser(parser: argparse.ArgumentParser) -> None:
         "--set",
         metavar="KEY=VALUE",
         action="append",
-        help="Override config values, e.g. --set backbone.num_layers=4",
+        help=(
+            "Override config values, e.g. --set backbone.num_layers=4 "
+            "or --set task.geom.temperature=0.1"
+        ),
     )
 
     # Model weights and saving options
@@ -275,6 +307,15 @@ def train_model(kwargs):
                 overrides[key] = val
     backbone_config_dict.update(overrides)
 
+    # Parse overrides from --set task.<task_id>.<param>=...
+    task_configs: dict[str, dict] = {}
+    for override in kwargs.get("set", []) or []:
+        if override.startswith("task."):
+            path, _, val = override[len("task.") :].partition("=")
+            task_id, _, param = path.partition(".")
+            if task_id and param and val:
+                task_configs.setdefault(task_id, {})[param] = val
+
     # Create backbone config
     adapter = TypeAdapter(BackboneConfig)
     backbone_config = adapter.validate_python(backbone_config_dict)
@@ -309,8 +350,12 @@ def train_model(kwargs):
     else:
         validated_augmentations = parsed_augmentation
 
-    # Update kwargs with parsed augmentation
-    kwargs_for_training = {**kwargs, "data_augmentation": validated_augmentations}
+    # Update kwargs with parsed augmentation and per-task overrides
+    kwargs_for_training = {
+        **kwargs,
+        "data_augmentation": validated_augmentations,
+        "task_configs": task_configs,
+    }
 
     # Configure training
     training_config = TrainingConfig.model_validate(kwargs_for_training)

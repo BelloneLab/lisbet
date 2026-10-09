@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Annotated, ClassVar, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class TransformerBackboneConfig(BaseModel):
@@ -78,6 +78,11 @@ class DataAugmentationConfig(BaseModel):
                 individual) pair and sets all of its spatial coordinates to 0.0 for
                 the full window. Simulates sustained missing or occluded keypoints.
 
+        Horizontal Transformations:
+            - all_translate: Randomly translate all individuals together in x,y.
+            - all_mirror_x: Randomly mirror horizontally around x=0.5.
+            - all_zoom: Randomly zoom/dezoom around center (0.5, 0.5).
+
         Rotation-based :
             - rotation: Random rotation of all keypoint coordinates around the
                 center of the normalized coordinate space. Supports 2D and 3D
@@ -102,6 +107,9 @@ class DataAugmentationConfig(BaseModel):
         "blk_perm_id",
         "gauss_jitter",
         "kp_ablation",
+        "all_translate",
+        "all_mirror_x",
+        "all_zoom",
         "rotation",
     ]
     p: float = 1.0
@@ -118,6 +126,9 @@ class DataAugmentationConfig(BaseModel):
         "blk_perm_id": {"p", "frac"},
         "gauss_jitter": {"p", "sigma"},
         "kp_ablation": {"p", "pB"},
+        "all_translate": {"p"},
+        "all_mirror_x": {"p"},
+        "all_zoom": {"p"},
         "rotation": {"p", "max_angle", "mode"},
     }
 
@@ -233,11 +244,25 @@ class ModelConfig(BaseModel):
     window_offset: int
 
 
+class TaskConfig(BaseModel):
+    """Per-task hyperparameter overrides (set via ``--set task.<id>.<param>=``)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # InfoNCE temperature for the contrastive "geom" task. None means "use the
+    # task default" (see lisbet.training.tasks.DEFAULT_GEOM_TEMPERATURE).
+    temperature: float | None = Field(default=None, gt=0)
+
+
 class TrainingConfig(BaseModel):
     epochs: int
     batch_size: int
     learning_rate: float
     data_augmentation: list[DataAugmentationConfig] | None = None
+    task_configs: dict[str, TaskConfig] = Field(default_factory=dict)
+    # Self-supervised window sampling: "any" = original (windows may extend past the record
+    # edges, zero padded); "inside" = only windows entirely inside their record.
+    window_sampling: Literal["any", "inside"] = "any"
     save_weights: str | None = None
     save_history: bool = False
     mixed_precision: bool = False

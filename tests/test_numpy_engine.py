@@ -13,6 +13,7 @@ from lisbet.config.schemas import DataAugmentationConfig
 from lisbet.datasets import (
     AnnotatedWindowDataset,
     AnnotatedWindowSelector,
+    GeometricInvarianceDataset,
     GroupConsistencyDataset,
     SocialBehaviorDataset,
     TemporalOrderDataset,
@@ -30,8 +31,11 @@ from lisbet.transforms_extra import (
     PoseToTensor,
     PoseToVideo,
     RandomBlockPermutation,
+    RandomMirrorX,
     RandomPermutation,
     RandomRotation,
+    RandomTranslate,
+    RandomZoom,
 )
 
 
@@ -147,6 +151,7 @@ _PUBLIC_DATASET_CLASSES = (
     TemporalOrderDataset,
     TemporalShiftDataset,
     TemporalWarpDataset,
+    GeometricInvarianceDataset,
 )
 
 
@@ -482,6 +487,42 @@ def test_iterable_datasets_are_deterministic_and_equivalent_across_engines(
         assert not hasattr(x_numpy, "attrs")
 
 
+def test_geometric_invariance_dataset_deterministic_and_equivalent_across_engines(
+    records,
+):
+    xarray_dataset = GeometricInvarianceDataset(
+        records, window_size=6, base_seed=23, engine="xarray"
+    )
+    numpy_dataset = GeometricInvarianceDataset(
+        records, window_size=6, base_seed=23, engine="numpy"
+    )
+    xarray_iterator = iter(xarray_dataset)
+    numpy_iterator = iter(numpy_dataset)
+
+    for _ in range(8):
+        x_orig_xarray, x_transform_xarray = next(xarray_iterator)
+        x_orig_numpy, x_transform_numpy = next(numpy_iterator)
+
+        assert isinstance(x_orig_xarray, xr.Dataset)
+        assert isinstance(x_transform_xarray, xr.Dataset)
+        assert isinstance(x_orig_numpy, np.ndarray)
+        assert isinstance(x_transform_numpy, np.ndarray)
+
+        np.testing.assert_allclose(
+            x_orig_numpy, _canonical_values(x_orig_xarray), rtol=1e-12, atol=1e-12
+        )
+        np.testing.assert_allclose(
+            x_transform_numpy,
+            _canonical_values(x_transform_xarray),
+            rtol=1e-12,
+            atol=1e-12,
+        )
+
+        assert "geometric_transforms_applied" in x_transform_xarray.attrs
+        assert not hasattr(x_orig_numpy, "attrs")
+        assert not hasattr(x_transform_numpy, "attrs")
+
+
 def test_gaussian_jitter_matches_legacy_xarray_rng_layout():
     values = np.full((4, 2, 3, 2), 0.5, dtype=np.float32)
     posetracks = xr.Dataset(
@@ -635,6 +676,9 @@ def test_random_rotation_matches_legacy_xarray_implementation(dtype, n_space, mo
             exclude_identity=True,
         ),
         lambda: RandomRotation(seed=3, max_angle=60, mode="none"),
+        lambda: RandomTranslate(seed=3),
+        lambda: RandomMirrorX(seed=3),
+        lambda: RandomZoom(seed=3),
     ],
 )
 def test_pose_augmentations_dispatch_with_equivalent_results(
@@ -717,7 +761,7 @@ def test_training_augmentation_configs_accept_numpy(records, config):
 
 
 def test_all_training_and_development_tasks_use_numpy(records):
-    task_ids = ["multiclass", "multilabel", "cons", "order", "shift", "warp"]
+    task_ids = ["multiclass", "multilabel", "cons", "order", "shift", "warp", "geom"]
     train_records = {task_id: records for task_id in task_ids}
     dev_records = {task_id: records for task_id in task_ids}
     tasks = configure_tasks(
@@ -742,6 +786,49 @@ def test_all_training_and_development_tasks_use_numpy(records):
         assert isinstance(x_dev, torch.Tensor)
         assert x_train.shape == (6, 12)
         assert x_dev.shape == (6, 12)
+
+
+def _configure_geom_task(records, task_configs=None, dev_records=None):
+    task_ids = ["geom"]
+    return configure_tasks(
+        train_rec={"geom": records},
+        dev_rec={"geom": [] if dev_records is None else dev_records},
+        task_ids=task_ids,
+        window_size=6,
+        window_offset=0,
+        embedding_dim=4,
+        hidden_dim=4,
+        data_augmentation=None,
+        run_seeds=generate_seeds(3, task_ids),
+        device=torch.device("cpu"),
+        task_configs=task_configs,
+    )[0]
+
+
+def test_geom_task_uses_default_temperature(records):
+    task = _configure_geom_task(records)
+    assert task.loss_function.temperature == 0.07
+
+
+def test_geom_task_temperature_override(records):
+    from lisbet.config.schemas import TaskConfig
+
+    task = _configure_geom_task(records, {"geom": TaskConfig(temperature=0.2)})
+    assert task.loss_function.temperature == 0.2
+
+
+def test_geom_task_tracks_alignment_and_uniformity(records):
+    from lisbet import modeling
+
+    task = _configure_geom_task(records, dev_records=records)
+
+    for scores in (task.train_score, task.dev_score):
+        assert isinstance(scores, dict)
+        assert set(scores) == {"alignment", "uniformity"}
+        assert isinstance(scores["alignment"], modeling.AlignmentMetric)
+        assert isinstance(scores["uniformity"], modeling.UniformityMetric)
+        assert scores["alignment"].normalize is True
+        assert scores["uniformity"].normalize is True
 
 
 def test_prediction_dataset_uses_numpy(records, monkeypatch):

@@ -8,6 +8,10 @@ from lisbet.modeling.heads.embedding import EmbeddingHead
 from lisbet.modeling.info import model_info
 from lisbet.modeling.models import MultiTaskModel
 
+from lisbet.modeling.heads.projection import ProjectionHead
+from lisbet.modeling.losses import InfoNCELoss
+from lisbet.modeling.metrics import AlignmentMetric, UniformityMetric
+
 __all__ = [
     "FrameClassificationHead",
     "WindowClassificationHead",
@@ -16,6 +20,10 @@ __all__ = [
     "MultiTaskModel",
     "LSTMBackbone",
     "TransformerBackbone",
+    "ProjectionHead",
+    "InfoNCELoss",
+    "AlignmentMetric",
+    "UniformityMetric",
 ]
 
 __doc__ = """

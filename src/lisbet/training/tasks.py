@@ -23,8 +23,16 @@ from lisbet.transforms_extra import (
     PoseToTensor,
     RandomBlockPermutation,
     RandomPermutation,
+    RandomTranslate,
+    RandomZoom,
+    RandomMirrorX,
     RandomRotation,
 )
+
+
+# Default InfoNCE temperature for the contrastive "geom" task. Single source of
+# truth: overridable from the CLI via ``--set task.geom.temperature=<value>``.
+DEFAULT_GEOM_TEMPERATURE = 0.07
 
 
 @dataclass
@@ -35,10 +43,12 @@ class Task:
     loss_function: torch.nn.Module
     train_dataset: Dataset
     train_loss: Metric
-    train_score: Metric
+    # A single Metric for most tasks, or a {name: Metric} dict for tasks that
+    # track several scores at once (e.g. "geom": alignment + uniformity).
+    train_score: Metric | dict[str, Metric]
     dev_dataset: Dataset | None = None
     dev_loss: Metric | None = None
-    dev_score: Metric | None = None
+    dev_score: Metric | dict[str, Metric] | None = None
 
 
 def _build_augmentation_transforms(data_augmentation, seed):
@@ -92,12 +102,28 @@ def _build_augmentation_transforms(data_augmentation, seed):
                     seed=aug_seed,
                     pB=aug_config.pB,
                 )
+            elif aug_config.name == "all_translate":
+                transform = RandomTranslate(
+                    seed=aug_seed,
+                )
+            elif aug_config.name == "all_zoom":
+                transform = RandomZoom(
+                    seed=aug_seed,
+                )
+            elif aug_config.name == "all_mirror_x":
+                transform = RandomMirrorX(
+                    seed=aug_seed,
+                )
+                                 
             elif aug_config.name == "rotation":
                 transform = RandomRotation(
                     seed=aug_seed,
                     max_angle=aug_config.max_angle,
                     mode=aug_config.mode,
                 )
+            
+            else:
+                raise ValueError(f"Unknown augmentation type: {aug_config.name}")
 
             if aug_config.p < 1.0:
                 transform = transforms.RandomApply([transform], p=aug_config.p)
@@ -286,6 +312,7 @@ def _configure_selfsupervised_task(
     data_augmentation,
     run_seeds,
     device,
+    window_sampling="any",
 ):
     """Internal helper. Configures a self-supervised task."""
     # Create classification head
@@ -312,6 +339,7 @@ def _configure_selfsupervised_task(
         transform=train_transform,
         base_seed=run_seeds[f"dataset_{task_id}"],
         engine="numpy",
+        window_sampling=window_sampling,
     )
 
     # Create task as dataclass with default dev attributes
@@ -335,9 +363,91 @@ def _configure_selfsupervised_task(
             transform=dev_transform,
             base_seed=run_seeds[f"dataset_{task_id}"],
             engine="numpy",
+            window_sampling=window_sampling,
         )
         task.dev_loss = MeanMetric().to(device)
         task.dev_score = BinaryAccuracy().to(device)
+
+    return task
+
+def _configure_geometric_invariance_task(
+    train_rec,
+    dev_rec,
+    window_size,
+    window_offset,
+    embedding_dim,
+    projection_dim,
+    data_augmentation,
+    run_seeds,
+    device,
+    temperature=DEFAULT_GEOM_TEMPERATURE,
+    window_sampling="any",
+):
+    """Internal helper. Configures the geometric invariance contrastive task.
+    This task uses contrastive learning (InfoNCE) to learn that geometric
+    transformations preserve scene identity.
+
+    The ``temperature`` argument sets the InfoNCE temperature and is overridable
+    from the CLI via ``--set task.geom.temperature=<value>``.
+    """
+    # Create projection head for contrastive learning
+    head = modeling.ProjectionHead(
+        input_dim=embedding_dim,
+        projection_dim=projection_dim // 2,
+        hidden_dim=projection_dim,
+        normalize=True,
+    )
+
+    def _geom_scores():
+        # Alignment and uniformity (Wang & Isola, 2020), both on the unit
+        # hypersphere. Logged separately plus as their mean (see _compute_epoch_logs).
+        return {
+            "alignment": modeling.AlignmentMetric(normalize=True).to(device),
+            "uniformity": modeling.UniformityMetric(normalize=True).to(device),
+        }
+
+    # Create data transformers
+    train_transform = _build_augmentation_transforms(
+        data_augmentation, run_seeds["transform_geom"]
+    )
+
+    # Create dataset
+    train_dataset = datasets.GeometricInvarianceDataset(
+        records=train_rec["geom"],
+        window_size=window_size,
+        window_offset=window_offset,
+        transform=train_transform,
+        base_seed=run_seeds["dataset_geom"],
+        engine="numpy",
+        window_sampling=window_sampling,
+    )
+
+    # Create task as dataclass with default dev attributes
+    # Note: out_dim is the projection output dimension for contrastive learning
+    task = Task(
+        task_id="geom",
+        head=head,
+        out_dim=projection_dim // 2,
+        loss_function=modeling.InfoNCELoss(temperature=temperature),
+        train_dataset=train_dataset,
+        train_loss=MeanMetric().to(device),
+        train_score=_geom_scores(),
+    )
+
+    # Update dev attributes if dev records are provided
+    if dev_rec["geom"]:
+        dev_transform = transforms.Compose([PoseToTensor()])
+        task.dev_dataset = datasets.GeometricInvarianceDataset(
+            records=dev_rec["geom"],
+            window_size=window_size,
+            window_offset=window_offset,
+            transform=dev_transform,
+            base_seed=run_seeds["dataset_geom"],
+            engine="numpy",
+            window_sampling=window_sampling,
+        )
+        task.dev_loss = MeanMetric().to(device)
+        task.dev_score = _geom_scores()
 
     return task
 
@@ -353,8 +463,30 @@ def configure_tasks(
     data_augmentation,
     run_seeds,
     device,
+    task_configs=None,
+    window_sampling="any",
 ):
-    """Internal helper. Configures all tasks."""
+    """Internal helper. Configures all tasks.
+
+    Parameters
+    ----------
+    task_configs : dict[str, TaskConfig] or None
+        Optional per-task hyperparameter overrides keyed by task id. Currently
+        only the "geom" task reads it (``temperature``). Keys that do not match a
+        requested task id are ignored with a warning.
+    window_sampling : {"any", "inside"}
+        Sampling of the self-supervised windows (see ``lisbet.datasets.common.leakfree_config``);
+        ignored by the supervised tasks.
+    """
+    task_configs = task_configs or {}
+
+    unused_overrides = set(task_configs) - set(task_ids)
+    if unused_overrides:
+        logging.warning(
+            "Ignoring task override(s) for non-requested task(s): %s",
+            ", ".join(sorted(unused_overrides)),
+        )
+
     tasks = []
     for task_id in task_ids:
         if task_id == "multiclass":
@@ -398,6 +530,30 @@ def configure_tasks(
                     data_augmentation,
                     run_seeds,
                     device,
+                    window_sampling=window_sampling,
+                )
+            )
+        elif task_id == "geom":
+             # Use hidden_dim as projection_dim for consistency
+            geom_cfg = task_configs.get("geom")
+            geom_temperature = (
+                geom_cfg.temperature
+                if geom_cfg is not None and geom_cfg.temperature is not None
+                else DEFAULT_GEOM_TEMPERATURE
+            )
+            tasks.append(
+                _configure_geometric_invariance_task(
+                    train_rec,
+                    dev_rec,
+                    window_size,
+                    window_offset,
+                    embedding_dim,
+                    projection_dim=hidden_dim,
+                    data_augmentation=data_augmentation,
+                    run_seeds=run_seeds,
+                    device=device,
+                    temperature=geom_temperature,
+                    window_sampling=window_sampling,
                 )
             )
         else:

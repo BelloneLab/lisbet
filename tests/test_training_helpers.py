@@ -302,7 +302,20 @@ def test_compute_epoch_logs_basic():
         train_loss=DummyMetric(),
         train_score=DummyMetric(),
     )
-    tasks = [task1, task2]
+    # geom exposes several scores as a dict -> logged individually + as their mean
+    align = DummyMetric()
+    unif = DummyMetric()
+    unif._value = 0.1
+    task3 = Task(
+        task_id="geom",
+        head=None,
+        out_dim=1,
+        loss_function=None,
+        train_dataset=None,
+        train_loss=DummyMetric(),
+        train_score={"alignment": align, "uniformity": unif},
+    )
+    tasks = [task1, task2, task3]
     logs = _compute_epoch_logs("train", tasks)
     assert "multiclass_train_score" in logs
     assert "order_train_score" in logs
@@ -311,6 +324,10 @@ def test_compute_epoch_logs_basic():
     assert np.isclose(logs["multiclass_train_loss"], 0.5)
     assert np.isclose(logs["order_train_loss"], 0.5)
     assert 0.0 <= logs["multiclass_train_score"] <= 1.0
+
+    assert np.isclose(logs["geom_train_alignment"], 0.5)
+    assert np.isclose(logs["geom_train_uniformity"], 0.1)
+    assert np.isclose(logs["geom_train_score"], 0.3)  # mean of the two
 
 
 def test_save_and_load_weights(tmp_path):

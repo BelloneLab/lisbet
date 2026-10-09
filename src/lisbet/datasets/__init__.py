@@ -5,6 +5,7 @@ from lisbet.datasets.iterable_style import (
     TemporalOrderDataset,
     TemporalShiftDataset,
     TemporalWarpDataset,
+    GeometricInvarianceDataset,
 )
 from lisbet.datasets.map_style import AnnotatedWindowDataset, WindowDataset
 
@@ -16,6 +17,7 @@ __all__ = [
     "TemporalOrderDataset",
     "TemporalShiftDataset",
     "TemporalWarpDataset",
+    "GeometricInvarianceDataset",
     "AnnotatedWindowDataset",
     "WindowDataset",
 ]

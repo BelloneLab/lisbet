@@ -44,6 +44,19 @@ VideoToTensor
     Converts video frames from NumPy arrays to PyTorch tensors with optional
     normalization for video model inputs.
 
+RandomTranslate
+    Apply random translation to entire window. Same translation applied to all
+    frames, computed to keep all keypoints within [0, 1] bounds. Provides invariance
+    to location within frame.
+RandomMirrorX
+    Apply horizontal mirroring to entire window. All frames mirrored around x=0.5
+    (flip left/right). Provides invariance to lateral orientation.
+RandomZoom
+    Apply random zoom/dezoom to entire window around center (0.5, 0.5). Same scale
+    factor applied to all frames using formula: keypoints_new = 0.5 + scale * 
+    (keypoints_old - 0.5). Scale computed to keep all keypoints within [0, 1] bounds.
+    Provides invariance to depth/distance.
+
 Usage Examples
 --------------
 >>> from lisbet.transforms_extra import RandomPermutation, PoseToTensor
@@ -88,6 +101,15 @@ Usage Examples
 ...     PoseToTensor(),
 ... ])
 
+>>> # Spatial augmentation pipeline
+>>> from lisbet.transforms_extra import RandomTranslate, RandomMirrorX, RandomZoom
+>>> transform = transforms.Compose([
+...     transforms.RandomApply([RandomTranslate(seed=42)], p=0.5),
+...     transforms.RandomApply([RandomMirrorX(seed=43)], p=0.5),
+...     transforms.RandomApply([RandomZoom(seed=44)], p=0.3),
+...     PoseToTensor(),
+... ])
+
 Notes
 -----
 - Augmentations should be applied thoughtfully based on dataset characteristics
@@ -95,6 +117,10 @@ Notes
   datasets where axes are symmetric
 - Identity permutations work best for datasets where individual labels are
   interchangeable
+- Spatial transformations (translate, mirror_x, zoom) automatically handle NaN values
+  and ensure coordinates remain within [0, 1] bounds
+- Mirror augmentation should only be used when left/right symmetry is meaningful
+  for the task
 """
 
 import cv2
@@ -347,10 +373,125 @@ class RandomPermutation:
         if isinstance(posetracks, np.ndarray):
             return np.take(posetracks, perm, axis=coordinate_axis)
 
-        # For xarray, retain the public behavior of reordering coordinate labels and
-        # every variable that uses the selected coordinate.
-        return posetracks.isel({self.coordinate: perm})
+        return posetracks
+      
+class RandomRotation:
+    """Apply a random rotation to keypoint coordinates in normalized [0, 1] space.
 
+    Samples a rotation angle uniformly from [-max_angle, +max_angle] and applies it
+    consistently across all frames in the window. For 2D data, rotates around the
+    center (0.5, 0.5). For 3D data, rotates around (0.5, 0.5, 0.5) about a randomly
+    sampled unit axis using Rodrigues' formula.
+
+    After rotation, coordinates can be normalized back to [0, 1] using one of three
+    modes: ``"truncate"`` (clamp), ``"rescale"`` (min-max rescaling per spatial
+    dimension), or ``"none"`` (no normalization).
+
+    Note: input data is assumed to be free of NaN values. NaN values are replaced
+    with 0.0 at load time (see ``lisbet.io.core._load_posetracks``).
+
+    Parameters
+    ----------
+    seed : int
+        RNG seed for reproducibility.
+    max_angle : float
+        Maximum rotation angle in degrees. The angle is sampled uniformly from
+        [-max_angle, +max_angle]. Default is 180.0.
+    mode : str
+        Normalization mode after rotation. One of:
+
+        - ``"truncate"``: Clamp coordinates to [0, 1].
+        - ``"rescale"``: If any coordinate falls outside [0, 1] after rotation,
+          rescale each spatial dimension independently so that the min maps to 0
+          and the max maps to 1 (across all keypoints, individuals, and time).
+          If all coordinates are already within [0, 1], no rescaling is applied.
+        - ``"none"``: No normalization is applied.
+
+        Default is ``"truncate"``.
+
+    Examples
+    --------
+    >>> from lisbet.transforms_extra import RandomRotation
+    >>> rotation = RandomRotation(seed=42, max_angle=30.0)
+    >>> rotated_ds = rotation(posetracks)
+    >>> # Rescale mode for 3D data
+    >>> rotation = RandomRotation(seed=42, max_angle=45.0, mode='rescale')
+    >>> rotated_ds = rotation(posetracks)
+    """
+
+    def __init__(self, seed: int, max_angle: float = 180.0, mode: str = "truncate"):
+        valid_modes = ("truncate", "rescale", "none")
+        if mode not in valid_modes:
+            raise ValueError(f"mode must be one of {valid_modes}, got '{mode}'")
+        self.seed = seed
+        self.max_angle = float(max_angle)
+        self.mode = mode
+        self.g = torch.Generator().manual_seed(seed)
+
+    def __call__(self, posetracks: xr.Dataset) -> xr.Dataset:
+        """
+        Apply random rotation to keypoint coordinates.
+
+        Parameters
+        ----------
+        posetracks : xarray.Dataset
+            Pose tracks dataset with a 'position' variable containing dimensions
+            (time, keypoints, individuals, space).
+
+        Returns
+        -------
+        xarray.Dataset
+            Dataset with rotated position coordinates.
+
+        Raises
+        ------
+        ValueError
+            If the 'space' dimension has a size other than 2 or 3.
+        """
+        dims = list(posetracks["position"].dims)
+        space_idx = dims.index("space")
+        n_space = posetracks["position"].shape[space_idx]
+
+        if n_space not in (2, 3):
+            raise ValueError(f"'space' dimension must have size 2 or 3, got {n_space}")
+
+        # Sample rotation angle uniformly from [-max_angle, +max_angle]
+        angle_deg = (
+            torch.rand(1, generator=self.g).item() * 2.0 - 1.0
+        ) * self.max_angle
+        angle_rad = angle_deg * (np.pi / 180.0)
+
+        # Build rotation matrix
+        c, s = np.cos(angle_rad), np.sin(angle_rad)
+        if n_space == 2:
+            R = np.array([[c, -s], [s, c]])
+        else:
+            # 3D: sample a random unit axis uniformly on the unit sphere
+            axis = torch.randn(3, generator=self.g).numpy()
+            axis = axis / np.linalg.norm(axis)
+            # Rodrigues' rotation formula: R = I + sin(θ)K + (1 - cos(θ))K²
+            kx, ky, kz = axis
+            K = np.array([[0.0, -kz, ky], [kz, 0.0, -kx], [-ky, kx, 0.0]])
+            R = np.eye(3) + s * K + (1.0 - c) * (K @ K)
+
+        # Rotate around center of the [0, 1] space
+        pos = np.moveaxis(posetracks["position"].values - 0.5, space_idx, -1) @ R.T
+        pos = np.moveaxis(pos, -1, space_idx) + 0.5
+
+        # Apply normalization mode
+        if self.mode == "truncate":
+            np.clip(pos, 0.0, 1.0, out=pos)
+        elif self.mode == "rescale" and (np.any(pos < 0.0) or np.any(pos > 1.0)):
+            for s_i in range(n_space):
+                slices = [slice(None)] * pos.ndim
+                slices[space_idx] = s_i
+                spatial_slice = pos[tuple(slices)]
+                vmin, vmax = spatial_slice.min(), spatial_slice.max()
+                if vmin != vmax:
+                    pos[tuple(slices)] = (spatial_slice - vmin) / (vmax - vmin)
+
+        posetracks["position"].values[:] = pos
+        return posetracks
 
 class RandomBlockPermutation:
     """
@@ -514,160 +655,170 @@ class RandomBlockPermutation:
 
         return posetracks
 
-    def _apply_numpy(self, posetracks):
-        """Apply a block permutation to a canonical NumPy pose array."""
-        position = _canonical_position(posetracks)
-        if self.coordinate not in _NUMPY_AXES:
-            raise ValueError(f"Unknown pose coordinate '{self.coordinate}'.")
-        coordinate_axis = _NUMPY_AXES[self.coordinate]
-
-        # Generate a random permutation
-        perm = _random_permutation(
-            position.shape[coordinate_axis], self.g, self.exclude_identity
-        )
-
-        window_size = position.shape[0]
-        block_size = int(self.permute_fraction * window_size)
-
-        if block_size == 0:
-            return _restore_position(posetracks, position)
-
-        # Sample start_idx from extended range to ensure uniform frame probability.
-        # Range: [1 - block_size, window_size - 1] gives each frame exactly
-        # block_size chances to be included in the block.
-        start_idx = torch.randint(
-            1 - block_size, window_size, (1,), generator=self.g
-        ).item()
-
-        # Clip to valid range
-        actual_start = max(0, start_idx)
-        actual_end = min(window_size, start_idx + block_size)
-
-        transformed = np.array(position, copy=True)
-        transformed[actual_start:actual_end] = np.take(
-            position[actual_start:actual_end], perm, axis=coordinate_axis
-        )
-        return _restore_position(posetracks, transformed)
-
-
-class RandomRotation:
-    """Apply a random rotation to keypoint coordinates in normalized [0, 1] space.
-
-    The input may be an xarray dataset or a NumPy array in canonical
-    ``(time, individuals, keypoints, space)`` order. The returned container type
-    matches the input.
-
-    Samples a rotation angle uniformly from [-max_angle, +max_angle] and applies it
-    consistently across all frames in the window. For 2D data, rotates around the
-    center (0.5, 0.5). For 3D data, rotates around (0.5, 0.5, 0.5) about a randomly
-    sampled unit axis using Rodrigues' formula.
-
-    After rotation, coordinates can be normalized back to [0, 1] using one of three
-    modes: ``"truncate"`` (clamp), ``"rescale"`` (min-max rescaling per spatial
-    dimension), or ``"none"`` (no normalization).
-
-    Note: input data is assumed to be free of NaN values. NaN values are replaced
-    with 0.0 at load time (see ``lisbet.io.core._load_posetracks``).
-
+class RandomTranslate:
+    """Apply random translation to entire window.
+    Same translation applied to all frames in the window, computed to keep all
+    keypoints within [0, 1] bounds. Provides invariance to location within frame.
+    Accepts either an xarray.Dataset or a canonical NumPy pose array of shape
+    (time, individuals, keypoints, space), and returns the same container type.
     Parameters
     ----------
     seed : int
         RNG seed for reproducibility.
-    max_angle : float
-        Maximum rotation angle in degrees. The angle is sampled uniformly from
-        [-max_angle, +max_angle]. Default is 180.0.
-    mode : str
-        Normalization mode after rotation. One of:
-
-        - ``"truncate"``: Clamp coordinates to [0, 1].
-        - ``"rescale"``: If any coordinate falls outside [0, 1] after rotation,
-          rescale each spatial dimension independently so that the min maps to 0
-          and the max maps to 1 (across all keypoints, individuals, and time).
-          If all coordinates are already within [0, 1], no rescaling is applied.
-        - ``"none"``: No normalization is applied.
-
-        Default is ``"truncate"``.
-
     Examples
     --------
-    >>> from lisbet.transforms_extra import RandomRotation
-    >>> rotation = RandomRotation(seed=42, max_angle=30.0)
-    >>> rotated_ds = rotation(posetracks)
-    >>> # Rescale mode for 3D data
-    >>> rotation = RandomRotation(seed=42, max_angle=45.0, mode='rescale')
-    >>> rotated_ds = rotation(posetracks)
+    >>> from lisbet.transforms_extra import RandomTranslate
+    >>> translate = RandomTranslate(seed=42)
+    >>> translated_ds = translate(posetracks)
     """
 
-    def __init__(self, seed: int, max_angle: float = 180.0, mode: str = "truncate"):
-        valid_modes = ("truncate", "rescale", "none")
-        if mode not in valid_modes:
-            raise ValueError(f"mode must be one of {valid_modes}, got '{mode}'")
+    def __init__(self, seed: int):
         self.seed = seed
-        self.max_angle = float(max_angle)
-        self.mode = mode
         self.g = torch.Generator().manual_seed(seed)
 
     def __call__(self, posetracks):
-        """
-        Apply random rotation to keypoint coordinates.
-
-        Parameters
-        ----------
-        posetracks : xarray.Dataset or numpy.ndarray
-            Pose tracks represented by an xarray dataset with a ``position`` variable,
-            or by a NumPy array in canonical
-            ``(time, individuals, keypoints, space)`` order.
-
-        Returns
-        -------
-        xarray.Dataset or numpy.ndarray
-            Pose tracks with rotated position coordinates. The returned container type
-            matches ``posetracks``.
-
-        Raises
-        ------
-        ValueError
-            If the 'space' dimension has a size other than 2 or 3.
-        """
         position = _canonical_position(posetracks)
-        n_space = position.shape[3]
+        T, n_space = position.shape[0], position.shape[3]
+        if T == 0:
+            return posetracks
 
-        if n_space not in (2, 3):
-            raise ValueError(f"'space' dimension must have size 2 or 3, got {n_space}")
+        # Canonical space axis order is always (x, y[, z, ...]).
+        space_dims = list(range(min(n_space, 2)))
+        if len(space_dims) == 0:
+            return posetracks
 
-        # Sample rotation angle uniformly from [-max_angle, +max_angle]
-        angle_deg = (
-            torch.rand(1, generator=self.g).item() * 2.0 - 1.0
-        ) * self.max_angle
-        angle_rad = angle_deg * (np.pi / 180.0)
+        pos = torch.from_numpy(np.ascontiguousarray(position))
 
-        # Build rotation matrix
-        c, s = np.cos(angle_rad), np.sin(angle_rad)
-        if n_space == 2:
-            R = np.array([[c, -s], [s, c]])
-        else:
-            # 3D: sample a random unit axis uniformly on the unit sphere
-            axis = torch.randn(3, generator=self.g).numpy()
-            axis = axis / np.linalg.norm(axis)
-            # Rodrigues' rotation formula: R = I + sin(θ)K + (1 - cos(θ))K²
-            kx, ky, kz = axis
-            K = np.array([[0.0, -kz, ky], [kz, 0.0, -kx], [-ky, kx, 0.0]])
-            R = np.eye(3) + s * K + (1.0 - c) * (K @ K)
+        # Compute translation for the entire window
+        # Find min/max across all frames
+        translations = []
+        for s_idx in space_dims:
+            all_coords = pos[:, :, :, s_idx]
+            valid_coords = all_coords[~torch.isnan(all_coords)]
 
-        # Rotate around center of the [0, 1] space
-        pos = (position - 0.5) @ R.T + 0.5
+            if valid_coords.numel() == 0:
+                translations.append(0.0)
+                continue
 
-        # Apply normalization mode
-        if self.mode == "truncate":
-            np.clip(pos, 0.0, 1.0, out=pos)
-        elif self.mode == "rescale" and (np.any(pos < 0.0) or np.any(pos > 1.0)):
-            for s_i in range(n_space):
-                spatial_slice = pos[..., s_i]
-                vmin, vmax = spatial_slice.min(), spatial_slice.max()
-                if vmin != vmax:
-                    pos[..., s_i] = (spatial_slice - vmin) / (vmax - vmin)
+            min_coord = valid_coords.min().item()
+            max_coord = valid_coords.max().item()
 
-        return _restore_position(posetracks, pos)
+            min_translation = -min_coord
+            max_translation = 1.0 - max_coord
+
+            if min_translation < max_translation:
+                delta = torch.rand(1, generator=self.g).item()
+                translation = min_translation + delta * (max_translation - min_translation)
+            else:
+                translation = min_translation
+
+            translations.append(translation)
+
+        # Apply the same scalar translation to every frame, for each space axis
+        for s_local_idx, s_idx in enumerate(space_dims):
+            pos[:, :, :, s_idx] += translations[s_local_idx]
+
+        return _restore_position(posetracks, pos.numpy())
+
+
+class RandomMirrorX:
+    """Apply horizontal mirroring to entire window.
+    All frames in the window have x coordinates mirrored around x=0.5
+    (flip left/right). Provides invariance to lateral orientation. No coordinate have NaN value
+    Accepts either an xarray.Dataset or a canonical NumPy pose array of shape
+    (time, individuals, keypoints, space), and returns the same container type.
+    Parameters
+    ----------
+    seed : int
+        RNG seed for reproducibility.
+    Examples
+    --------
+    >>> from lisbet.transforms_extra import RandomMirrorX
+    >>> mirror = RandomMirrorX(seed=42)
+    >>> mirrored_ds = mirror(posetracks)
+    """
+
+    def __init__(self, seed: int):
+        self.seed = seed
+        self.g = torch.Generator().manual_seed(seed)
+
+    def __call__(self, posetracks):
+        position = _canonical_position(posetracks)
+        T, n_space = position.shape[0], position.shape[3]
+        if T == 0 or n_space == 0:
+            return posetracks
+
+        # Canonical space axis 0 is always "x".
+        pos = torch.from_numpy(np.ascontiguousarray(position))
+        pos[:, :, :, 0] = 1.0 - pos[:, :, :, 0]
+
+        return _restore_position(posetracks, pos.numpy())
+
+
+class RandomZoom:
+    """Apply random zoom/dezoom to entire window.
+    Same scale factor applied to all frames in the window, scaling around center
+    (0.5, 0.5). Scale computed to keep all keypoints within [0, 1] bounds.
+    Formula: keypoints_new = 0.5 + scale * (keypoints_old - 0.5).
+    Provides invariance to depth/distance.
+    Accepts either an xarray.Dataset or a canonical NumPy pose array of shape
+    (time, individuals, keypoints, space), and returns the same container type.
+    Parameters
+    ----------
+    seed : int
+        RNG seed for reproducibility.
+    Examples
+    --------
+    >>> from lisbet.transforms_extra import RandomZoom
+    >>> zoom = RandomZoom(seed=42)
+    >>> zoomed_ds = zoom(posetracks)
+    """
+
+    def __init__(self, seed: int):
+        self.seed = seed
+        self.g = torch.Generator().manual_seed(seed)
+
+    def __call__(self, posetracks):
+        position = _canonical_position(posetracks)
+        T, n_space = position.shape[0], position.shape[3]
+        if T == 0:
+            return posetracks
+
+        # Canonical space axis order is always (x, y[, z, ...]).
+        space_dims = list(range(min(n_space, 2)))
+        if len(space_dims) == 0:
+            return posetracks
+
+        pos = torch.from_numpy(np.ascontiguousarray(position))
+        center = 0.5
+
+        # Find valid scale range across all frames in the window
+        min_scale = 0.0
+        max_scale = float('inf')
+
+        for s_idx in space_dims:
+            diffs = pos[:, :, :, s_idx] - center
+            valid = ~torch.isnan(diffs) & (diffs.abs() >= 1e-9)
+
+            pos_diffs = diffs[valid & (diffs > 0)]
+            if pos_diffs.numel() > 0:
+                max_scale = min(max_scale, ((1.0 - center) / pos_diffs).min().item())
+                min_scale = max(min_scale, (-center / pos_diffs).max().item())
+
+            neg_diffs = diffs[valid & (diffs < 0)]
+            if neg_diffs.numel() > 0:
+                min_scale = max(min_scale, ((1.0 - center) / neg_diffs).max().item())
+                max_scale = min(max_scale, (-center / neg_diffs).min().item())
+
+        # Sample random scale for entire window
+        if min_scale < max_scale and max_scale > 0:
+            scale = min_scale + torch.rand(1, generator=self.g).item() * (max_scale - min_scale)
+
+            # Apply to all frames
+            for s_idx in space_dims:
+                pos[:, :, :, s_idx] = center + scale * (pos[:, :, :, s_idx] - center)
+
+        return _restore_position(posetracks, pos.numpy())
 
 
 class PoseToTensor:

@@ -178,19 +178,42 @@ def _train_one_epoch(
         # Iterate over all tasks
         # NOTE: strict=False to allow for different iterable lengths
         for task, dataloader in zip(tasks, dl_iter, strict=False):
-            data, target = next(dataloader)
+            batch = next(dataloader)
 
-            # Forward pass
-            output = model(data, task.task_id)
-            loss = task.loss_function(output, target)
+            # Contrastive tasks return pairs of views instead of (data, target)
+            if task.task_id == "geom":
+                data_orig, data_transform = batch
+
+                # Forward pass for both views
+                output_orig = model(data_orig, task.task_id)
+                output_transform = model(data_transform, task.task_id)
+
+                # InfoNCE loss expects both projections
+                loss = task.loss_function(output_orig, output_transform)
+
+
+                # Store loss value and metrics for stats
+                if batch_idx % 10 == 0:
+                    task.train_loss.update(loss)
+                    # Alignment expects both views; uniformity a single view
+                    task.train_score["alignment"].update(output_orig, output_transform)
+                    task.train_score["uniformity"].update(output_orig)
+
+            else:
+                data, target = batch
+
+                # Forward pass
+                output = model(data, task.task_id)
+                loss = task.loss_function(output, target)
+
+                # Store loss value and metrics for stats
+                if batch_idx % 10 == 0:
+                    task.train_loss.update(loss)
+                    task.train_score.update(output, target)
 
             # Backward pass
             fabric.backward(loss)
 
-            # Store loss value and metrics for stats
-            if batch_idx % 10 == 0:
-                task.train_loss.update(loss)
-                task.train_score.update(output, target)
 
             # Step profiler
             if prof is not None:
@@ -215,26 +238,59 @@ def _evaluate(model, dataloaders, n_batches, tasks):
             # Iterate over all tasks
             # NOTE: strict=False to allow for different iterable lengths
             for task, dataloader in zip(tasks, dl_iter, strict=False):
-                data, target = next(dataloader)
+                batch = next(dataloader)
 
-                # Forward pass
-                output = model(data, task.task_id)
-                loss = task.loss_function(output, target)
+                # Contrastive tasks return pairs of views instead of (data, target)
+                if task.task_id == "geom":
+                    data_orig, data_transform = batch
 
-                # Store loss value and metrics for stats
-                if batch_idx % 10 == 0:
-                    task.dev_loss.update(loss)
-                    task.dev_score.update(output, target)
+                    # Forward pass for both views
+                    output_orig = model(data_orig, task.task_id)
+                    output_transform = model(data_transform, task.task_id)
+
+                    # InfoNCE loss expects both projections
+                    loss = task.loss_function(output_orig, output_transform)
+
+                    # Store loss value and metrics for stats
+                    if batch_idx % 10 == 0:
+                        task.dev_loss.update(loss)
+                        # Alignment expects both views; uniformity a single view
+                        task.dev_score["alignment"].update(output_orig, output_transform)
+                        task.dev_score["uniformity"].update(output_orig)
+                else:
+                    # Classification tasks return (data, target)
+                    data, target = batch
+
+                    # Forward pass
+                    output = model(data, task.task_id)
+                    loss = task.loss_function(output, target)
+
+                    # Store loss value and metrics for stats
+                    if batch_idx % 10 == 0:
+                        task.dev_loss.update(loss)
+                        task.dev_score.update(output, target)
 
 
 def _compute_epoch_logs(group_id, tasks):
     """Internal helper. Computes metrics and mean losses for an epoch."""
     epoch_log = {}
     for task in tasks:
-        # Compute metrics
-        metric_name = f"{task.task_id}_{group_id}_score"
-        epoch_log[metric_name] = getattr(task, f"{group_id}_score").compute()
-        getattr(task, f"{group_id}_score").reset()
+        # Compute metrics. Most tasks expose a single score Metric; tasks that
+        # track several (e.g. geom: alignment + uniformity) expose a dict, and we
+        # log each one plus their mean under the generic "_score" key.
+        score = getattr(task, f"{group_id}_score")
+        if isinstance(score, dict):
+            details = {}
+            for name, metric in score.items():
+                details[name] = metric.compute()
+                metric.reset()
+                epoch_log[f"{task.task_id}_{group_id}_{name}"] = details[name]
+            epoch_log[f"{task.task_id}_{group_id}_score"] = sum(
+                details.values()
+            ) / len(details)
+        else:
+            epoch_log[f"{task.task_id}_{group_id}_score"] = score.compute()
+            score.reset()
 
         # Compute mean losses
         loss_name = f"{task.task_id}_{group_id}_loss"
@@ -283,7 +339,7 @@ def train(experiment_config: ExperimentConfig) -> torch.nn.Module:
     )
 
     # Create Fabric instance
-    precision = "16-mixed" if experiment_config.training.mixed_precision else "32-true"
+    precision = "bf16-mixed" if experiment_config.training.mixed_precision else "32-true"
     history_logger = CSVLogger(
         experiment_config.output_path / "models" / run_id,
         name="training_history",
@@ -357,6 +413,8 @@ def train(experiment_config: ExperimentConfig) -> torch.nn.Module:
         training_config.data_augmentation,
         run_seeds,
         fabric.device,
+        task_configs=training_config.task_configs,
+        window_sampling=training_config.window_sampling,
     )
     n_tasks = len(tasks)
 
