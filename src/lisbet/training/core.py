@@ -339,7 +339,7 @@ def train(experiment_config: ExperimentConfig) -> torch.nn.Module:
     )
 
     # Create Fabric instance
-    precision = "16-mixed" if experiment_config.training.mixed_precision else "32-true"
+    precision = "bf16-mixed" if experiment_config.training.mixed_precision else "32-true"
     history_logger = CSVLogger(
         experiment_config.output_path / "models" / run_id,
         name="training_history",
