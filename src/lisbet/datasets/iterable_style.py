@@ -947,8 +947,8 @@ class GeometricInvarianceDataset(IterableDataset):
         transform=None,
         base_seed=None,
         window_sampling: Literal["any", "inside"] = "any",
-        engine: Literal["xarray", "numpy"] = "xarray",
         space_layout: str = "legacy",
+        engine: Literal["xarray", "numpy"] = "xarray",
     ):
         """
         Initialize the GeometricInvarianceDataset.
@@ -973,13 +973,13 @@ class GeometricInvarianceDataset(IterableDataset):
             "any" (default) is the original sampling; "inside" only draws samples whose windows lie
             entirely inside their record (no zero padding at the record edges), see
             ``lisbet.datasets.common.leakfree_config``.
-        engine : {"xarray", "numpy"}, optional
-            Window representation (default is ``"xarray"``). NumPy windows have shape
-            ``(time, individuals, keypoints, space)``.
         space_layout : {"legacy", "xyz_up_y", "xyz_up_z"}, optional
             "legacy" (default): 1 to 3 of translate / mirror_x / zoom, as originally.
             3D layout: a rigid motion that keeps the floor, i.e. a yaw uniform in
             [-180, 180] deg about the vertical axis followed by a floor translation.
+        engine : {"xarray", "numpy"}, optional
+            Window representation (default is ``"xarray"``). NumPy windows have shape
+            ``(time, individuals, keypoints, space)``.
         """
         super().__init__()
 
