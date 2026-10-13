@@ -15,7 +15,13 @@ from lisbet.datasets.common import (
     leakfree_config,
     log_leakfree_once,
 )
-from lisbet.transforms_extra import RandomMirrorX, RandomTranslate, RandomZoom
+from lisbet.transforms_extra import (
+    SPACE_LAYOUTS,
+    RandomMirrorX,
+    RandomRotation,
+    RandomTranslate,
+    RandomZoom,
+)
 
 
 class SocialBehaviorDataset(IterableDataset):
@@ -942,6 +948,7 @@ class GeometricInvarianceDataset(IterableDataset):
         base_seed=None,
         window_sampling: Literal["any", "inside"] = "any",
         engine: Literal["xarray", "numpy"] = "xarray",
+        space_layout: str = "legacy",
     ):
         """
         Initialize the GeometricInvarianceDataset.
@@ -969,9 +976,16 @@ class GeometricInvarianceDataset(IterableDataset):
         engine : {"xarray", "numpy"}, optional
             Window representation (default is ``"xarray"``). NumPy windows have shape
             ``(time, individuals, keypoints, space)``.
+        space_layout : {"legacy", "xyz_up_y", "xyz_up_z"}, optional
+            "legacy" (default): 1 to 3 of translate / mirror_x / zoom, as originally.
+            3D layout: a rigid motion that keeps the floor, i.e. a yaw uniform in
+            [-180, 180] deg about the vertical axis followed by a floor translation.
         """
         super().__init__()
 
+        if space_layout not in SPACE_LAYOUTS:
+            raise ValueError(f"space_layout must be one of {SPACE_LAYOUTS}")
+        self.space_layout = space_layout
         self.window_selector = WindowSelector(
             records, window_size, window_offset, fps_scaling, engine
         )
@@ -994,9 +1008,13 @@ class GeometricInvarianceDataset(IterableDataset):
 
         # Create geometric transformation functions
         # Use a different seed for each transformation to ensure variety
-        self.translate = RandomTranslate(seed=self.base_seed)
+        self.translate = RandomTranslate(seed=self.base_seed, space_layout=space_layout)
         self.mirror_x = RandomMirrorX(seed=self.base_seed + 1)
         self.zoom = RandomZoom(seed=self.base_seed + 2)
+        if space_layout != "legacy":
+            self.yaw = RandomRotation(
+                seed=self.base_seed + 3, max_angle=180.0, space_layout=space_layout
+            )
 
     def _apply_geometric_transform(self, x):
         """
@@ -1016,6 +1034,13 @@ class GeometricInvarianceDataset(IterableDataset):
         """
         # Copy so the source window (and, for xarray, its cache) is left untouched.
         x_ds = x.copy(deep=True) if self.engine == "xarray" else x.copy()
+
+        if self.space_layout != "legacy":
+            # 3D: rigid motion keeping the floor (yaw, then floor translation)
+            x_ds = self.translate(self.yaw(x_ds))
+            if self.engine == "xarray":
+                x_ds.attrs["geometric_transforms_applied"] = ["yaw", "translate"]
+            return x_ds
 
         # Available transformations
         available_transforms = [

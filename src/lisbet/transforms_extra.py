@@ -168,6 +168,31 @@ def _restore_position(posetracks, position):
     return posetracks
 
 
+#: Spatial layouts (``--space_layout``). "legacy" keeps the original behaviour of every
+#: transform whatever the number of axes; the 3D layouts name the vertical axis of
+#: ``space = (x, y, z)``, the two other axes being the floor plane.
+SPACE_LAYOUTS = ("legacy", "xyz_up_y", "xyz_up_z")
+_LAYOUT_AXES = {"xyz_up_y": (1, (0, 2)), "xyz_up_z": (2, (0, 1))}
+
+
+def layout_axes(space_layout):
+    """Return ``(vertical_axis, floor_axes)`` of a 3D layout (space indices)."""
+    if space_layout not in _LAYOUT_AXES:
+        raise ValueError(
+            f"space_layout={space_layout!r} has no vertical axis; expected one of "
+            f"{tuple(_LAYOUT_AXES)}"
+        )
+    return _LAYOUT_AXES[space_layout]
+
+
+def _check_3d(position, space_layout):
+    if position.shape[3] != 3:
+        raise ValueError(
+            f"space_layout={space_layout!r} needs 3 spatial axes, "
+            f"got {position.shape[3]}"
+        )
+
+
 def _random_permutation(n, generator, exclude_identity=False):
     """Generate a random permutation of n elements.
 
@@ -387,6 +412,12 @@ class RandomRotation:
     modes: ``"truncate"`` (clamp), ``"rescale"`` (min-max rescaling per spatial
     dimension), or ``"none"`` (no normalization).
 
+    With a 3D ``space_layout`` (``"xyz_up_y"`` or ``"xyz_up_z"``) the rotation is a
+    yaw: about the vertical axis through the window centroid, so the vertical
+    coordinate and every distance are preserved. The rotated scene is then shifted
+    back inside [0, 1] along the floor axes when it fits (a rigid correction), and
+    only the remainder is clamped (``mode`` must be ``"truncate"``).
+
     Note: input data is assumed to be free of NaN values. NaN values are replaced
     with 0.0 at load time (see ``lisbet.io.core._load_posetracks``).
 
@@ -419,16 +450,56 @@ class RandomRotation:
     >>> rotated_ds = rotation(posetracks)
     """
 
-    def __init__(self, seed: int, max_angle: float = 180.0, mode: str = "truncate"):
+    def __init__(
+        self,
+        seed: int,
+        max_angle: float = 180.0,
+        mode: str = "truncate",
+        space_layout: str = "legacy",
+    ):
         valid_modes = ("truncate", "rescale", "none")
         if mode not in valid_modes:
             raise ValueError(f"mode must be one of {valid_modes}, got '{mode}'")
+        if space_layout not in SPACE_LAYOUTS:
+            raise ValueError(f"space_layout must be one of {SPACE_LAYOUTS}")
+        if space_layout != "legacy" and mode != "truncate":
+            raise ValueError("A 3D space_layout only supports mode='truncate'")
         self.seed = seed
         self.max_angle = float(max_angle)
         self.mode = mode
+        self.space_layout = space_layout
         self.g = torch.Generator().manual_seed(seed)
 
-    def __call__(self, posetracks: xr.Dataset) -> xr.Dataset:
+    def _yaw(self, posetracks):
+        position = _canonical_position(posetracks)
+        _check_3d(position, self.space_layout)
+        _, (a, b) = layout_axes(self.space_layout)
+
+        angle_deg = (
+            torch.rand(1, generator=self.g).item() * 2.0 - 1.0
+        ) * self.max_angle
+        angle_rad = angle_deg * (np.pi / 180.0)
+        c, s = np.cos(angle_rad), np.sin(angle_rad)
+
+        pos = np.array(position, dtype=np.float64)
+        u, v = pos[..., a].copy(), pos[..., b].copy()
+        cu, cv = np.nanmean(u), np.nanmean(v)
+        if np.isnan(cu):  # nothing observed in the window
+            return posetracks
+        du, dv = u - cu, v - cv
+        pos[..., a] = cu + c * du - s * dv
+        pos[..., b] = cv + s * du + c * dv
+
+        # Rigid shift back inside [0, 1] on each floor axis when the extent fits
+        for ax in (a, b):
+            lo, hi = np.nanmin(pos[..., ax]), np.nanmax(pos[..., ax])
+            if hi - lo <= 1.0:
+                pos[..., ax] += max(0.0, -lo) - max(0.0, hi - 1.0)
+        np.clip(pos, 0.0, 1.0, out=pos)
+
+        return _restore_position(posetracks, pos.astype(position.dtype, copy=False))
+
+    def __call__(self, posetracks):
         """
         Apply random rotation to keypoint coordinates.
 
@@ -448,9 +519,18 @@ class RandomRotation:
         ValueError
             If the 'space' dimension has a size other than 2 or 3.
         """
-        dims = list(posetracks["position"].dims)
+        if self.space_layout != "legacy":
+            return self._yaw(posetracks)
+
+        # Canonical NumPy windows (the training engine) carry the space axis last
+        if isinstance(posetracks, np.ndarray):
+            values = _canonical_position(posetracks)
+            dims = list(_CANONICAL_DIMS)
+        else:
+            values = posetracks["position"].values
+            dims = list(posetracks["position"].dims)
         space_idx = dims.index("space")
-        n_space = posetracks["position"].shape[space_idx]
+        n_space = values.shape[space_idx]
 
         if n_space not in (2, 3):
             raise ValueError(f"'space' dimension must have size 2 or 3, got {n_space}")
@@ -475,7 +555,7 @@ class RandomRotation:
             R = np.eye(3) + s * K + (1.0 - c) * (K @ K)
 
         # Rotate around center of the [0, 1] space
-        pos = np.moveaxis(posetracks["position"].values - 0.5, space_idx, -1) @ R.T
+        pos = np.moveaxis(values - 0.5, space_idx, -1) @ R.T
         pos = np.moveaxis(pos, -1, space_idx) + 0.5
 
         # Apply normalization mode
@@ -490,6 +570,8 @@ class RandomRotation:
                 if vmin != vmax:
                     pos[tuple(slices)] = (spatial_slice - vmin) / (vmax - vmin)
 
+        if isinstance(posetracks, np.ndarray):
+            return _restore_position(posetracks, pos)
         posetracks["position"].values[:] = pos
         return posetracks
 
@@ -665,6 +747,10 @@ class RandomTranslate:
     ----------
     seed : int
         RNG seed for reproducibility.
+    space_layout : str
+        "legacy" (default) translates the first two axes (x, y). A 3D layout
+        ("xyz_up_y", "xyz_up_z") translates the two floor axes and leaves the
+        vertical one untouched.
     Examples
     --------
     >>> from lisbet.transforms_extra import RandomTranslate
@@ -672,8 +758,11 @@ class RandomTranslate:
     >>> translated_ds = translate(posetracks)
     """
 
-    def __init__(self, seed: int):
+    def __init__(self, seed: int, space_layout: str = "legacy"):
+        if space_layout not in SPACE_LAYOUTS:
+            raise ValueError(f"space_layout must be one of {SPACE_LAYOUTS}")
         self.seed = seed
+        self.space_layout = space_layout
         self.g = torch.Generator().manual_seed(seed)
 
     def __call__(self, posetracks):
@@ -682,8 +771,12 @@ class RandomTranslate:
         if T == 0:
             return posetracks
 
-        # Canonical space axis order is always (x, y[, z, ...]).
-        space_dims = list(range(min(n_space, 2)))
+        if self.space_layout == "legacy":
+            # Canonical space axis order is always (x, y[, z, ...]).
+            space_dims = list(range(min(n_space, 2)))
+        else:
+            _check_3d(position, self.space_layout)
+            space_dims = list(layout_axes(self.space_layout)[1])
         if len(space_dims) == 0:
             return posetracks
 

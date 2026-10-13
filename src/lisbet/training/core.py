@@ -377,6 +377,26 @@ def train(experiment_config: ExperimentConfig) -> torch.nn.Module:
         for dim in ("individuals", "keypoints", "space")
     }
 
+    # A 3D layout names its vertical axis among (x, y, z): the data must match
+    space_layout = training_config.space_layout
+    if space_layout != "legacy" and input_features["space"] != ["x", "y", "z"]:
+        raise ValueError(
+            f"space_layout='{space_layout}' requires space coordinates "
+            "['x', 'y', 'z'], "
+            f"got {input_features['space']}"
+        )
+    logging.info(
+        "Space layout %s, space %s, %d individuals x %d keypoints x %d axes = %d "
+        "input features; augmentations: %s",
+        space_layout,
+        input_features["space"],
+        cdim["individuals"],
+        cdim["keypoints"],
+        cdim["space"],
+        feature_dim,
+        [a.name for a in training_config.data_augmentation or []],
+    )
+
     if training_config.load_backbone_weights is not None:
         logging.warning(
             "Loading backbone weights from %s. If you are not experimenting with "
@@ -415,6 +435,7 @@ def train(experiment_config: ExperimentConfig) -> torch.nn.Module:
         fabric.device,
         task_configs=training_config.task_configs,
         window_sampling=training_config.window_sampling,
+        space_layout=space_layout,
     )
     n_tasks = len(tasks)
 
@@ -423,6 +444,7 @@ def train(experiment_config: ExperimentConfig) -> torch.nn.Module:
 
     # Set dynamic attributes for model config
     model_config.input_features = input_features
+    model_config.space_layout = space_layout
     model_config.out_heads = {task.task_id: task.head.get_config() for task in tasks}
 
     # Build model

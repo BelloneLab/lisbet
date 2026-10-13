@@ -673,7 +673,10 @@ def dump_model_config(output_path, run_id, model_config):
     model_path.parent.mkdir(parents=True, exist_ok=True)
 
     with open(model_path, "w", encoding="utf-8") as f_yaml:
-        yaml.safe_dump(model_config.model_dump(), f_yaml)
+        # space_layout is written only when it is not "legacy", so legacy model configs
+        # stay identical to those of earlier versions
+        exclude = {"space_layout"} if model_config.space_layout == "legacy" else None
+        yaml.safe_dump(model_config.model_dump(exclude=exclude), f_yaml)
 
 
 def dump_profiling_results(output_path, run_id, prof):

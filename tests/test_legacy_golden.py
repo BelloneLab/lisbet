@@ -1,13 +1,14 @@
-"""Legacy golden test: the default ``space_layout`` ("legacy") must reproduce lisbet 77dd947 bit for bit.
+"""Legacy golden test: the default space_layout ("legacy") reproduces lisbet 77dd947.
 
-The reference hashes in ``tests/golden/legacy_samples.json`` were produced by running this file as a script
-on commit 77dd947 (before the 3D layouts existed)::
+The reference hashes in ``tests/golden/legacy_samples.json`` were produced by running
+this file as a script on commit 77dd947 (before the 3D layouts existed)::
 
     python tests/test_legacy_golden.py --write
 
-Each case draws samples from the self-supervised tasks (cons, order, shift, warp, geom) built through
-``configure_tasks`` with a fixed seed, on synthetic 2D and 3D dyads, and hashes the float64 bytes of every
-tensor. Hashes are platform dependent in principle (floating point); they were written on Windows / CPU.
+Each case draws samples from the self-supervised tasks (cons, order, shift, warp, geom)
+built through ``configure_tasks`` with a fixed seed, on synthetic 2D and 3D dyads, and
+hashes the float64 bytes of every tensor. Hashes are platform dependent in principle
+(floating point); they were written on Windows / CPU.
 """
 
 import hashlib
@@ -35,9 +36,10 @@ AUGMENTATIONS = {
     "none": "",
     # humanlisbet-code wrapper default
     "wrapper_default": "all_translate:p=0.1,all_mirror_x:p=0.1,all_zoom:p=0.1",
-    # every geometric / noise augmentation, always applied. Not included because they crash on
-    # the numpy engine at 77dd947: blk_perm_id (RandomBlockPermutation has no _apply_numpy) and
-    # rotation (RandomRotation reads posetracks["position"] on a NumPy array)
+    # every geometric / noise augmentation, always applied. Not included because they
+    # crash on the numpy engine at 77dd947: blk_perm_id (RandomBlockPermutation has no
+    # _apply_numpy) and rotation (RandomRotation reads posetracks["position"] on a
+    # NumPy array)
     "all": (
         "all_translate,all_mirror_x,all_zoom,"
         "gauss_jitter:sigma=0.01,all_perm_ax,all_perm_id,kp_ablation:pB=0.05"
@@ -77,7 +79,9 @@ def _hash(x):
 def compute_case(n_space, aug_name, window_sampling):
     records = _records(n_space)
     run_seeds = generate_seeds(1789, list(TASKS))
-    torch.manual_seed(run_seeds["torch"])  # RandomApply draws from the global generator, as in training
+    torch.manual_seed(
+        run_seeds["torch"]
+    )  # RandomApply draws from the global generator, as in training
     tasks = configure_tasks(
         train_rec={t: records for t in TASKS},
         dev_rec={t: [] for t in TASKS},

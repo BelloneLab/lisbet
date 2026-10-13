@@ -126,6 +126,26 @@ def configure_train_model_parser(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
+        "--space_layout",
+        choices=["legacy", "xyz_up_y", "xyz_up_z"],
+        default="legacy",
+        help=textwrap.dedent(
+            """            Spatial layout of the keypoints.
+
+            - legacy:   original behaviour whatever the number of axes (2D, or 3D
+                        with the 2D augmentations acting on x and y).
+            - xyz_up_y: 3D keypoints, space (x, y, z), y vertical, x-z the floor plane.
+            - xyz_up_z: 3D keypoints, space (x, y, z), z vertical, x-y the floor plane.
+
+            With a 3D layout the augmentations and the geom task are restricted to
+            rigid motions that keep the floor: all_translate moves the floor axes
+            only, rotation is a yaw about the vertical axis; all_zoom, all_mirror_x
+            and all_perm_ax are refused. It also requires an isotropic --data_scale
+            (e.g. 1x1x1).
+            """
+        ),
+    )
+    parser.add_argument(
         "--data_augmentation",
         type=str,
         help=textwrap.dedent(
