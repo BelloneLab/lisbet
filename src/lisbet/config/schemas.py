@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Annotated, ClassVar, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class TransformerBackboneConfig(BaseModel):
@@ -78,6 +78,11 @@ class DataAugmentationConfig(BaseModel):
                 individual) pair and sets all of its spatial coordinates to 0.0 for
                 the full window. Simulates sustained missing or occluded keypoints.
 
+        Horizontal Transformations:
+            - all_translate: Randomly translate all individuals together in x,y.
+            - all_mirror_x: Randomly mirror horizontally around x=0.5.
+            - all_zoom: Randomly zoom/dezoom around center (0.5, 0.5).
+
         Rotation-based :
             - rotation: Random rotation of all keypoint coordinates around the
                 center of the normalized coordinate space. Supports 2D and 3D
@@ -102,6 +107,9 @@ class DataAugmentationConfig(BaseModel):
         "blk_perm_id",
         "gauss_jitter",
         "kp_ablation",
+        "all_translate",
+        "all_mirror_x",
+        "all_zoom",
         "rotation",
     ]
     p: float = 1.0
@@ -118,6 +126,9 @@ class DataAugmentationConfig(BaseModel):
         "blk_perm_id": {"p", "frac"},
         "gauss_jitter": {"p", "sigma"},
         "kp_ablation": {"p", "pB"},
+        "all_translate": {"p"},
+        "all_mirror_x": {"p"},
+        "all_zoom": {"p"},
         "rotation": {"p", "max_angle", "mode"},
     }
 
@@ -224,6 +235,12 @@ class DataAugmentationPipeline(BaseModel):
     augmentations: list[DataAugmentationConfig]
 
 
+SpaceLayout = Literal["legacy", "xyz_up_y", "xyz_up_z"]
+
+# Augmentations that are not rigid motions of a 3D scene (refused with a 3D layout)
+NON_RIGID_3D = ("all_zoom", "all_mirror_x", "all_perm_ax")
+
+
 class ModelConfig(BaseModel):
     model_id: str | None = None
     backbone: BackboneConfig
@@ -231,6 +248,18 @@ class ModelConfig(BaseModel):
     input_features: dict[str, list[str]]
     window_size: int
     window_offset: int
+    # Spatial layout the model was trained with (see TrainingConfig.space_layout)
+    space_layout: SpaceLayout = "legacy"
+
+
+class TaskConfig(BaseModel):
+    """Per-task hyperparameter overrides (set via ``--set task.<id>.<param>=``)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # InfoNCE temperature for the contrastive "geom" task. None means "use the
+    # task default" (see lisbet.training.tasks.DEFAULT_GEOM_TEMPERATURE).
+    temperature: float | None = Field(default=None, gt=0)
 
 
 class TrainingConfig(BaseModel):
@@ -238,12 +267,37 @@ class TrainingConfig(BaseModel):
     batch_size: int
     learning_rate: float
     data_augmentation: list[DataAugmentationConfig] | None = None
+    task_configs: dict[str, TaskConfig] = Field(default_factory=dict)
+    # Self-supervised window sampling: "any" = original (windows may extend past the record
+    # edges, zero padded); "inside" = only windows entirely inside their record.
+    window_sampling: Literal["any", "inside"] = "any"
+    # Spatial layout: "legacy" = original augmentations whatever the number of axes;
+    # "xyz_up_y" / "xyz_up_z" = 3D keypoints (space x, y, z) with that vertical axis,
+    # augmentations and geom restricted to rigid motions keeping the floor.
+    space_layout: SpaceLayout = "legacy"
     save_weights: str | None = None
     save_history: bool = False
     mixed_precision: bool = False
     head_type: Literal["mlp", "linear"] = "mlp"
     freeze_backbone_weights: bool = False
     load_backbone_weights: str | Path | None = None
+
+    @model_validator(mode="after")
+    def validate_space_layout_augmentations(self):
+        if self.space_layout == "legacy":
+            return self
+        for aug in self.data_augmentation or []:
+            if aug.name in NON_RIGID_3D:
+                raise ValueError(
+                    f"Augmentation '{aug.name}' is not allowed with space_layout="
+                    f"'{self.space_layout}': 3D allows rigid motions only "
+                    "(all_translate, rotation = yaw)"
+                )
+            if aug.name == "rotation" and aug.mode != "truncate":
+                raise ValueError(
+                    "A 3D space_layout only supports rotation mode=truncate"
+                )
+        return self
 
 
 class ExperimentConfig(BaseModel):
@@ -255,3 +309,22 @@ class ExperimentConfig(BaseModel):
     task_data: str | None = None
     seed: int = 1991
     output_path: Path = Path(".")
+
+    @model_validator(mode="after")
+    def validate_space_layout_scale(self):
+        """A 3D layout needs an explicit, isotropic data_scale (no auto-scaling)."""
+        if self.training.space_layout == "legacy":
+            return self
+        scale = self.data.data_scale
+        if scale is None:
+            raise ValueError(
+                f"space_layout='{self.training.space_layout}' requires an explicit "
+                "data_scale (e.g. 1x1x1): per-record auto-scaling distorts 3D geometry"
+            )
+        factors = [float(v) for v in scale.split("x")]
+        if len(factors) != 3 or len(set(factors)) != 1:
+            raise ValueError(
+                f"space_layout='{self.training.space_layout}' requires an isotropic "
+                f"3-axis data_scale (e.g. 1x1x1), got '{scale}'"
+            )
+        return self

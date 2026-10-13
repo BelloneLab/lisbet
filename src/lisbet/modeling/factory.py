@@ -20,6 +20,7 @@ from lisbet.modeling import (
     EmbeddingHead,
     FrameClassificationHead,
     MultiTaskModel,
+    ProjectionHead,
     TransformerBackbone,
     WindowClassificationHead,
 )
@@ -38,6 +39,7 @@ HEAD_REGISTRY = {
     "frame_classification": FrameClassificationHead,
     "window_classification": WindowClassificationHead,
     "embedding": EmbeddingHead,
+    "projection": ProjectionHead,
 }
 
 
@@ -91,6 +93,14 @@ def create_model_from_config(model_config: ModelConfig) -> MultiTaskModel:
                 input_dim=backbone_kwargs["embedding_dim"],
                 num_classes=head_cfg.get("num_classes", 1),
                 hidden_dim=head_cfg.get("hidden_dim"),
+            )
+        elif task_id == "geom":
+            heads[task_id] = ProjectionHead(
+                input_dim=backbone_kwargs["embedding_dim"],
+                projection_dim=head_cfg.get("projection_dim", 
+                                            head_cfg.get("hidden_dim", 256)),
+                hidden_dim=head_cfg.get("hidden_dim"),
+                normalize=head_cfg.get("normalize", True),
             )
         else:
             raise ValueError(f"Unknown task_id: {task_id}")

@@ -20,6 +20,7 @@ Advanced
 
    train_model
    data_augmentation
+   window_sampling
    fine_tuning
    prototype_calibration
    prototype_inference

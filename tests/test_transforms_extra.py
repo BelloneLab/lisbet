@@ -10,6 +10,9 @@ from lisbet.transforms_extra import (
     RandomPermutation,
     RandomRotation,
     _random_permutation,
+    RandomTranslate,
+    RandomZoom,
+    RandomMirrorX,
 )
 
 
